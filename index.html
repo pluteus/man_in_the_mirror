@@ -53,6 +53,20 @@
     background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:16px 20px;
     font-size:13px; text-align:center; line-height:1.6; backdrop-filter:blur(8px); max-width:80%; }
   #centerHint b{ color:var(--accent); }
+
+  #calibOverlay{ position:fixed; inset:0; z-index:40; background:rgba(6,9,14,0.94);
+    display:none; flex-direction:column; align-items:center; justify-content:center; gap:18px;
+    padding:20px; text-align:center; }
+  #calibOverlay.show{ display:flex; }
+  #calibOverlay p{ font-size:12.5px; color:var(--text-dim); line-height:1.7; max-width:340px; margin:0; }
+  #calibBarWrap{ width:90%; max-width:420px; height:70px; display:flex; align-items:center; }
+  #calibBar{ height:44px; background:linear-gradient(135deg,#4f9dff,#2f6fd0); border-radius:8px;
+    box-shadow:0 0 0 1px var(--border); transition:width 0.05s linear; }
+  #calibSlider{ width:90%; max-width:420px; accent-color:var(--accent); }
+  #calibPresets{ display:flex; gap:6px; flex-wrap:wrap; justify-content:center; max-width:420px; }
+  #calibResult{ font-size:14px; color:var(--accent); font-weight:600; }
+  #calibActions{ display:flex; gap:10px; margin-top:4px; }
+  #calibActions button{ padding:10px 18px; font-size:13px; }
 </style>
 </head>
 <body>
@@ -67,6 +81,8 @@
   <button id="btnCam">▶ カメラ開始</button>
   <button id="btnCalib">🎯 中央校正</button>
   <button id="btnGyro">🧭 ジャイロ有効化</button>
+  <button id="btnCalibScreen">📏 画面校正</button>
+  <button id="btnOffAxis">🪟 本格off-axis</button>
   <button id="btnSliders">⚙ 調整</button>
   <button id="btnLog">📋 ログ</button>
 </div>
@@ -83,6 +99,10 @@
     <div class="slider-row"><label>ミラー反転</label><input type="range" id="flip" min="0" max="1" step="1" value="0"><span id="flipV">off</span></div>
     <div class="slider-row"><label>ジャイロ感度</label><input type="range" id="gsens" min="0" max="3" step="0.05" value="1"><span id="gsensV">1.0</span></div>
     <div class="slider-row"><label>ジャイロ反転</label><input type="range" id="gflip" min="0" max="1" step="1" value="0"><span id="gflipV">off</span></div>
+    <div style="border-top:1px solid var(--border); margin:6px 0 4px; padding-top:4px; color:var(--accent); font-size:10.5px;">— 本格off-axisモード用 —</div>
+    <div class="slider-row"><label>画面-モデル距離</label><input type="range" id="screenZ" min="0.1" max="1.5" step="0.05" value="0.4"><span id="screenZV">0.40</span></div>
+    <div class="slider-row"><label>目との距離(cm)</label><input type="range" id="eyeDistCm" min="15" max="80" step="1" value="40"><span id="eyeDistCmV">40</span></div>
+    <div class="slider-row"><label>左右cm換算</label><input type="range" id="cmRange" min="10" max="120" step="1" value="60"><span id="cmRangeV">60</span></div>
   </div>
   <div id="log" class="hidden"></div>
 </div>
@@ -93,6 +113,23 @@
   ② ▶ カメラ開始（顔認識のためカメラ許可が必要）<br>
   ③ 正面を向いた状態で 🎯 中央校正 をタップ<br>
   以後、顔の動きに合わせて画面がのぞき窓のように動きます
+</div>
+
+<div id="calibOverlay">
+  <p><b style="color:var(--accent)">画面サイズ校正</b><br>
+  お手元のカード類を画面に重ね、下のバーの幅が実物の幅と一致するようスライダーで調整してください。</p>
+  <div id="calibPresets">
+    <button data-cm="8.56" class="calibPreset on">💳 クレジットカード幅(8.56cm)</button>
+    <button data-cm="5.398" class="calibPreset">🪪 マイナンバーカード幅(5.4cm)</button>
+    <button data-cm="10" class="calibPreset">📏 10cm基準</button>
+  </div>
+  <div id="calibBarWrap"><div id="calibBar" style="width:200px;"></div></div>
+  <input type="range" id="calibSlider" min="60" max="600" step="1" value="200">
+  <div id="calibResult">— px/cm 未確定 —</div>
+  <div id="calibActions">
+    <button id="calibConfirm">✓ この幅で確定</button>
+    <button id="calibCancel">キャンセル</button>
+  </div>
 </div>
 
 <script src="https://unpkg.com/three@0.133.0/build/three.min.js"></script>
@@ -225,8 +262,105 @@ let calib = { x:0, y:0, width:0.28 };
 
 const params = {
   sxy: 1.0, sz: 1.0, baseDist: 2.2, lookY: 1.0, smooth: 0.25, flip: 0,
-  gsens: 1.0, gflip: 0
+  gsens: 1.0, gflip: 0,
+  offAxis: false, screenZ: 0.4, eyeDistCm: 40, cmRange: 60
 };
+
+/* ---------------- 画面サイズ校正(オンスクリーン) ---------------- */
+// pxPerCm 未校正時は 96dpi 相当を仮の初期値として使う(端末により誤差あり)
+let pxPerCm = 96 / 2.54;
+let screenWidthCm = window.innerWidth / pxPerCm;
+let screenHeightCm = window.innerHeight / pxPerCm;
+let screenCalibrated = false;
+
+function recomputeScreenCm(){
+  screenWidthCm = window.innerWidth / pxPerCm;
+  screenHeightCm = window.innerHeight / pxPerCm;
+}
+
+const calibOverlay = document.getElementById('calibOverlay');
+const calibBar = document.getElementById('calibBar');
+const calibSlider = document.getElementById('calibSlider');
+const calibResult = document.getElementById('calibResult');
+let calibRefCm = 8.56; // デフォルト: クレジットカード幅
+
+document.querySelectorAll('.calibPreset').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.calibPreset').forEach(b => b.classList.remove('on'));
+    btn.classList.add('on');
+    calibRefCm = parseFloat(btn.dataset.cm);
+    updateCalibDisplay();
+  });
+});
+
+function updateCalibDisplay(){
+  const px = parseFloat(calibSlider.value);
+  calibBar.style.width = px + 'px';
+  const ppc = px / calibRefCm;
+  calibResult.textContent = `${ppc.toFixed(2)} px/cm （画面幅換算: 約${(window.innerWidth/ppc).toFixed(1)}cm）`;
+}
+calibSlider.addEventListener('input', updateCalibDisplay);
+
+document.getElementById('btnCalibScreen').addEventListener('click', () => {
+  calibSlider.value = Math.round((screenCalibrated ? pxPerCm : (96/2.54)) * calibRefCm);
+  updateCalibDisplay();
+  calibOverlay.classList.add('show');
+});
+document.getElementById('calibCancel').addEventListener('click', () => {
+  calibOverlay.classList.remove('show');
+});
+document.getElementById('calibConfirm').addEventListener('click', () => {
+  const px = parseFloat(calibSlider.value);
+  pxPerCm = px / calibRefCm;
+  screenCalibrated = true;
+  recomputeScreenCm();
+  calibOverlay.classList.remove('show');
+  log(`画面校正完了: ${pxPerCm.toFixed(2)}px/cm （実測画面サイズ 約${screenWidthCm.toFixed(1)}×${screenHeightCm.toFixed(1)}cm）`, 'ok');
+});
+
+document.getElementById('btnOffAxis').addEventListener('click', () => {
+  params.offAxis = !params.offAxis;
+  const btn = document.getElementById('btnOffAxis');
+  btn.classList.toggle('on', params.offAxis);
+  if(params.offAxis && !screenCalibrated){
+    log('未校正のため概算値(96dpi相当)で動作します。📏画面校正での実測を推奨します', 'warn');
+  }
+  if(!params.offAxis){
+    camera.matrixAutoUpdate = true;
+    camera.updateProjectionMatrix();
+  }
+  log(`本格off-axisモード: ${params.offAxis ? 'ON' : 'OFF'}`, 'ok');
+});
+
+// Kooima(2009)の一般化透視投影法。screenパラメータはワールド座標(メートル)。
+const _vr = new THREE.Vector3(), _vu = new THREE.Vector3(), _vn = new THREE.Vector3();
+const _va = new THREE.Vector3(), _vb = new THREE.Vector3(), _vc = new THREE.Vector3();
+function updateOffAxisCamera(pe, pa, pb, pc, near, far){
+  _vr.subVectors(pb, pa).normalize();
+  _vu.subVectors(pc, pa).normalize();
+  _vn.crossVectors(_vr, _vu).normalize();
+
+  _va.subVectors(pa, pe);
+  _vb.subVectors(pb, pe);
+  _vc.subVectors(pc, pe);
+
+  const d = -_va.dot(_vn);
+  const nOverD = near / d;
+  const l = _vr.dot(_va) * nOverD;
+  const r = _vr.dot(_vb) * nOverD;
+  const b = _vu.dot(_va) * nOverD;
+  const t = _vu.dot(_vc) * nOverD;
+
+  camera.projectionMatrix.makePerspective(l, r, t, b, near, far);
+  if(camera.projectionMatrixInverse.invert){ camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert(); }
+
+  camera.matrixAutoUpdate = false;
+  camera.position.copy(pe);
+  const rotMat = new THREE.Matrix4().makeBasis(_vr, _vu, _vn);
+  camera.quaternion.setFromRotationMatrix(rotMat);
+  camera.updateMatrix();
+  camera.updateMatrixWorld(true);
+}
 
 /* ---------------- ジャイロ(端末の傾き) ---------------- */
 let gyroEnabled = false;
@@ -324,6 +458,27 @@ document.getElementById('btnCalib').addEventListener('click', () => {
 });
 
 /* ---------------- カメラ視点更新（覗き窓効果） ---------------- */
+function updateOffAxisFromHead(totalDx, totalDy, depthRatio){
+  // 校正済みの物理画面サイズ(cm→m)でスクリーン矩形をワールド座標に定義
+  const Wm = (screenWidthCm/100)/2;
+  const Hm = (screenHeightCm/100)/2;
+  const cy = params.lookY; // スクリーン中心の高さをモデルの視線先高さに合わせる
+  const pa = new THREE.Vector3(-Wm, cy - Hm, 0); // 左下
+  const pb = new THREE.Vector3( Wm, cy - Hm, 0); // 右下
+  const pc = new THREE.Vector3(-Wm, cy + Hm, 0); // 左上
+
+  const rangeM = (params.cmRange/100) * params.sxy;
+  const eyeX = totalDx * rangeM;
+  const eyeY = cy + totalDy * rangeM * 0.85;
+  const eyeZ = (params.eyeDistCm/100) / Math.pow(Math.max(depthRatio, 0.3), params.sz);
+  const pe = new THREE.Vector3(eyeX, eyeY, eyeZ);
+
+  // モデルは画面(z=0)の奥側に置くことで「窓の中」の錯覚を作る
+  if(currentVRM){ currentVRM.scene.position.z = -params.screenZ; }
+
+  updateOffAxisCamera(pe, pa, pb, pc, 0.01, 50);
+}
+
 function updateCameraFromFace(){
   // 校正基準からの差分（画面比率）。カメラ映像は反転していないため符号調整。
   const flipSign = params.flip ? -1 : 1;
@@ -331,34 +486,35 @@ function updateCameraFromFace(){
   const dy = -(smoothed.y - calib.y);             // 正=顔が下へ動いた→カメラは下がりローアングルに
   const depthRatio = calib.width > 0.01 ? (smoothed.width / calib.width) : 1; // >1で顔が近い(=奥行き変化)
 
-  // 頭が右に動く(dx>0) → のぞき窓の原理でカメラは左へ寄り、モデルの右側面が見える
-  const range = 1.6 * params.sxy;
-  let camX = -dx * range;
-  let camY =  dy * range * 0.85;
+  let totalDx = -dx; // 頭が右へ動く→視点は左へ寄る、の符号規約
+  let totalDy = dy;
 
-  // 端末の傾き(ジャイロ)分を加算。度数を簡易的にカメラオフセットへ変換。
+  // 端末の傾き(ジャイロ)分を加算
   if(gyroEnabled && gyroRaw.has){
     const gFlipSign = params.gflip ? -1 : 1;
-    const dGamma = (gyroSmoothed.gamma - gyroBaseline.gamma) * gFlipSign; // 左右の傾き
-    const dBeta  = (gyroSmoothed.beta  - gyroBaseline.beta);              // 前後(上下)の傾き
-    const gScale = 0.022 * params.gsens; // 1度あたりのオフセット量(経験的な値)
-    // 端末を右に傾ける(gamma増)→頭が右へ寄るのと同じ向きで、覗き窓的にカメラは左へ
-    camX += -dGamma * gScale * range;
-    // 端末の上部を手前に倒す(beta減少)→ローアングル側、奥に倒す→俯瞰側
-    camY += -dBeta * gScale * range * 0.85;
+    const dGamma = (gyroSmoothed.gamma - gyroBaseline.gamma) * gFlipSign;
+    const dBeta  = (gyroSmoothed.beta  - gyroBaseline.beta);
+    const gScaleNorm = 0.011 * params.gsens;
+    totalDx += -dGamma * gScaleNorm;
+    totalDy += -dBeta * gScaleNorm * 0.85;
   }
 
-  // 顔が近づく(depthRatio>1)ほど、視点がモデルに近づく
+  if(params.offAxis){
+    updateOffAxisFromHead(totalDx, totalDy, depthRatio);
+    document.querySelector('#camPreview .dot').style.left = `${(1-smoothed.x)*100}%`;
+    document.querySelector('#camPreview .dot').style.top = `${smoothed.y*100}%`;
+    return;
+  }
+
+  if(currentVRM){ currentVRM.scene.position.z = 0; }
+  const range = 1.6 * params.sxy;
+  const camX = totalDx * range;
+  const camY = totalDy * range * 0.85;
   const dist = params.baseDist / Math.pow(Math.max(depthRatio, 0.3), params.sz);
 
   camera.position.x += (camX - camera.position.x) * 0.35;
   camera.position.y += ((params.lookY + camY) - camera.position.y) * 0.35;
-  const dir = new THREE.Vector3(camera.position.x, camera.position.y - params.lookY, 0);
-  const horizLen = Math.hypot(camera.position.x, 0); // 水平距離は position.x のみで簡易化
-  camera.position.z += (Math.sqrt(Math.max(dist*dist - camX*camX*0, dist*dist)) - camera.position.z) * 0.35;
-  // 上のz補間は簡略化のため、素直にdistへ寄せる
-  camera.position.z += (dist - camera.position.z) * 0.0; // 二重補正防止(上でsmoothing済)
-
+  camera.position.z += (dist - camera.position.z) * 0.35;
   camera.lookAt(0, params.lookY, 0);
 
   document.querySelector('#camPreview .dot').style.left = `${(1-smoothed.x)*100}%`;
@@ -371,7 +527,7 @@ function bindSlider(id, key, fmt = v=>v){
   const out = document.getElementById(id+'V');
   input.addEventListener('input', () => {
     params[key] = parseFloat(input.value);
-    out.textContent = key==='flip' ? (params[key] ? 'on' : 'off') : fmt(params[key]);
+    out.textContent = (key==='flip' || key==='gflip') ? (params[key] ? 'on' : 'off') : fmt(params[key]);
   });
 }
 bindSlider('sxy','sxy', v=>v.toFixed(2));
@@ -382,6 +538,9 @@ bindSlider('smooth','smooth', v=>v.toFixed(2));
 bindSlider('flip','flip');
 bindSlider('gsens','gsens', v=>v.toFixed(2));
 bindSlider('gflip','gflip');
+bindSlider('screenZ','screenZ', v=>v.toFixed(2));
+bindSlider('eyeDistCm','eyeDistCm', v=>v.toFixed(0));
+bindSlider('cmRange','cmRange', v=>v.toFixed(0));
 
 document.getElementById('btnSliders').addEventListener('click', () => {
   document.getElementById('sliders').classList.toggle('hidden');
