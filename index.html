@@ -333,8 +333,20 @@ function updateCameraFromFace(){
 
   // 頭が右に動く(dx>0) → のぞき窓の原理でカメラは左へ寄り、モデルの右側面が見える
   const range = 1.6 * params.sxy;
-  const camX = -dx * range;
-  const camY =  dy * range * 0.85;
+  let camX = -dx * range;
+  let camY =  dy * range * 0.85;
+
+  // 端末の傾き(ジャイロ)分を加算。度数を簡易的にカメラオフセットへ変換。
+  if(gyroEnabled && gyroRaw.has){
+    const gFlipSign = params.gflip ? -1 : 1;
+    const dGamma = (gyroSmoothed.gamma - gyroBaseline.gamma) * gFlipSign; // 左右の傾き
+    const dBeta  = (gyroSmoothed.beta  - gyroBaseline.beta);              // 前後(上下)の傾き
+    const gScale = 0.022 * params.gsens; // 1度あたりのオフセット量(経験的な値)
+    // 端末を右に傾ける(gamma増)→頭が右へ寄るのと同じ向きで、覗き窓的にカメラは左へ
+    camX += -dGamma * gScale * range;
+    // 端末の上部を手前に倒す(beta減少)→ローアングル側、奥に倒す→俯瞰側
+    camY += -dBeta * gScale * range * 0.85;
+  }
 
   // 顔が近づく(depthRatio>1)ほど、視点がモデルに近づく
   const dist = params.baseDist / Math.pow(Math.max(depthRatio, 0.3), params.sz);
@@ -368,6 +380,8 @@ bindSlider('baseDist','baseDist', v=>v.toFixed(1));
 bindSlider('lookY','lookY', v=>v.toFixed(2));
 bindSlider('smooth','smooth', v=>v.toFixed(2));
 bindSlider('flip','flip');
+bindSlider('gsens','gsens', v=>v.toFixed(2));
+bindSlider('gflip','gflip');
 
 document.getElementById('btnSliders').addEventListener('click', () => {
   document.getElementById('sliders').classList.toggle('hidden');
@@ -381,6 +395,7 @@ function animate(){
   requestAnimationFrame(animate);
   detectFace();
   updateSmoothing();
+  updateGyroSmoothing();
   updateCameraFromFace();
   renderer.render(scene, camera);
 }
