@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>顔トラッキングVRMビューア</title>
+<style>
+  :root{
+    --bg:#0a0e14; --panel:#131922cc; --border:#263040; --accent:#4f9dff;
+    --text:#e6edf3; --text-dim:#8b98a9; --ok:#3ddc84; --warn:#ffb454; --err:#ff5f6d;
+  }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; user-select:none; }
+  html,body{ margin:0; padding:0; width:100%; height:100%; background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Hiragino Kaku Gothic ProN",sans-serif;
+    overflow:hidden; overscroll-behavior:none; }
+  #canvas-container{ position:fixed; inset:0; }
+  #canvas-container canvas{ display:block; width:100%; height:100%; touch-action:none; }
+
+  #camPreview{ position:fixed; top:calc(env(safe-area-inset-top,0px) + 10px); right:10px;
+    width:120px; height:90px; border-radius:10px; overflow:hidden; border:1px solid var(--border);
+    background:#000; z-index:20; opacity:.85; }
+  #camPreview video{ width:100%; height:100%; object-fit:cover; transform:scaleX(-1); }
+  #camPreview .dot{ position:absolute; width:6px; height:6px; border-radius:50%; background:var(--accent);
+    top:50%; left:50%; transform:translate(-50%,-50%); box-shadow:0 0 4px var(--accent); }
+
+  #topbar{ position:fixed; top:calc(env(safe-area-inset-top,0px) + 10px); left:10px; right:140px;
+    display:flex; gap:6px; flex-wrap:wrap; z-index:20; }
+  button, .file-btn{ background:var(--panel); border:1px solid var(--border); color:var(--text);
+    padding:8px 12px; border-radius:8px; font-size:12px; backdrop-filter:blur(8px);
+    -webkit-backdrop-filter:blur(8px); white-space:nowrap; }
+  button:active, .file-btn:active{ background:#1c2531; }
+  button.on{ border-color:var(--accent); color:var(--accent); }
+  input[type=file]{ display:none; }
+
+  #bottomPanel{ position:fixed; left:10px; right:10px; bottom:calc(env(safe-area-inset-bottom,0px) + 10px);
+    z-index:20; display:flex; flex-direction:column; gap:6px; }
+  #sliders{ background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:8px 12px;
+    backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); font-size:11px; color:var(--text-dim); }
+  #sliders.hidden{ display:none; }
+  .slider-row{ display:flex; align-items:center; gap:8px; margin:4px 0; }
+  .slider-row label{ width:76px; flex-shrink:0; }
+  .slider-row input[type=range]{ flex:1; accent-color:var(--accent); }
+  .slider-row span{ width:34px; text-align:right; color:var(--text); }
+
+  #log{ background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:8px 10px;
+    max-height:110px; overflow-y:auto; font-size:10.5px; font-family:ui-monospace,Menlo,monospace;
+    color:var(--text-dim); backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); }
+  #log.hidden{ display:none; }
+  #log div{ white-space:pre-wrap; word-break:break-all; }
+  #log .ok{ color:var(--ok); } #log .warn{ color:var(--warn); } #log .err{ color:var(--err); }
+
+  #centerHint{ position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); z-index:30;
+    background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:16px 20px;
+    font-size:13px; text-align:center; line-height:1.6; backdrop-filter:blur(8px); max-width:80%; }
+  #centerHint b{ color:var(--accent); }
+</style>
+</head>
+<body>
+
+<div id="canvas-container"></div>
+
+<div id="camPreview"><video id="cam" playsinline muted></video><div class="dot"></div></div>
+
+<div id="topbar">
+  <label class="file-btn" for="vrmFile">📂 VRM選択</label>
+  <input type="file" id="vrmFile" accept=".vrm">
+  <button id="btnCam">▶ カメラ開始</button>
+  <button id="btnCalib">🎯 中央校正</button>
+  <button id="btnSliders">⚙ 調整</button>
+  <button id="btnLog">📋 ログ</button>
+</div>
+
+<div id="bottomPanel">
+  <div id="sliders" class="hidden">
+    <div class="slider-row"><label>左右感度</label><input type="range" id="sxy" min="0" max="3" step="0.05" value="1"><span id="sxyV">1.0</span></div>
+    <div class="slider-row">
+      <label>奥行き感度</label><input type="range" id="sz" min="0" max="3" step="0.05" value="1"><span id="szV">1.0</span>
+    </div>
+    <div class="slider-row"><label>視点距離</label><input type="range" id="baseDist" min="0.5" max="5" step="0.1" value="2.2"><span id="baseDistV">2.2</span></div>
+    <div class="slider-row"><label>視線先高さ</label><input type="range" id="lookY" min="0" max="2" step="0.05" value="1.0"><span id="lookYV">1.0</span></div>
+    <div class="slider-row"><label>スムージング</label><input type="range" id="smooth" min="0.05" max="0.9" step="0.05" value="0.25"><span id="smoothV">0.25</span></div>
+    <div class="slider-row"><label>ミラー反転</label><input type="range" id="flip" min="0" max="1" step="1" value="0"><span id="flipV">off</span></div>
+  </div>
+  <div id="log" class="hidden"></div>
+</div>
+
+<div id="centerHint">
+  <b>顔トラッキングVRMビューア</b><br>
+  ① 📂 でVRMファイルを選択<br>
+  ② ▶ カメラ開始（顔認識のためカメラ許可が必要）<br>
+  ③ 正面を向いた状態で 🎯 中央校正 をタップ<br>
+  以後、顔の動きに合わせて画面がのぞき窓のように動きます
+</div>
+
+<script src="https://unpkg.com/three@0.133.0/build/three.min.js"></script>
+<script src="https://unpkg.com/three@0.133.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://unpkg.com/@pixiv/three-vrm@0.6.11/lib/three-vrm.js"></script>
+
+<script type="module">
+import { FaceLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+
+/* ---------------- ログ ---------------- */
+const logEl = document.getElementById('log');
+function log(msg, level=''){
+  const t = new Date().toLocaleTimeString('ja-JP', {hour12:false});
+  const d = document.createElement('div');
+  if(level) d.className = level;
+  d.textContent = `[${t}] ${msg}`;
+  logEl.appendChild(d);
+  logEl.scrollTop = logEl.scrollHeight;
+  console.log(msg);
+}
+
+/* ---------------- three.js セットアップ ---------------- */
+const container = document.getElementById('canvas-container');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0a0e14);
+
+const camera = new THREE.PerspectiveCamera(30, window.innerWidth/window.innerHeight, 0.05, 50);
+camera.position.set(0, 1.0, 2.2);
+
+const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:false });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.outputEncoding = THREE.sRGBEncoding;
+container.appendChild(renderer.domElement);
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x444455, 1.1));
+const dirLight = new THREE.DirectionalLight(0xffffff, 0.9);
+dirLight.position.set(1, 2, 1.5);
+scene.add(dirLight);
+
+const grid = new THREE.GridHelper(4, 16, 0x263040, 0x1a2230);
+grid.position.y = 0;
+scene.add(grid);
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+/* ---------------- VRM 読み込み ---------------- */
+let currentVRM = null;
+const gltfLoader = new THREE.GLTFLoader();
+
+document.getElementById('vrmFile').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if(!file) return;
+  const url = URL.createObjectURL(file);
+  log(`VRM読込中: ${file.name}`);
+  gltfLoader.load(url, (gltf) => {
+    THREE_VRM.VRMUtils.removeUnnecessaryJoints(gltf.scene);
+    THREE_VRM.VRM.from(gltf).then((vrm) => {
+      if(currentVRM){ scene.remove(currentVRM.scene); }
+      currentVRM = vrm;
+      scene.add(vrm.scene);
+      vrm.scene.rotation.y = Math.PI; // VRMは正面が-Z側を向くため反転
+      document.getElementById('centerHint').style.display = 'none';
+      log(`VRM読込完了: ${file.name}`, 'ok');
+    }).catch(err => log(`VRM変換エラー: ${err}`, 'err'));
+  }, undefined, (err) => log(`VRM読込エラー: ${err}`, 'err'));
+});
+
+/* ---------------- カメラ映像 & 顔トラッキング ---------------- */
+const video = document.getElementById('cam');
+let faceLandmarker = null;
+let camRunning = false;
+let lastVideoTime = -1;
+
+async function initFaceLandmarker(){
+  log('顔認識モデルを準備中...');
+  const filesetResolver = await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
+  );
+  faceLandmarker = await FaceLandmarker.createFromOptions(filesetResolver, {
+    baseOptions: {
+      modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+      delegate: "GPU"
+    },
+    runningMode: "VIDEO",
+    numFaces: 1
+  });
+  log('顔認識モデル準備完了', 'ok');
+}
+
+document.getElementById('btnCam').addEventListener('click', async () => {
+  const btn = document.getElementById('btnCam');
+  if(camRunning){
+    video.srcObject && video.srcObject.getTracks().forEach(t => t.stop());
+    camRunning = false;
+    btn.textContent = '▶ カメラ開始';
+    btn.classList.remove('on');
+    log('カメラ停止');
+    return;
+  }
+  try{
+    if(!faceLandmarker) await initFaceLandmarker();
+    log('カメラ許可を要求中...');
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'user', width:{ideal:480}, height:{ideal:360} },
+      audio: false
+    });
+    video.srcObject = stream;
+    await video.play();
+    camRunning = true;
+    btn.textContent = '■ カメラ停止';
+    btn.classList.add('on');
+    log('カメラ開始・顔トラッキング開始', 'ok');
+  }catch(err){
+    log(`カメラ起動エラー: ${err.message || err}`, 'err');
+  }
+});
+
+/* ---------------- 頭部位置 推定 ---------------- */
+// 生値(平滑化前)
+const raw = { x:0, y:0, width:0.28 };
+// 平滑化後
+const smoothed = { x:0, y:0, width:0.28 };
+// 校正基準(正面を向いた時の値)
+let calib = { x:0, y:0, width:0.28 };
+
+const params = {
+  sxy: 1.0, sz: 1.0, baseDist: 2.2, lookY: 1.0, smooth: 0.25, flip: 0
+};
+
+function detectFace(){
+  if(!camRunning || !faceLandmarker) return;
+  if(video.readyState < 2) return;
+  if(video.currentTime === lastVideoTime) return;
+  lastVideoTime = video.currentTime;
+
+  const result = faceLandmarker.detectForVideo(video, performance.now());
+  if(result.faceLandmarks && result.faceLandmarks.length > 0){
+    const lm = result.faceLandmarks[0];
+    const nose = lm[1];      // 鼻先
+    const rightEdge = lm[454]; // 顔右端付近(画像上)
+    const leftEdge = lm[234];  // 顔左端付近(画像上)
+    raw.x = nose.x; // 0=左, 1=右 (ミラーされていない生カメラ座標)
+    raw.y = nose.y; // 0=上, 1=下
+    raw.width = Math.abs(rightEdge.x - leftEdge.x); // 顔幅(奥行きの目安)
+  }
+}
+
+function updateSmoothing(){
+  const a = params.smooth;
+  smoothed.x += (raw.x - smoothed.x) * a;
+  smoothed.y += (raw.y - smoothed.y) * a;
+  smoothed.width += (raw.width - smoothed.width) * a;
+}
+
+document.getElementById('btnCalib').addEventListener('click', () => {
+  calib = { x: smoothed.x, y: smoothed.y, width: smoothed.width };
+  log(`中央校正しました (x:${calib.x.toFixed(2)} y:${calib.y.toFixed(2)} w:${calib.width.toFixed(2)})`, 'ok');
+});
+
+/* ---------------- カメラ視点更新（覗き窓効果） ---------------- */
+function updateCameraFromFace(){
+  // 校正基準からの差分（画面比率）。カメラ映像は反転していないため符号調整。
+  const flipSign = params.flip ? -1 : 1;
+  const dx = (smoothed.x - calib.x) * flipSign;   // 正=顔が右へ動いた
+  const dy = (smoothed.y - calib.y);              // 正=顔が下へ動いた
+  const depthRatio = calib.width > 0.01 ? (smoothed.width / calib.width) : 1; // >1で顔が近い(=奥行き変化)
+
+  // 頭が右に動く(dx>0) → のぞき窓の原理でカメラは左へ寄り、モデルの右側面が見える
+  const range = 1.6 * params.sxy;
+  const camX = -dx * range;
+  const camY =  dy * range * 0.85;
+
+  // 顔が近づく(depthRatio>1)ほど、視点がモデルに近づく
+  const dist = params.baseDist / Math.pow(Math.max(depthRatio, 0.3), params.sz);
+
+  camera.position.x += (camX - camera.position.x) * 0.35;
+  camera.position.y += ((params.lookY + camY) - camera.position.y) * 0.35;
+  const dir = new THREE.Vector3(camera.position.x, camera.position.y - params.lookY, 0);
+  const horizLen = Math.hypot(camera.position.x, 0); // 水平距離は position.x のみで簡易化
+  camera.position.z += (Math.sqrt(Math.max(dist*dist - camX*camX*0, dist*dist)) - camera.position.z) * 0.35;
+  // 上のz補間は簡略化のため、素直にdistへ寄せる
+  camera.position.z += (dist - camera.position.z) * 0.0; // 二重補正防止(上でsmoothing済)
+
+  camera.lookAt(0, params.lookY, 0);
+
+  document.querySelector('#camPreview .dot').style.left = `${(1-smoothed.x)*100}%`;
+  document.querySelector('#camPreview .dot').style.top = `${smoothed.y*100}%`;
+}
+
+/* ---------------- UIバインド ---------------- */
+function bindSlider(id, key, fmt = v=>v){
+  const input = document.getElementById(id);
+  const out = document.getElementById(id+'V');
+  input.addEventListener('input', () => {
+    params[key] = parseFloat(input.value);
+    out.textContent = key==='flip' ? (params[key] ? 'on' : 'off') : fmt(params[key]);
+  });
+}
+bindSlider('sxy','sxy', v=>v.toFixed(2));
+bindSlider('sz','sz', v=>v.toFixed(2));
+bindSlider('baseDist','baseDist', v=>v.toFixed(1));
+bindSlider('lookY','lookY', v=>v.toFixed(2));
+bindSlider('smooth','smooth', v=>v.toFixed(2));
+bindSlider('flip','flip');
+
+document.getElementById('btnSliders').addEventListener('click', () => {
+  document.getElementById('sliders').classList.toggle('hidden');
+});
+document.getElementById('btnLog').addEventListener('click', () => {
+  document.getElementById('log').classList.toggle('hidden');
+});
+
+/* ---------------- メインループ ---------------- */
+function animate(){
+  requestAnimationFrame(animate);
+  detectFace();
+  updateSmoothing();
+  updateCameraFromFace();
+  renderer.render(scene, camera);
+}
+animate();
+
+log('起動しました。VRMを選択してカメラを開始してください。');
+</script>
+</body>
+</html>
