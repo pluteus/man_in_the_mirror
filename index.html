@@ -66,6 +66,7 @@
   <input type="file" id="vrmFile" accept=".vrm">
   <button id="btnCam">▶ カメラ開始</button>
   <button id="btnCalib">🎯 中央校正</button>
+  <button id="btnGyro">🧭 ジャイロ有効化</button>
   <button id="btnSliders">⚙ 調整</button>
   <button id="btnLog">📋 ログ</button>
 </div>
@@ -80,6 +81,8 @@
     <div class="slider-row"><label>視線先高さ</label><input type="range" id="lookY" min="0" max="2" step="0.05" value="1.0"><span id="lookYV">1.0</span></div>
     <div class="slider-row"><label>スムージング</label><input type="range" id="smooth" min="0.05" max="0.9" step="0.05" value="0.25"><span id="smoothV">0.25</span></div>
     <div class="slider-row"><label>ミラー反転</label><input type="range" id="flip" min="0" max="1" step="1" value="0"><span id="flipV">off</span></div>
+    <div class="slider-row"><label>ジャイロ感度</label><input type="range" id="gsens" min="0" max="3" step="0.05" value="1"><span id="gsensV">1.0</span></div>
+    <div class="slider-row"><label>ジャイロ反転</label><input type="range" id="gflip" min="0" max="1" step="1" value="0"><span id="gflipV">off</span></div>
   </div>
   <div id="log" class="hidden"></div>
 </div>
@@ -221,8 +224,69 @@ const smoothed = { x:0, y:0, width:0.28 };
 let calib = { x:0, y:0, width:0.28 };
 
 const params = {
-  sxy: 1.0, sz: 1.0, baseDist: 2.2, lookY: 1.0, smooth: 0.25, flip: 0
+  sxy: 1.0, sz: 1.0, baseDist: 2.2, lookY: 1.0, smooth: 0.25, flip: 0,
+  gsens: 1.0, gflip: 0
 };
+
+/* ---------------- ジャイロ(端末の傾き) ---------------- */
+let gyroEnabled = false;
+const gyroRaw = { beta: 0, gamma: 0, has: false };
+const gyroSmoothed = { beta: 0, gamma: 0 };
+let gyroBaseline = { beta: 0, gamma: 0 };
+
+function handleOrientation(e){
+  if(e.beta === null || e.gamma === null) return;
+  gyroRaw.beta = e.beta;   // 前後の傾き -180〜180 (縦持ちで約90前後)
+  gyroRaw.gamma = e.gamma; // 左右の傾き -90〜90
+  if(!gyroRaw.has){
+    // 初回受信時にその場でスムージング値も初期化(起動時の飛びを防ぐ)
+    gyroSmoothed.beta = e.beta;
+    gyroSmoothed.gamma = e.gamma;
+    gyroRaw.has = true;
+  }
+}
+
+async function toggleGyro(){
+  const btn = document.getElementById('btnGyro');
+  if(gyroEnabled){
+    window.removeEventListener('deviceorientation', handleOrientation);
+    gyroEnabled = false;
+    btn.textContent = '🧭 ジャイロ有効化';
+    btn.classList.remove('on');
+    log('ジャイロトラッキング停止');
+    return;
+  }
+  if(typeof DeviceOrientationEvent === 'undefined'){
+    log('この端末はジャイロ(DeviceOrientation)に対応していません', 'warn');
+    return;
+  }
+  if(typeof DeviceOrientationEvent.requestPermission === 'function'){
+    // iOS: ユーザー操作の直後でないと許可ダイアログが出ないため、ボタン押下内で呼ぶ
+    try{
+      const perm = await DeviceOrientationEvent.requestPermission();
+      if(perm !== 'granted'){
+        log('ジャイロの利用が許可されませんでした', 'warn');
+        return;
+      }
+    }catch(err){
+      log(`ジャイロ許可の要求に失敗: ${err.message || err}`, 'err');
+      return;
+    }
+  }
+  window.addEventListener('deviceorientation', handleOrientation);
+  gyroEnabled = true;
+  btn.textContent = '🧭 ジャイロ停止';
+  btn.classList.add('on');
+  log('ジャイロトラッキング開始', 'ok');
+}
+document.getElementById('btnGyro').addEventListener('click', toggleGyro);
+
+function updateGyroSmoothing(){
+  if(!gyroEnabled || !gyroRaw.has) return;
+  const a = params.smooth;
+  gyroSmoothed.beta += (gyroRaw.beta - gyroSmoothed.beta) * a;
+  gyroSmoothed.gamma += (gyroRaw.gamma - gyroSmoothed.gamma) * a;
+}
 
 function detectFace(){
   if(!camRunning || !faceLandmarker) return;
@@ -251,7 +315,12 @@ function updateSmoothing(){
 
 document.getElementById('btnCalib').addEventListener('click', () => {
   calib = { x: smoothed.x, y: smoothed.y, width: smoothed.width };
-  log(`中央校正しました (x:${calib.x.toFixed(2)} y:${calib.y.toFixed(2)} w:${calib.width.toFixed(2)})`, 'ok');
+  let msg = `中央校正しました (x:${calib.x.toFixed(2)} y:${calib.y.toFixed(2)} w:${calib.width.toFixed(2)})`;
+  if(gyroEnabled && gyroRaw.has){
+    gyroBaseline = { beta: gyroSmoothed.beta, gamma: gyroSmoothed.gamma };
+    msg += ` / ジャイロ基準(beta:${gyroBaseline.beta.toFixed(1)} gamma:${gyroBaseline.gamma.toFixed(1)})`;
+  }
+  log(msg, 'ok');
 });
 
 /* ---------------- カメラ視点更新（覗き窓効果） ---------------- */
@@ -259,7 +328,7 @@ function updateCameraFromFace(){
   // 校正基準からの差分（画面比率）。カメラ映像は反転していないため符号調整。
   const flipSign = params.flip ? -1 : 1;
   const dx = (smoothed.x - calib.x) * flipSign;   // 正=顔が右へ動いた
-  const dy = (smoothed.y - calib.y);              // 正=顔が下へ動いた
+  const dy = -(smoothed.y - calib.y);             // 正=顔が下へ動いた→カメラは下がりローアングルに
   const depthRatio = calib.width > 0.01 ? (smoothed.width / calib.width) : 1; // >1で顔が近い(=奥行き変化)
 
   // 頭が右に動く(dx>0) → のぞき窓の原理でカメラは左へ寄り、モデルの右側面が見える
