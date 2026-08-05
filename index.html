@@ -78,6 +78,9 @@
 <div id="topbar">
   <label class="file-btn" for="vrmFile">📂 VRM選択</label>
   <input type="file" id="vrmFile" accept=".vrm">
+  <label class="file-btn" for="vrmaFile">🎬 VRMA選択</label>
+  <input type="file" id="vrmaFile" accept=".vrma">
+  <button id="btnMotion">▶ モーション再生</button>
   <button id="btnCam">▶ カメラ開始</button>
   <button id="btnCalib">🎯 中央校正</button>
   <button id="btnGyro">🧭 ジャイロ有効化</button>
@@ -109,9 +112,10 @@
 
 <div id="centerHint">
   <b>顔トラッキングVRMビューア</b><br>
-  ① 📂 でVRMファイルを選択<br>
-  ② ▶ カメラ開始（顔認識のためカメラ許可が必要）<br>
-  ③ 正面を向いた状態で 🎯 中央校正 をタップ<br>
+  起動時に AliciaSolid.vrm と VRMA_02.vrma を自動読み込みしてモーション再生します<br>
+  (同フォルダに配置されている必要があります。無い場合は 📂 / 🎬 から手動選択してください)<br><br>
+  ① ▶ カメラ開始（顔認識のためカメラ許可が必要）<br>
+  ② 正面を向いた状態で 🎯 中央校正 をタップ<br>
   以後、顔の動きに合わせて画面がのぞき窓のように動きます
 </div>
 
@@ -132,11 +136,22 @@
   </div>
 </div>
 
-<script src="https://unpkg.com/three@0.133.0/build/three.min.js"></script>
-<script src="https://unpkg.com/three@0.133.0/examples/js/loaders/GLTFLoader.js"></script>
-<script src="https://unpkg.com/@pixiv/three-vrm@0.6.11/lib/three-vrm.js"></script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/",
+    "@pixiv/three-vrm": "https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@3/lib/three-vrm.module.min.js",
+    "@pixiv/three-vrm-animation": "https://cdn.jsdelivr.net/npm/@pixiv/three-vrm-animation@3/lib/three-vrm-animation.module.js"
+  }
+}
+</script>
 
 <script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
+import { VRMAnimationLoaderPlugin, createVRMAnimationClip } from '@pixiv/three-vrm-animation';
 import { FaceLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
 
 /* ---------------- ログ ---------------- */
@@ -180,27 +195,101 @@ window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-/* ---------------- VRM 読み込み ---------------- */
+/* ---------------- VRM / VRMA 読み込み ---------------- */
 let currentVRM = null;
-const gltfLoader = new THREE.GLTFLoader();
+let mixer = null;
+let currentAction = null;
+const clock = new THREE.Clock();
+
+const vrmLoader = new GLTFLoader();
+vrmLoader.register((parser) => new VRMLoaderPlugin(parser));
+
+const vrmaLoader = new GLTFLoader();
+vrmaLoader.register((parser) => new VRMAnimationLoaderPlugin(parser));
+
+function loadVRM(url, label){
+  return new Promise((resolve, reject) => {
+    log(`VRM読込中: ${label}`);
+    vrmLoader.load(url, (gltf) => {
+      const vrm = gltf.userData.vrm;
+      if(currentVRM){ scene.remove(currentVRM.scene); }
+      currentVRM = vrm;
+      scene.add(vrm.scene);
+      // VRM0.x モデルは正面が-Z向きなので、+Z向き(VRM1.0基準)に揃える
+      if(vrm.meta && vrm.meta.metaVersion === '0'){
+        VRMUtils.rotateVRM0(vrm);
+      }
+      mixer = new THREE.AnimationMixer(vrm.scene);
+      currentAction = null;
+      document.getElementById('centerHint').style.display = 'none';
+      log(`VRM読込完了: ${label}`, 'ok');
+      resolve(vrm);
+    }, undefined, (err) => { log(`VRM読込エラー(${label}): ${err.message || err}`, 'err'); reject(err); });
+  });
+}
+
+function loadVRMA(url, label){
+  return new Promise((resolve, reject) => {
+    if(!currentVRM){ log('先にVRMを読み込んでください', 'warn'); reject(new Error('no vrm')); return; }
+    log(`モーション読込中: ${label}`);
+    vrmaLoader.load(url, (gltf) => {
+      const vrmAnimations = gltf.userData.vrmAnimations;
+      if(!vrmAnimations || !vrmAnimations.length){
+        log(`モーションデータが見つかりません: ${label}`, 'err');
+        reject(new Error('no animation'));
+        return;
+      }
+      const clip = createVRMAnimationClip(vrmAnimations[0], currentVRM);
+      if(currentAction){ currentAction.stop(); }
+      currentAction = mixer.clipAction(clip);
+      currentAction.setLoop(THREE.LoopRepeat);
+      currentAction.play();
+      document.getElementById('btnMotion').classList.add('on');
+      document.getElementById('btnMotion').textContent = '⏸ モーション停止';
+      log(`モーション再生開始: ${label}`, 'ok');
+      resolve(clip);
+    }, undefined, (err) => { log(`モーション読込エラー(${label}): ${err.message || err}`, 'err'); reject(err); });
+  });
+}
 
 document.getElementById('vrmFile').addEventListener('change', (e) => {
   const file = e.target.files[0];
   if(!file) return;
   const url = URL.createObjectURL(file);
-  log(`VRM読込中: ${file.name}`);
-  gltfLoader.load(url, (gltf) => {
-    THREE_VRM.VRMUtils.removeUnnecessaryJoints(gltf.scene);
-    THREE_VRM.VRM.from(gltf).then((vrm) => {
-      if(currentVRM){ scene.remove(currentVRM.scene); }
-      currentVRM = vrm;
-      scene.add(vrm.scene);
-      vrm.scene.rotation.y = Math.PI; // VRMは正面が-Z側を向くため反転
-      document.getElementById('centerHint').style.display = 'none';
-      log(`VRM読込完了: ${file.name}`, 'ok');
-    }).catch(err => log(`VRM変換エラー: ${err}`, 'err'));
-  }, undefined, (err) => log(`VRM読込エラー: ${err}`, 'err'));
+  loadVRM(url, file.name).catch(()=>{});
 });
+
+document.getElementById('vrmaFile').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if(!file) return;
+  const url = URL.createObjectURL(file);
+  loadVRMA(url, file.name).catch(()=>{});
+});
+
+document.getElementById('btnMotion').addEventListener('click', () => {
+  if(!currentAction) return;
+  const btn = document.getElementById('btnMotion');
+  if(currentAction.isRunning()){
+    currentAction.paused = true;
+    btn.classList.remove('on');
+    btn.textContent = '▶ モーション再生';
+  }else{
+    currentAction.paused = false;
+    if(!currentAction.isRunning()) currentAction.play();
+    btn.classList.add('on');
+    btn.textContent = '⏸ モーション停止';
+  }
+});
+
+// 起動時にデフォルトのVRM・VRMAを自動読み込み(同フォルダに配置しておく必要あり)
+(async () => {
+  try{
+    await loadVRM('./AliciaSolid.vrm', 'AliciaSolid.vrm');
+    await loadVRMA('./VRMA_02.vrma', 'VRMA_02.vrma');
+  }catch(err){
+    log('デフォルトアセットの自動読込に失敗しました。AliciaSolid.vrm と VRMA_02.vrma を index.html と同じフォルダに配置してください', 'warn');
+  }
+})();
 
 /* ---------------- カメラ映像 & 顔トラッキング ---------------- */
 const video = document.getElementById('cam');
@@ -552,6 +641,9 @@ document.getElementById('btnLog').addEventListener('click', () => {
 /* ---------------- メインループ ---------------- */
 function animate(){
   requestAnimationFrame(animate);
+  const delta = clock.getDelta();
+  if(mixer) mixer.update(delta);
+  if(currentVRM) currentVRM.update(delta);
   detectFace();
   updateSmoothing();
   updateGyroSmoothing();
