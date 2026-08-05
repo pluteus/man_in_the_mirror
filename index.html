@@ -18,12 +18,17 @@
 
   #camPreview{ position:fixed; top:calc(env(safe-area-inset-top,0px) + 10px); right:10px;
     width:120px; height:90px; border-radius:10px; overflow:hidden; border:1px solid var(--border);
-    background:#000; z-index:20; opacity:.85; }
-  #camPreview video{ width:100%; height:100%; object-fit:cover; transform:scaleX(-1); }
+    background:#000; z-index:20; opacity:.85; transition:opacity .3s; }
+  #camPreview video{ display:none; }
+  #camPreview canvas{ width:100%; height:100%; display:block;
+    image-rendering:pixelated; image-rendering:-webkit-optimize-contrast; image-rendering:crisp-edges; }
   #camPreview .dot{ position:absolute; width:6px; height:6px; border-radius:50%; background:var(--accent);
     top:50%; left:50%; transform:translate(-50%,-50%); box-shadow:0 0 4px var(--accent); }
 
-  #topbar{ position:fixed; top:calc(env(safe-area-inset-top,0px) + 10px); left:10px; right:140px;
+  #btnFullscreen{ position:fixed; top:calc(env(safe-area-inset-top,0px) + 10px); right:140px;
+    z-index:21; }
+
+  #topbar{ position:fixed; top:calc(env(safe-area-inset-top,0px) + 10px); left:10px; right:190px;
     display:flex; gap:6px; flex-wrap:wrap; z-index:20; }
   button, .file-btn{ background:var(--panel); border:1px solid var(--border); color:var(--text);
     padding:8px 12px; border-radius:8px; font-size:12px; backdrop-filter:blur(8px);
@@ -31,6 +36,17 @@
   button:active, .file-btn:active{ background:#1c2531; }
   button.on{ border-color:var(--accent); color:var(--accent); }
   input[type=file]{ display:none; }
+
+  /* フルスクリーン中はUIとカメラ表示を隠す。タップで数秒だけ再表示 */
+  body.fs-active #topbar,
+  body.fs-active #bottomPanel,
+  body.fs-active #btnFullscreen,
+  body.fs-active #camPreview{ opacity:0; pointer-events:none; transition:opacity .3s; }
+  body.fs-active.show-controls #topbar,
+  body.fs-active.show-controls #bottomPanel,
+  body.fs-active.show-controls #btnFullscreen{ opacity:1; pointer-events:auto; }
+  /* カメラ表示はプライバシー配慮のためフルスクリーン中は常に非表示のまま */
+  body.fs-active.show-controls #camPreview{ opacity:0; pointer-events:none; }
 
   #bottomPanel{ position:fixed; left:10px; right:10px; bottom:calc(env(safe-area-inset-bottom,0px) + 10px);
     z-index:20; display:flex; flex-direction:column; gap:6px; }
@@ -73,7 +89,9 @@
 
 <div id="canvas-container"></div>
 
-<div id="camPreview"><video id="cam" playsinline muted></video><div class="dot"></div></div>
+<div id="camPreview"><video id="cam" playsinline muted></video><canvas id="camMosaic"></canvas><div class="dot"></div></div>
+
+<button id="btnFullscreen" title="フルスクリーン">⛶</button>
 
 <div id="topbar">
   <label class="file-btn" for="vrmFile">📂 VRM選択</label>
@@ -366,6 +384,23 @@ const video = document.getElementById('cam');
 let faceLandmarker = null;
 let camRunning = false;
 let lastVideoTime = -1;
+
+/* プライバシー配慮: プレビューは低解像度canvasに描画してモザイク化する */
+const mosaicCanvas = document.getElementById('camMosaic');
+const mosaicCtx = mosaicCanvas.getContext('2d');
+const MOSAIC_W = 16, MOSAIC_H = 12; // 小さいほど粗いモザイクになる
+mosaicCanvas.width = MOSAIC_W;
+mosaicCanvas.height = MOSAIC_H;
+mosaicCtx.imageSmoothingEnabled = false;
+
+function drawMosaicPreview(){
+  if(!camRunning || video.readyState < 2) return;
+  mosaicCtx.save();
+  mosaicCtx.translate(MOSAIC_W, 0);
+  mosaicCtx.scale(-1, 1); // ミラー表示
+  mosaicCtx.drawImage(video, 0, 0, MOSAIC_W, MOSAIC_H);
+  mosaicCtx.restore();
+}
 
 async function initFaceLandmarker(){
   log('顔認識モデルを準備中...');
@@ -708,6 +743,52 @@ document.getElementById('btnLog').addEventListener('click', () => {
   document.getElementById('log').classList.toggle('hidden');
 });
 
+/* ---------------- フルスクリーン ---------------- */
+function getFsElement(){ return document.fullscreenElement || document.webkitFullscreenElement || null; }
+
+async function toggleFullscreen(){
+  const el = document.documentElement;
+  try{
+    if(!getFsElement()){
+      if(el.requestFullscreen) await el.requestFullscreen();
+      else if(el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+      else{ log('この端末/ブラウザはフルスクリーン表示に対応していません', 'warn'); }
+    }else{
+      if(document.exitFullscreen) await document.exitFullscreen();
+      else if(document.webkitExitFullscreen) document.webkitExitFullscreen();
+    }
+  }catch(err){
+    log(`フルスクリーン切替エラー: ${err.message || err}`, 'err');
+  }
+}
+document.getElementById('btnFullscreen').addEventListener('click', toggleFullscreen);
+
+let controlsHideTimer = null;
+function showControlsTemporarily(){
+  document.body.classList.add('show-controls');
+  clearTimeout(controlsHideTimer);
+  controlsHideTimer = setTimeout(() => document.body.classList.remove('show-controls'), 3000);
+}
+
+function onFullscreenChange(){
+  const active = !!getFsElement();
+  document.body.classList.toggle('fs-active', active);
+  if(active){
+    log('フルスクリーン表示にしました(画面タップでボタンを一時表示)', 'ok');
+    showControlsTemporarily();
+  }else{
+    document.body.classList.remove('show-controls');
+    log('フルスクリーンを解除しました');
+  }
+}
+document.addEventListener('fullscreenchange', onFullscreenChange);
+document.addEventListener('webkitfullscreenchange', onFullscreenChange);
+
+// フルスクリーン中に画面をタップするとボタンが数秒だけ再表示される(カメラ表示は常に非表示のまま)
+document.getElementById('canvas-container').addEventListener('pointerdown', () => {
+  if(document.body.classList.contains('fs-active')) showControlsTemporarily();
+});
+
 /* ---------------- メインループ ---------------- */
 function animate(){
   requestAnimationFrame(animate);
@@ -718,6 +799,7 @@ function animate(){
   updateSmoothing();
   updateGyroSmoothing();
   updateCameraFromFace();
+  drawMosaicPreview();
   renderer.render(scene, camera);
 }
 animate();
