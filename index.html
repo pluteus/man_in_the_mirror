@@ -78,6 +78,7 @@
 <div id="topbar">
   <label class="file-btn" for="vrmFile">📂 VRM選択</label>
   <input type="file" id="vrmFile" accept=".vrm">
+  <button id="btnVroidHub">🌐 VRoid Hub</button>
   <label class="file-btn" for="vrmaFile">🎬 VRMA選択</label>
   <input type="file" id="vrmaFile" accept=".vrma">
   <button id="btnMotion">▶ モーション再生</button>
@@ -255,6 +256,11 @@ document.getElementById('vrmFile').addEventListener('change', (e) => {
   if(!file) return;
   const url = URL.createObjectURL(file);
   loadVRM(url, file.name).catch(()=>{});
+});
+
+document.getElementById('btnVroidHub').addEventListener('click', () => {
+  window.open('https://hub.vroid.com', '_blank', 'noopener');
+  log('VRoid Hubを新しいタブで開きました。モデルページで「このモデルを利用する」からVRMファイルをダウンロードし、📂 VRM選択で読み込んでください', 'ok');
 });
 
 document.getElementById('vrmaFile').addEventListener('change', (e) => {
