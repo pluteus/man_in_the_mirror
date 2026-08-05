@@ -81,6 +81,8 @@
   <label class="file-btn" for="vrmaFile">🎬 VRMA選択</label>
   <input type="file" id="vrmaFile" accept=".vrma">
   <button id="btnMotion">▶ モーション再生</button>
+  <button id="btnRandom" class="on">🔀 ランダム再生:ON</button>
+  <button id="btnNext">⏭ 次へ</button>
   <button id="btnCam">▶ カメラ開始</button>
   <button id="btnCalib">🎯 中央校正</button>
   <button id="btnGyro">🧭 ジャイロ有効化</button>
@@ -112,7 +114,7 @@
 
 <div id="centerHint">
   <b>顔トラッキングVRMビューア</b><br>
-  起動時に AliciaSolid.vrm と VRMA_02.vrma を自動読み込みしてモーション再生します<br>
+  起動時に AliciaSolid.vrm と VRMA_01〜07.vrma を自動読み込みし、ランダムにモーション再生します<br>
   (同フォルダに配置されている必要があります。無い場合は 📂 / 🎬 から手動選択してください)<br><br>
   ① ▶ カメラ開始（顔認識のためカメラ許可が必要）<br>
   ② 正面を向いた状態で 🎯 中央校正 をタップ<br>
@@ -220,6 +222,9 @@ function loadVRM(url, label){
         VRMUtils.rotateVRM0(vrm);
       }
       mixer = new THREE.AnimationMixer(vrm.scene);
+      mixer.addEventListener('finished', (e) => {
+        if(randomPlayback && e.action === currentAction) playRandomMotion();
+      });
       currentAction = null;
       document.getElementById('centerHint').style.display = 'none';
       log(`VRM読込完了: ${label}`, 'ok');
@@ -240,14 +245,7 @@ function loadVRMA(url, label){
         return;
       }
       const clip = createVRMAnimationClip(vrmAnimations[0], currentVRM);
-      if(currentAction){ currentAction.stop(); }
-      currentAction = mixer.clipAction(clip);
-      currentAction.setLoop(THREE.LoopRepeat);
-      currentAction.play();
-      document.getElementById('btnMotion').classList.add('on');
-      document.getElementById('btnMotion').textContent = '⏸ モーション停止';
-      log(`モーション再生開始: ${label}`, 'ok');
-      resolve(clip);
+      resolve({ name: label, clip });
     }, undefined, (err) => { log(`モーション読込エラー(${label}): ${err.message || err}`, 'err'); reject(err); });
   });
 }
@@ -263,7 +261,13 @@ document.getElementById('vrmaFile').addEventListener('change', (e) => {
   const file = e.target.files[0];
   if(!file) return;
   const url = URL.createObjectURL(file);
-  loadVRMA(url, file.name).catch(()=>{});
+  loadVRMA(url, file.name).then((entry) => {
+    randomPlayback = false;
+    document.getElementById('btnRandom').classList.remove('on');
+    document.getElementById('btnRandom').textContent = '🔀 ランダム再生:OFF';
+    motionClips = [entry];
+    playMotion(0, 'repeat');
+  }).catch(()=>{});
 });
 
 document.getElementById('btnMotion').addEventListener('click', () => {
@@ -281,13 +285,73 @@ document.getElementById('btnMotion').addEventListener('click', () => {
   }
 });
 
-// 起動時にデフォルトのVRM・VRMAを自動読み込み(同フォルダに配置しておく必要あり)
+/* ---------------- モーションリスト & ランダム再生 ---------------- */
+const defaultMotionFiles = ['VRMA_01.vrma','VRMA_02.vrma','VRMA_03.vrma','VRMA_04.vrma','VRMA_05.vrma','VRMA_06.vrma','VRMA_07.vrma'];
+let motionClips = []; // { name, clip }
+let lastMotionIndex = -1;
+let randomPlayback = true;
+
+async function loadMotionList(files){
+  motionClips = [];
+  for(const name of files){
+    try{
+      const entry = await loadVRMA(`./${name}`, name);
+      motionClips.push(entry);
+    }catch(err){
+      log(`モーションリストへの追加をスキップ: ${name}`, 'warn');
+    }
+  }
+  log(`モーションリスト読込完了 (${motionClips.length}/${files.length}件)`, motionClips.length ? 'ok' : 'warn');
+}
+
+function playMotion(index, loopMode){
+  if(!motionClips.length || !mixer) return;
+  const entry = motionClips[index];
+  if(currentAction){ currentAction.stop(); }
+  currentAction = mixer.clipAction(entry.clip);
+  currentAction.reset();
+  const isOnce = loopMode === 'once';
+  currentAction.setLoop(isOnce ? THREE.LoopOnce : THREE.LoopRepeat);
+  currentAction.clampWhenFinished = isOnce;
+  currentAction.play();
+  lastMotionIndex = index;
+  document.getElementById('btnMotion').classList.add('on');
+  document.getElementById('btnMotion').textContent = '⏸ モーション停止';
+  log(`再生: ${entry.name}`, 'ok');
+}
+
+function playRandomMotion(){
+  if(!motionClips.length) return;
+  let idx = 0;
+  if(motionClips.length > 1){
+    do{ idx = Math.floor(Math.random() * motionClips.length); }while(idx === lastMotionIndex);
+  }
+  playMotion(idx, 'once');
+}
+
+document.getElementById('btnRandom').addEventListener('click', () => {
+  randomPlayback = !randomPlayback;
+  const btn = document.getElementById('btnRandom');
+  btn.classList.toggle('on', randomPlayback);
+  btn.textContent = `🔀 ランダム再生:${randomPlayback ? 'ON' : 'OFF'}`;
+  if(randomPlayback && motionClips.length > 1) playRandomMotion();
+  log(`ランダム再生: ${randomPlayback ? 'ON' : 'OFF'}`, 'ok');
+});
+
+document.getElementById('btnNext').addEventListener('click', () => {
+  if(!motionClips.length) return;
+  if(randomPlayback){ playRandomMotion(); }
+  else{ playMotion((lastMotionIndex + 1) % motionClips.length, 'once'); }
+});
+
+// 起動時にデフォルトのVRMとモーションリスト(VRMA_01〜07)を自動読み込みし、ランダム再生を開始
 (async () => {
   try{
     await loadVRM('./AliciaSolid.vrm', 'AliciaSolid.vrm');
-    await loadVRMA('./VRMA_02.vrma', 'VRMA_02.vrma');
+    await loadMotionList(defaultMotionFiles);
+    if(motionClips.length) playRandomMotion();
   }catch(err){
-    log('デフォルトアセットの自動読込に失敗しました。AliciaSolid.vrm と VRMA_02.vrma を index.html と同じフォルダに配置してください', 'warn');
+    log('デフォルトアセットの自動読込に失敗しました。AliciaSolid.vrm と VRMA_01〜07.vrma を index.html と同じフォルダに配置してください', 'warn');
   }
 })();
 
