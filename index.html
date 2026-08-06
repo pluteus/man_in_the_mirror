@@ -40,10 +40,12 @@
   /* フルスクリーン中はUIとカメラ表示を隠す。タップで数秒だけ再表示 */
   body.fs-active #topbar,
   body.fs-active #bottomPanel,
+  body.fs-active #motionListPanel,
   body.fs-active #btnFullscreen,
   body.fs-active #camPreview{ opacity:0; pointer-events:none; transition:opacity .3s; }
   body.fs-active.show-controls #topbar,
   body.fs-active.show-controls #bottomPanel,
+  body.fs-active.show-controls #motionListPanel,
   body.fs-active.show-controls #btnFullscreen{ opacity:1; pointer-events:auto; }
   /* カメラ表示はプライバシー配慮のためフルスクリーン中は常に非表示のまま */
   body.fs-active.show-controls #camPreview{ opacity:0; pointer-events:none; }
@@ -57,6 +59,24 @@
   .slider-row label{ width:76px; flex-shrink:0; }
   .slider-row input[type=range]{ flex:1; accent-color:var(--accent); }
   .slider-row span{ width:34px; text-align:right; color:var(--text); }
+
+  #motionListPanel{ position:fixed; top:calc(env(safe-area-inset-top,0px) + 54px); left:10px;
+    width:260px; max-width:calc(100vw - 20px); max-height:50vh; z-index:20;
+    background:var(--panel); border:1px solid var(--border); border-radius:10px;
+    backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px);
+    display:flex; flex-direction:column; overflow:hidden; }
+  #motionListPanel.hidden{ display:none; }
+  .motion-controls{ display:flex; gap:6px; flex-wrap:wrap; padding:8px 8px 6px; border-bottom:1px solid var(--border); }
+  .motion-controls button{ flex:1; min-width:0; padding:7px 4px; font-size:11px; }
+  #motionListItems{ overflow-y:auto; padding:4px 6px; }
+  .motion-item{ display:flex; align-items:center; justify-content:space-between; gap:6px;
+    padding:7px 4px; border-bottom:1px solid var(--border); font-size:12px; }
+  .motion-item:last-child{ border-bottom:none; }
+  .motion-item.playing{ color:var(--accent); }
+  .motion-item .motion-name{ flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis;
+    white-space:nowrap; cursor:pointer; }
+  .motion-item button{ padding:4px 8px; font-size:11px; flex-shrink:0; }
+  .motion-empty{ padding:10px 4px; color:var(--text-dim); font-size:11.5px; line-height:1.5; }
 
   #log{ background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:8px 10px;
     max-height:110px; overflow-y:auto; font-size:10.5px; font-family:ui-monospace,Menlo,monospace;
@@ -97,11 +117,8 @@
   <label class="file-btn" for="vrmFile">📂 VRM選択</label>
   <input type="file" id="vrmFile" accept=".vrm">
   <button id="btnVroidHub">🌐 VRoid Hub</button>
-  <label class="file-btn" for="vrmaFile">🎬 VRMA選択</label>
-  <input type="file" id="vrmaFile" accept=".vrma">
-  <button id="btnMotion">▶ モーション再生</button>
-  <button id="btnRandom" class="on">🔀 ランダム再生:ON</button>
-  <button id="btnNext">⏭ 次へ</button>
+  <input type="file" id="vrmaFile" accept=".vrma" multiple style="display:none">
+  <button id="btnMotionList">🎞 モーションリスト</button>
   <button id="btnCam">▶ カメラ開始</button>
   <button id="btnCalib">🎯 中央校正</button>
   <button id="btnGyro">🧭 ジャイロ有効化</button>
@@ -109,6 +126,16 @@
   <button id="btnOffAxis">🪟 本格off-axis</button>
   <button id="btnSliders">⚙ 調整</button>
   <button id="btnLog">📋 ログ</button>
+</div>
+
+<div id="motionListPanel" class="hidden">
+  <div class="motion-controls">
+    <button id="btnMotion">▶</button>
+    <button id="btnRandom" class="on">🔀 ランダム:ON</button>
+    <button id="btnRepeat">🔁 リピート:OFF</button>
+    <button id="btnAddMotion">➕ 追加</button>
+  </div>
+  <div id="motionListItems"></div>
 </div>
 
 <div id="bottomPanel">
@@ -135,7 +162,7 @@
 <div id="centerHint">
   <b>顔トラッキングVRMビューア</b><br>
   起動時に AliciaSolid.vrm と VRMA_01〜07.vrma を自動読み込みし、ランダムにモーション再生します<br>
-  (同フォルダに配置されている必要があります。無い場合は 📂 / 🎬 から手動選択してください)<br><br>
+  (同フォルダに配置されている必要があります。無い場合は 📂 / 🎞モーションリスト内の➕追加 から手動選択してください)<br><br>
   ① ▶ カメラ開始（顔認識のためカメラ許可が必要）<br>
   ② 正面を向いた状態で 🎯 中央校正 をタップ<br>
   以後、顔の動きに合わせて画面がのぞき窓のように動きます
@@ -316,7 +343,7 @@ function loadVRM(url, label){
         }
         mixer = new THREE.AnimationMixer(vrm.scene);
         mixer.addEventListener('finished', (e) => {
-          if(randomPlayback && e.action === currentAction) playRandomMotion();
+          if(e.action === currentAction) onMotionFinished();
         });
         currentAction = null;
         document.getElementById('centerHint').style.display = 'none';
@@ -356,39 +383,12 @@ document.getElementById('btnVroidHub').addEventListener('click', () => {
   log('VRoid Hubを新しいタブで開きました。モデルページで「このモデルを利用する」からVRMファイルをダウンロードし、📂 VRM選択で読み込んでください', 'ok');
 });
 
-document.getElementById('vrmaFile').addEventListener('change', (e) => {
-  const file = e.target.files[0];
-  if(!file) return;
-  const url = URL.createObjectURL(file);
-  loadVRMA(url, file.name).then((entry) => {
-    randomPlayback = false;
-    document.getElementById('btnRandom').classList.remove('on');
-    document.getElementById('btnRandom').textContent = '🔀 ランダム再生:OFF';
-    motionClips = [entry];
-    playMotion(0, 'repeat');
-  }).catch(()=>{});
-});
-
-document.getElementById('btnMotion').addEventListener('click', () => {
-  if(!currentAction) return;
-  const btn = document.getElementById('btnMotion');
-  if(currentAction.isRunning()){
-    currentAction.paused = true;
-    btn.classList.remove('on');
-    btn.textContent = '▶ モーション再生';
-  }else{
-    currentAction.paused = false;
-    if(!currentAction.isRunning()) currentAction.play();
-    btn.classList.add('on');
-    btn.textContent = '⏸ モーション停止';
-  }
-});
-
-/* ---------------- モーションリスト & ランダム再生 ---------------- */
+/* ---------------- モーションリスト & 再生制御 ---------------- */
 const defaultMotionFiles = ['VRMA_01.vrma','VRMA_02.vrma','VRMA_03.vrma','VRMA_04.vrma','VRMA_05.vrma','VRMA_06.vrma','VRMA_07.vrma'];
 let motionClips = []; // { name, clip }
 let lastMotionIndex = -1;
 let randomPlayback = true;
+let repeatMode = false;
 
 async function loadMotionList(files){
   motionClips = [];
@@ -401,21 +401,21 @@ async function loadMotionList(files){
     }
   }
   log(`モーションリスト読込完了 (${motionClips.length}/${files.length}件)`, motionClips.length ? 'ok' : 'warn');
+  updateMotionListUI();
 }
 
-function playMotion(index, loopMode){
+function playMotion(index){
   if(!motionClips.length || !mixer) return;
   const entry = motionClips[index];
   if(currentAction){ currentAction.stop(); }
   currentAction = mixer.clipAction(entry.clip);
   currentAction.reset();
-  const isOnce = loopMode === 'once';
-  currentAction.setLoop(isOnce ? THREE.LoopOnce : THREE.LoopRepeat);
-  currentAction.clampWhenFinished = isOnce;
+  currentAction.setLoop(repeatMode ? THREE.LoopRepeat : THREE.LoopOnce);
+  currentAction.clampWhenFinished = !repeatMode;
   currentAction.play();
   lastMotionIndex = index;
-  document.getElementById('btnMotion').classList.add('on');
-  document.getElementById('btnMotion').textContent = '⏸ モーション停止';
+  updatePlayPauseButton();
+  updateMotionListUI();
   log(`再生: ${entry.name}`, 'ok');
 }
 
@@ -425,22 +425,132 @@ function playRandomMotion(){
   if(motionClips.length > 1){
     do{ idx = Math.floor(Math.random() * motionClips.length); }while(idx === lastMotionIndex);
   }
-  playMotion(idx, 'once');
+  playMotion(idx);
 }
+
+function playNextSequential(){
+  if(!motionClips.length) return;
+  playMotion((lastMotionIndex + 1) % motionClips.length);
+}
+
+function onMotionFinished(){
+  if(repeatMode || !motionClips.length) return;
+  if(randomPlayback) playRandomMotion();
+  else playNextSequential();
+}
+
+function updatePlayPauseButton(){
+  const btn = document.getElementById('btnMotion');
+  if(currentAction && currentAction.isRunning() && !currentAction.paused){
+    btn.textContent = '⏸';
+    btn.classList.add('on');
+  }else{
+    btn.textContent = '▶';
+    btn.classList.remove('on');
+  }
+}
+
+document.getElementById('btnMotion').addEventListener('click', () => {
+  if(!currentAction) return;
+  if(currentAction.isRunning() && !currentAction.paused){
+    currentAction.paused = true;
+  }else{
+    currentAction.paused = false;
+    if(!currentAction.isRunning()) currentAction.play();
+  }
+  updatePlayPauseButton();
+});
 
 document.getElementById('btnRandom').addEventListener('click', () => {
   randomPlayback = !randomPlayback;
   const btn = document.getElementById('btnRandom');
   btn.classList.toggle('on', randomPlayback);
-  btn.textContent = `🔀 ランダム再生:${randomPlayback ? 'ON' : 'OFF'}`;
-  if(randomPlayback && motionClips.length > 1) playRandomMotion();
+  btn.textContent = `🔀 ランダム:${randomPlayback ? 'ON' : 'OFF'}`;
   log(`ランダム再生: ${randomPlayback ? 'ON' : 'OFF'}`, 'ok');
 });
 
-document.getElementById('btnNext').addEventListener('click', () => {
-  if(!motionClips.length) return;
-  if(randomPlayback){ playRandomMotion(); }
-  else{ playMotion((lastMotionIndex + 1) % motionClips.length, 'once'); }
+document.getElementById('btnRepeat').addEventListener('click', () => {
+  repeatMode = !repeatMode;
+  const btn = document.getElementById('btnRepeat');
+  btn.classList.toggle('on', repeatMode);
+  btn.textContent = `🔁 リピート:${repeatMode ? 'ON' : 'OFF'}`;
+  if(currentAction){
+    currentAction.setLoop(repeatMode ? THREE.LoopRepeat : THREE.LoopOnce);
+    currentAction.clampWhenFinished = !repeatMode;
+  }
+  log(`リピート再生: ${repeatMode ? 'ON' : 'OFF'}`, 'ok');
+});
+
+document.getElementById('btnAddMotion').addEventListener('click', () => {
+  document.getElementById('vrmaFile').click();
+});
+
+document.getElementById('vrmaFile').addEventListener('change', async (e) => {
+  const files = Array.from(e.target.files || []);
+  e.target.value = ''; // 同じファイルを連続追加できるようリセット
+  for(const file of files){
+    const url = URL.createObjectURL(file);
+    try{
+      const entry = await loadVRMA(url, file.name);
+      motionClips.push(entry);
+      log(`モーションリストに追加: ${file.name}`, 'ok');
+    }catch(err){ /* エラーはloadVRMA内でログ済み */ }
+  }
+  updateMotionListUI();
+  if(!currentAction && motionClips.length){
+    if(randomPlayback) playRandomMotion(); else playMotion(0);
+  }
+});
+
+function removeMotion(idx){
+  const removed = motionClips.splice(idx, 1)[0];
+  if(!removed) return;
+  log(`モーションを削除しました: ${removed.name}`);
+  if(idx === lastMotionIndex){
+    if(currentAction){ currentAction.stop(); currentAction = null; }
+    lastMotionIndex = -1;
+    if(motionClips.length){
+      if(randomPlayback) playRandomMotion(); else playMotion(0);
+    }else{
+      updatePlayPauseButton();
+    }
+  }else if(idx < lastMotionIndex){
+    lastMotionIndex -= 1;
+  }
+  updateMotionListUI();
+}
+
+function updateMotionListUI(){
+  const container = document.getElementById('motionListItems');
+  if(!container) return;
+  container.innerHTML = '';
+  if(!motionClips.length){
+    const empty = document.createElement('div');
+    empty.className = 'motion-empty';
+    empty.textContent = 'モーションがありません。➕ 追加 から.vrmaファイルを追加してください';
+    container.appendChild(empty);
+    return;
+  }
+  motionClips.forEach((entry, idx) => {
+    const row = document.createElement('div');
+    row.className = 'motion-item' + (idx === lastMotionIndex ? ' playing' : '');
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'motion-name';
+    nameSpan.textContent = (idx === lastMotionIndex ? '▶ ' : '') + entry.name;
+    nameSpan.addEventListener('click', () => playMotion(idx));
+    const delBtn = document.createElement('button');
+    delBtn.textContent = '🗑';
+    delBtn.addEventListener('click', (ev) => { ev.stopPropagation(); removeMotion(idx); });
+    row.appendChild(nameSpan);
+    row.appendChild(delBtn);
+    container.appendChild(row);
+  });
+}
+
+document.getElementById('btnMotionList').addEventListener('click', () => {
+  const panel = document.getElementById('motionListPanel');
+  panel.classList.toggle('hidden');
+  if(!panel.classList.contains('hidden')) updateMotionListUI();
 });
 
 // 起動時にデフォルトのVRMとモーションリスト(VRMA_01〜07)を自動読み込みし、ランダム再生を開始
@@ -453,6 +563,7 @@ document.getElementById('btnNext').addEventListener('click', () => {
     log('デフォルトアセットの自動読込に失敗しました。AliciaSolid.vrm と VRMA_01〜07.vrma を index.html と同じフォルダに配置してください', 'warn');
   }
 })();
+
 
 /* ---------------- カメラ映像 & 顔トラッキング ---------------- */
 const video = document.getElementById('cam');
