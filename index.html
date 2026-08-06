@@ -127,6 +127,7 @@
     <div class="slider-row"><label>画面-モデル距離</label><input type="range" id="screenZ" min="0.1" max="1.5" step="0.05" value="0.4"><span id="screenZV">0.40</span></div>
     <div class="slider-row"><label>目との距離(cm)</label><input type="range" id="eyeDistCm" min="15" max="80" step="1" value="40"><span id="eyeDistCmV">40</span></div>
     <div class="slider-row"><label>左右cm換算</label><input type="range" id="cmRange" min="10" max="120" step="1" value="60"><span id="cmRangeV">60</span></div>
+    <div class="slider-row"><label>テクスチャ上限</label><input type="range" id="texBudget" min="50" max="500" step="10" value="200"><span id="texBudgetV">200</span>MB</div>
   </div>
   <div id="log" class="hidden"></div>
 </div>
@@ -228,28 +229,102 @@ vrmLoader.register((parser) => new VRMLoaderPlugin(parser));
 const vrmaLoader = new GLTFLoader();
 vrmaLoader.register((parser) => new VRMAnimationLoaderPlugin(parser));
 
+/* GLB内のテクスチャ解像度を、WebGLへ渡す前に軽量に見積もる。
+   createImageBitmapはCPU側デコードのみでGPUテクスチャは作らないため、
+   ここで危険と判定すれば「実際にcrashする読み込み」自体を回避できる。 */
+async function inspectGlbTextureMemory(arrayBuffer){
+  if(arrayBuffer.byteLength < 12) return null;
+  const dv = new DataView(arrayBuffer);
+  const magic = String.fromCharCode(...new Uint8Array(arrayBuffer, 0, 4));
+  if(magic !== 'glTF') return null; // バイナリglTF(.vrm/.glb)以外は判定対象外
+
+  let offset = 12;
+  let jsonObj = null, binOffset = -1, binLength = 0;
+  while(offset + 8 <= arrayBuffer.byteLength){
+    const chunkLength = dv.getUint32(offset, true);
+    const chunkTypeStr = String.fromCharCode(...new Uint8Array(arrayBuffer, offset + 4, 4));
+    const dataStart = offset + 8;
+    if(chunkTypeStr === 'JSON'){
+      jsonObj = JSON.parse(new TextDecoder('utf-8').decode(new Uint8Array(arrayBuffer, dataStart, chunkLength)));
+    }else if(chunkTypeStr.startsWith('BIN')){
+      binOffset = dataStart;
+      binLength = chunkLength;
+    }
+    offset = dataStart + chunkLength;
+  }
+  if(!jsonObj || binOffset < 0) return null;
+
+  const images = jsonObj.images || [];
+  const bufferViews = jsonObj.bufferViews || [];
+  let totalRawBytes = 0, maxDim = 0, decoded = 0;
+  for(const img of images){
+    if(img.bufferView === undefined || !bufferViews[img.bufferView]) continue;
+    const bv = bufferViews[img.bufferView];
+    const start = binOffset + (bv.byteOffset || 0);
+    const len = bv.byteLength;
+    try{
+      const blob = new Blob([arrayBuffer.slice(start, start + len)], { type: img.mimeType || 'image/png' });
+      const bitmap = await createImageBitmap(blob);
+      totalRawBytes += bitmap.width * bitmap.height * 4;
+      maxDim = Math.max(maxDim, bitmap.width, bitmap.height);
+      decoded++;
+      if(bitmap.close) bitmap.close();
+    }catch(e){ /* デコードできない画像はスキップ(判定には含めない) */ }
+  }
+  const estimatedMB = (totalRawBytes * 1.33) / 1e6; // mipmap分を概算で加算
+  return { estimatedMB, maxDim, textureCount: decoded };
+}
+
 function loadVRM(url, label){
-  return new Promise((resolve, reject) => {
+  return (async () => {
     log(`VRM読込中: ${label}`);
-    vrmLoader.load(url, (gltf) => {
-      const vrm = gltf.userData.vrm;
-      if(currentVRM){ scene.remove(currentVRM.scene); }
-      currentVRM = vrm;
-      scene.add(vrm.scene);
-      // VRM0.x モデルは正面が-Z向きなので、+Z向き(VRM1.0基準)に揃える
-      if(vrm.meta && vrm.meta.metaVersion === '0'){
-        VRMUtils.rotateVRM0(vrm);
+    let arrayBuffer;
+    try{
+      const res = await fetch(url);
+      if(!res.ok) throw new Error(`HTTP ${res.status}`);
+      arrayBuffer = await res.arrayBuffer();
+    }catch(err){
+      log(`VRM取得エラー(${label}): ${err.message || err}`, 'err');
+      throw err;
+    }
+
+    try{
+      const info = await inspectGlbTextureMemory(arrayBuffer);
+      if(info && info.textureCount > 0){
+        log(`テクスチャ事前チェック: ${info.textureCount}枚 / 最大${info.maxDim}px / 推定GPUメモリ約${info.estimatedMB.toFixed(0)}MB`);
+        if(info.estimatedMB > params.texBudgetMB){
+          const msg = `⚠ テクスチャの推定GPUメモリ約${info.estimatedMB.toFixed(0)}MBが上限${params.texBudgetMB}MBを超えています。クラッシュ回避のため読み込みを中止しました(${label})。テクスチャを2048px以下に縮小してから再度お試しください`;
+          log(msg, 'err');
+          throw new Error('texture_budget_exceeded');
+        }
       }
-      mixer = new THREE.AnimationMixer(vrm.scene);
-      mixer.addEventListener('finished', (e) => {
-        if(randomPlayback && e.action === currentAction) playRandomMotion();
-      });
-      currentAction = null;
-      document.getElementById('centerHint').style.display = 'none';
-      log(`VRM読込完了: ${label}`, 'ok');
-      resolve(vrm);
-    }, undefined, (err) => { log(`VRM読込エラー(${label}): ${err.message || err}`, 'err'); reject(err); });
-  });
+    }catch(err){
+      if(err.message === 'texture_budget_exceeded') throw err;
+      log(`テクスチャ事前チェックをスキップして読み込みを継続します: ${err.message || err}`, 'warn');
+    }
+
+    const path = THREE.LoaderUtils.extractUrlBase(url);
+    return new Promise((resolve, reject) => {
+      vrmLoader.parse(arrayBuffer, path, (gltf) => {
+        const vrm = gltf.userData.vrm;
+        if(currentVRM){ scene.remove(currentVRM.scene); }
+        currentVRM = vrm;
+        scene.add(vrm.scene);
+        // VRM0.x モデルは正面が-Z向きなので、+Z向き(VRM1.0基準)に揃える
+        if(vrm.meta && vrm.meta.metaVersion === '0'){
+          VRMUtils.rotateVRM0(vrm);
+        }
+        mixer = new THREE.AnimationMixer(vrm.scene);
+        mixer.addEventListener('finished', (e) => {
+          if(randomPlayback && e.action === currentAction) playRandomMotion();
+        });
+        currentAction = null;
+        document.getElementById('centerHint').style.display = 'none';
+        log(`VRM読込完了: ${label}`, 'ok');
+        resolve(vrm);
+      }, (err) => { log(`VRM読込エラー(${label}): ${err.message || err}`, 'err'); reject(err); });
+    });
+  })();
 }
 
 function loadVRMA(url, label){
@@ -457,7 +532,8 @@ let calib = { x:0, y:0, width:0.28 };
 const params = {
   sxy: 1.0, sz: 1.0, baseDist: 2.2, lookY: 1.0, smooth: 0.25, flip: 0,
   gsens: 1.0, gflip: 0,
-  offAxis: false, screenZ: 0.4, eyeDistCm: 40, cmRange: 60
+  offAxis: false, screenZ: 0.4, eyeDistCm: 40, cmRange: 60,
+  texBudgetMB: 200
 };
 
 /* ---------------- 画面サイズ校正(オンスクリーン) ---------------- */
@@ -735,6 +811,7 @@ bindSlider('gflip','gflip');
 bindSlider('screenZ','screenZ', v=>v.toFixed(2));
 bindSlider('eyeDistCm','eyeDistCm', v=>v.toFixed(0));
 bindSlider('cmRange','cmRange', v=>v.toFixed(0));
+bindSlider('texBudget','texBudgetMB', v=>v.toFixed(0));
 
 document.getElementById('btnSliders').addEventListener('click', () => {
   document.getElementById('sliders').classList.toggle('hidden');
