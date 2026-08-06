@@ -871,7 +871,7 @@ function updateSmoothing(){
   smoothed.width += (raw.width - smoothed.width) * a;
 }
 
-document.getElementById('btnCalib').addEventListener('click', () => {
+function performCenterCalibration(){
   calib = { x: smoothed.x, y: smoothed.y, width: smoothed.width };
   let msg = `中央校正しました (x:${calib.x.toFixed(2)} y:${calib.y.toFixed(2)} w:${calib.width.toFixed(2)})`;
   if(gyroEnabled && gyroRaw.has){
@@ -879,7 +879,8 @@ document.getElementById('btnCalib').addEventListener('click', () => {
     msg += ` / ジャイロ基準(beta:${gyroBaseline.beta.toFixed(1)} gamma:${gyroBaseline.gamma.toFixed(1)})`;
   }
   log(msg, 'ok');
-});
+}
+document.getElementById('btnCalib').addEventListener('click', performCenterCalibration);
 
 /* ---------------- カメラ視点更新（覗き窓効果） ---------------- */
 function updateOffAxisFromHead(totalDx, totalDy, depthRatio){
@@ -1019,6 +1020,104 @@ document.addEventListener('webkitfullscreenchange', onFullscreenChange);
 document.getElementById('canvas-container').addEventListener('pointerdown', () => {
   if(document.body.classList.contains('fs-active')) showControlsTemporarily();
 });
+
+/* ---------------- 画面ジェスチャー操作 ---------------- */
+// ダブルタップ:中央校正 / ピンチ:視点距離調整 / 縦スワイプ:視線先高さ調整
+const gestureEl = document.getElementById('canvas-container');
+const activePointers = new Map(); // pointerId -> {x,y}
+const clamp = (v, min, max) => Math.min(max, Math.max(min, v));
+
+let pinchStartDist = null;
+let pinchStartBaseDist = null;
+let pinchStartEyeDist = null;
+
+let dragActive = false;
+let dragStartY = 0;
+let dragStartLookY = 0;
+let dragMoved = false;
+
+let lastTapTime = 0;
+let lastTapPos = null;
+
+function pointersArray(){ return Array.from(activePointers.values()); }
+function dist2(a, b){ return Math.hypot(a.x - b.x, a.y - b.y); }
+
+function syncSliderUI(id, value){
+  const input = document.getElementById(id);
+  if(!input) return;
+  input.value = value;
+  input.dispatchEvent(new Event('input'));
+}
+
+gestureEl.addEventListener('pointerdown', (e) => {
+  activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+  if(activePointers.size === 1){
+    dragActive = true;
+    dragMoved = false;
+    dragStartY = e.clientY;
+    dragStartLookY = params.lookY;
+  }else if(activePointers.size === 2){
+    dragActive = false; // 2本指になったら縦スワイプ判定は無効化しピンチへ切替
+    const pts = pointersArray();
+    pinchStartDist = dist2(pts[0], pts[1]);
+    pinchStartBaseDist = params.baseDist;
+    pinchStartEyeDist = params.eyeDistCm;
+  }
+});
+
+gestureEl.addEventListener('pointermove', (e) => {
+  if(!activePointers.has(e.pointerId)) return;
+  activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+  if(activePointers.size === 2 && pinchStartDist){
+    const pts = pointersArray();
+    const d = dist2(pts[0], pts[1]);
+    const ratio = d / pinchStartDist; // >1: 指を広げた(ピンチアウト) → 近づく
+    if(params.offAxis){
+      syncSliderUI('eyeDistCm', clamp(pinchStartEyeDist / ratio, 15, 80));
+    }else{
+      syncSliderUI('baseDist', clamp(pinchStartBaseDist / ratio, 0.5, 5));
+    }
+    return;
+  }
+
+  if(activePointers.size === 1 && dragActive){
+    const dy = e.clientY - dragStartY;
+    if(Math.abs(dy) > 6) dragMoved = true;
+    if(dragMoved){
+      // 上方向スワイプで視線先を高く、下方向スワイプで低く
+      const deltaNorm = -dy / window.innerHeight;
+      syncSliderUI('lookY', clamp(dragStartLookY + deltaNorm * 2.4, 0, 2));
+    }
+  }
+});
+
+function endGesturePointer(e){
+  const wasSingle = activePointers.size === 1;
+  activePointers.delete(e.pointerId);
+
+  if(activePointers.size < 2){ pinchStartDist = null; }
+
+  if(activePointers.size === 0){
+    if(wasSingle && !dragMoved){
+      const now = Date.now();
+      const pos = { x: e.clientX, y: e.clientY };
+      if(lastTapPos && (now - lastTapTime) < 350 && dist2(pos, lastTapPos) < 40){
+        performCenterCalibration();
+        lastTapTime = 0;
+        lastTapPos = null;
+      }else{
+        lastTapTime = now;
+        lastTapPos = pos;
+      }
+    }
+    dragActive = false;
+    dragMoved = false;
+  }
+}
+gestureEl.addEventListener('pointerup', endGesturePointer);
+gestureEl.addEventListener('pointercancel', endGesturePointer);
 
 /* ---------------- メインループ ---------------- */
 function animate(){
