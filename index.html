@@ -690,6 +690,50 @@ const params = {
   texBudgetMB: 200
 };
 
+/* ---------------- 調整値の保存/復元(localStorage) ---------------- */
+const PARAMS_STORAGE_KEY = 'vrmFaceTrackingViewer.params';
+
+function saveParamsToStorage(){
+  try{
+    localStorage.setItem(PARAMS_STORAGE_KEY, JSON.stringify(params));
+  }catch(e){ /* 保存できない環境では無視 */ }
+}
+
+function loadParamsFromStorage(){
+  try{
+    const raw = localStorage.getItem(PARAMS_STORAGE_KEY);
+    if(!raw) return false;
+    const saved = JSON.parse(raw);
+    for(const key in saved){
+      if(key in params) params[key] = saved[key];
+    }
+    return true;
+  }catch(e){
+    return false;
+  }
+}
+
+// id(HTML input要素)とparamsのキーの対応表。texBudgetのみid≠keyなので明示。
+const SLIDER_BINDINGS = [
+  { id:'sxy', key:'sxy' }, { id:'sz', key:'sz' },
+  { id:'baseDist', key:'baseDist' }, { id:'lookY', key:'lookY' },
+  { id:'smooth', key:'smooth' }, { id:'flip', key:'flip' },
+  { id:'gsens', key:'gsens' }, { id:'gflip', key:'gflip' },
+  { id:'screenZ', key:'screenZ' }, { id:'eyeDistCm', key:'eyeDistCm' },
+  { id:'cmRange', key:'cmRange' }, { id:'texBudget', key:'texBudgetMB' }
+];
+
+function applyParamsToUI(){
+  SLIDER_BINDINGS.forEach(({ id, key }) => {
+    const input = document.getElementById(id);
+    if(!input) return;
+    input.value = params[key];
+    input.dispatchEvent(new Event('input'));
+  });
+  const offAxisBtn = document.getElementById('btnOffAxis');
+  if(offAxisBtn) offAxisBtn.classList.toggle('on', params.offAxis);
+}
+
 /* ---------------- 画面サイズ校正(オンスクリーン) ---------------- */
 // pxPerCm 未校正時は 96dpi 相当を仮の初期値として使う(端末により誤差あり)
 let pxPerCm = 96 / 2.54;
@@ -753,6 +797,7 @@ document.getElementById('btnOffAxis').addEventListener('click', () => {
     camera.matrixAutoUpdate = true;
     camera.updateProjectionMatrix();
   }
+  saveParamsToStorage();
   log(`本格off-axisモード: ${params.offAxis ? 'ON' : 'OFF'}`, 'ok');
 });
 
@@ -953,6 +998,7 @@ function bindSlider(id, key, fmt = v=>v){
   input.addEventListener('input', () => {
     params[key] = parseFloat(input.value);
     out.textContent = (key==='flip' || key==='gflip') ? (params[key] ? 'on' : 'off') : fmt(params[key]);
+    saveParamsToStorage();
   });
 }
 bindSlider('sxy','sxy', v=>v.toFixed(2));
@@ -967,6 +1013,12 @@ bindSlider('screenZ','screenZ', v=>v.toFixed(2));
 bindSlider('eyeDistCm','eyeDistCm', v=>v.toFixed(0));
 bindSlider('cmRange','cmRange', v=>v.toFixed(0));
 bindSlider('texBudget','texBudgetMB', v=>v.toFixed(0));
+
+// 保存済みの調整値があれば復元してUIに反映
+if(loadParamsFromStorage()){
+  applyParamsToUI();
+  log('前回の調整値を復元しました', 'ok');
+}
 
 document.getElementById('btnSliders').addEventListener('click', () => {
   document.getElementById('sliders').classList.toggle('hidden');
@@ -1086,8 +1138,8 @@ gestureEl.addEventListener('pointermove', (e) => {
     const dy = e.clientY - dragStartY;
     if(Math.abs(dy) > 6) dragMoved = true;
     if(dragMoved){
-      // 上方向スワイプで視線先を高く、下方向スワイプで低く
-      const deltaNorm = -dy / window.innerHeight;
+      // 上方向スワイプで視線先を低く、下方向スワイプで高く(反転済み)
+      const deltaNorm = dy / window.innerHeight;
       syncSliderUI('lookY', clamp(dragStartLookY + deltaNorm * 2.4, 0, 2));
     }
   }
