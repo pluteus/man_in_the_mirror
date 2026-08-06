@@ -1027,6 +1027,37 @@ document.getElementById('btnLog').addEventListener('click', () => {
   document.getElementById('log').classList.toggle('hidden');
 });
 
+/* ---------------- 枠外タップで閉じる ---------------- */
+const dismissiblePanels = [
+  {
+    panel: document.getElementById('centerHint'),
+    isVisible: (el) => el.style.display !== 'none',
+    hide: (el) => { el.style.display = 'none'; },
+    exclude: []
+  },
+  {
+    panel: document.getElementById('motionListPanel'),
+    isVisible: (el) => !el.classList.contains('hidden'),
+    hide: (el) => { el.classList.add('hidden'); },
+    exclude: [document.getElementById('btnMotionList')]
+  },
+  {
+    panel: document.getElementById('sliders'),
+    isVisible: (el) => !el.classList.contains('hidden'),
+    hide: (el) => { el.classList.add('hidden'); },
+    exclude: [document.getElementById('btnSliders')]
+  }
+];
+
+document.addEventListener('pointerdown', (e) => {
+  dismissiblePanels.forEach(({ panel, isVisible, hide, exclude }) => {
+    if(!panel || !isVisible(panel)) return;
+    if(panel.contains(e.target)) return;
+    if(exclude.some(el => el && el.contains(e.target))) return;
+    hide(panel);
+  });
+});
+
 /* ---------------- フルスクリーン ---------------- */
 function getFsElement(){ return document.fullscreenElement || document.webkitFullscreenElement || null; }
 
