@@ -41,6 +41,12 @@
   button.on{ border-color:var(--accent); color:var(--accent); }
   input[type=file]{ display:none; }
 
+  /* 各パネル右上の×閉じるボタン */
+  .panel-close-btn{ position:absolute; top:6px; right:6px; width:26px; height:26px; padding:0;
+    display:flex; align-items:center; justify-content:center; border-radius:50%;
+    font-size:15px; line-height:1; z-index:6; }
+  .toggle-btn{ flex:1; }
+
   /* フルスクリーン中はUIとカメラ表示を隠す。タップで数秒だけ再表示 */
   body.fs-active #topbar,
   body.fs-active #bottomPanel,
@@ -56,7 +62,7 @@
 
   #bottomPanel{ position:fixed; left:10px; right:10px; bottom:calc(env(safe-area-inset-bottom,0px) + 10px);
     z-index:20; display:flex; flex-direction:column; gap:6px; }
-  #sliders{ background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:8px 12px;
+  #sliders{ position:relative; background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:34px 12px 8px;
     backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); font-size:11px; color:var(--text-dim); }
   #sliders.hidden{ display:none; }
   .slider-row{ display:flex; align-items:center; gap:8px; margin:4px 0; }
@@ -70,7 +76,7 @@
     backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px);
     display:flex; flex-direction:column; overflow:hidden; }
   #motionListPanel.hidden{ display:none; }
-  .motion-controls{ display:flex; gap:6px; flex-wrap:wrap; padding:8px 8px 6px; border-bottom:1px solid var(--border); }
+  .motion-controls{ display:flex; gap:6px; flex-wrap:wrap; padding:8px 34px 6px 8px; border-bottom:1px solid var(--border); }
   .motion-controls button{ flex:1; min-width:0; padding:7px 4px; font-size:11px; }
   .motion-progress-row{ padding:6px 10px 8px; border-bottom:1px solid var(--border); }
   .motion-progress-row input[type=range]{ width:100%; accent-color:var(--accent); display:block; }
@@ -84,7 +90,7 @@
   .motion-item button{ padding:4px 8px; font-size:11px; flex-shrink:0; }
   .motion-empty{ padding:10px 4px; color:var(--text-dim); font-size:11.5px; line-height:1.5; }
 
-  #log{ background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:8px 10px;
+  #log{ position:relative; background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:34px 10px 8px;
     max-height:110px; overflow-y:auto; font-size:10.5px; font-family:ui-monospace,Menlo,monospace;
     color:var(--text-dim); backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); }
   #log.hidden{ display:none; }
@@ -92,7 +98,7 @@
   #log .ok{ color:var(--ok); } #log .warn{ color:var(--warn); } #log .err{ color:var(--err); }
 
   #centerHint{ position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); z-index:30;
-    background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:16px 20px;
+    background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:34px 20px 16px;
     font-size:13px; text-align:center; line-height:1.6; backdrop-filter:blur(8px); max-width:80%; }
   #centerHint b{ color:var(--accent); }
 
@@ -135,6 +141,7 @@
 </div>
 
 <div id="motionListPanel" class="hidden">
+  <button class="panel-close-btn" id="btnCloseMotionList" aria-label="閉じる">×</button>
   <div class="motion-controls">
     <button id="btnMotion">▶</button>
     <button id="btnRandom" class="on">🔀 ランダム:ON</button>
@@ -149,6 +156,7 @@
 
 <div id="bottomPanel">
   <div id="sliders" class="hidden">
+    <button class="panel-close-btn" id="btnCloseSliders" aria-label="閉じる">×</button>
     <div class="slider-row"><label>左右感度</label><input type="range" id="sxy" min="0" max="3" step="0.05" value="1"><span id="sxyV">1.0</span></div>
     <div class="slider-row">
       <label>奥行き感度</label><input type="range" id="sz" min="0" max="3" step="0.05" value="1"><span id="szV">1.0</span>
@@ -156,19 +164,22 @@
     <div class="slider-row"><label>視点距離</label><input type="range" id="baseDist" min="0.5" max="5" step="0.1" value="2.2"><span id="baseDistV">2.2</span></div>
     <div class="slider-row"><label>視線先高さ</label><input type="range" id="lookY" min="0" max="2" step="0.05" value="1.0"><span id="lookYV">1.0</span></div>
     <div class="slider-row"><label>スムージング</label><input type="range" id="smooth" min="0.05" max="0.9" step="0.05" value="0.25"><span id="smoothV">0.25</span></div>
-    <div class="slider-row"><label>ミラー反転</label><input type="range" id="flip" min="0" max="1" step="1" value="0"><span id="flipV">off</span></div>
+    <div class="slider-row"><label>ミラー反転</label><button id="flipToggle" class="toggle-btn">OFF</button></div>
     <div class="slider-row"><label>ジャイロ感度</label><input type="range" id="gsens" min="0" max="3" step="0.05" value="1"><span id="gsensV">1.0</span></div>
-    <div class="slider-row"><label>ジャイロ反転</label><input type="range" id="gflip" min="0" max="1" step="1" value="0"><span id="gflipV">off</span></div>
+    <div class="slider-row"><label>ジャイロ反転</label><button id="gflipToggle" class="toggle-btn">OFF</button></div>
     <div style="border-top:1px solid var(--border); margin:6px 0 4px; padding-top:4px; color:var(--accent); font-size:10.5px;">— 本格off-axisモード用 —</div>
     <div class="slider-row"><label>画面-モデル距離</label><input type="range" id="screenZ" min="0.1" max="1.5" step="0.05" value="0.4"><span id="screenZV">0.40</span></div>
     <div class="slider-row"><label>目との距離(cm)</label><input type="range" id="eyeDistCm" min="15" max="80" step="1" value="40"><span id="eyeDistCmV">40</span></div>
     <div class="slider-row"><label>左右cm換算</label><input type="range" id="cmRange" min="10" max="120" step="1" value="60"><span id="cmRangeV">60</span></div>
     <div class="slider-row"><label>テクスチャ上限</label><input type="range" id="texBudget" min="50" max="500" step="10" value="200"><span id="texBudgetV">200</span>MB</div>
   </div>
-  <div id="log" class="hidden"></div>
+  <div id="log" class="hidden">
+    <button class="panel-close-btn" id="btnCloseLog" aria-label="閉じる">×</button>
+  </div>
 </div>
 
 <div id="centerHint">
+  <button class="panel-close-btn" id="btnCloseHint" aria-label="閉じる">×</button>
   <b>顔トラッキングVRMビューア</b><br>
   起動時に AliciaSolid.vrm と VRMA_01〜07.vrma を自動読み込みし、ランダムにモーション再生します<br>
   (同フォルダに配置されている必要があります。無い場合は 📂 / 🎞モーションリスト内の➕追加 から手動選択してください)<br><br>
@@ -714,11 +725,12 @@ function loadParamsFromStorage(){
 }
 
 // id(HTML input要素)とparamsのキーの対応表。texBudgetのみid≠keyなので明示。
+// flip/gflipはトグルボタン化したためここには含めず、applyToggleUI()で個別に同期する。
 const SLIDER_BINDINGS = [
   { id:'sxy', key:'sxy' }, { id:'sz', key:'sz' },
   { id:'baseDist', key:'baseDist' }, { id:'lookY', key:'lookY' },
-  { id:'smooth', key:'smooth' }, { id:'flip', key:'flip' },
-  { id:'gsens', key:'gsens' }, { id:'gflip', key:'gflip' },
+  { id:'smooth', key:'smooth' },
+  { id:'gsens', key:'gsens' },
   { id:'screenZ', key:'screenZ' }, { id:'eyeDistCm', key:'eyeDistCm' },
   { id:'cmRange', key:'cmRange' }, { id:'texBudget', key:'texBudgetMB' }
 ];
@@ -732,6 +744,8 @@ function applyParamsToUI(){
   });
   const offAxisBtn = document.getElementById('btnOffAxis');
   if(offAxisBtn) offAxisBtn.classList.toggle('on', params.offAxis);
+  if(typeof applyFlipToggleUI === 'function') applyFlipToggleUI();
+  if(typeof applyGflipToggleUI === 'function') applyGflipToggleUI();
 }
 
 /* ---------------- 画面サイズ校正(オンスクリーン) ---------------- */
@@ -997,18 +1011,35 @@ function bindSlider(id, key, fmt = v=>v){
   const out = document.getElementById(id+'V');
   input.addEventListener('input', () => {
     params[key] = parseFloat(input.value);
-    out.textContent = (key==='flip' || key==='gflip') ? (params[key] ? 'on' : 'off') : fmt(params[key]);
+    out.textContent = fmt(params[key]);
     saveParamsToStorage();
   });
 }
+
+// ON/OFFトグルボタン(0/1をparamsに保持)。戻り値は復元時に呼べる同期用関数。
+function bindToggle(id, key){
+  const btn = document.getElementById(id);
+  const apply = () => {
+    btn.classList.toggle('on', !!params[key]);
+    btn.textContent = params[key] ? 'ON' : 'OFF';
+  };
+  btn.addEventListener('click', () => {
+    params[key] = params[key] ? 0 : 1;
+    apply();
+    saveParamsToStorage();
+  });
+  apply();
+  return apply;
+}
+
 bindSlider('sxy','sxy', v=>v.toFixed(2));
 bindSlider('sz','sz', v=>v.toFixed(2));
 bindSlider('baseDist','baseDist', v=>v.toFixed(1));
 bindSlider('lookY','lookY', v=>v.toFixed(2));
 bindSlider('smooth','smooth', v=>v.toFixed(2));
-bindSlider('flip','flip');
+const applyFlipToggleUI = bindToggle('flipToggle','flip');
 bindSlider('gsens','gsens', v=>v.toFixed(2));
-bindSlider('gflip','gflip');
+const applyGflipToggleUI = bindToggle('gflipToggle','gflip');
 bindSlider('screenZ','screenZ', v=>v.toFixed(2));
 bindSlider('eyeDistCm','eyeDistCm', v=>v.toFixed(0));
 bindSlider('cmRange','cmRange', v=>v.toFixed(0));
@@ -1056,6 +1087,20 @@ document.addEventListener('pointerdown', (e) => {
     if(exclude.some(el => el && el.contains(e.target))) return;
     hide(panel);
   });
+});
+
+// 右上×ボタン:各パネルを確実に閉じる
+document.getElementById('btnCloseHint').addEventListener('click', () => {
+  document.getElementById('centerHint').style.display = 'none';
+});
+document.getElementById('btnCloseMotionList').addEventListener('click', () => {
+  document.getElementById('motionListPanel').classList.add('hidden');
+});
+document.getElementById('btnCloseSliders').addEventListener('click', () => {
+  document.getElementById('sliders').classList.add('hidden');
+});
+document.getElementById('btnCloseLog').addEventListener('click', () => {
+  document.getElementById('log').classList.add('hidden');
 });
 
 /* ---------------- フルスクリーン ---------------- */
