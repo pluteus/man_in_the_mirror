@@ -51,11 +51,13 @@
   body.fs-active #topbar,
   body.fs-active #bottomPanel,
   body.fs-active #motionListPanel,
+  body.fs-active #bgmListPanel,
   body.fs-active #btnFullscreen,
   body.fs-active #camPreview{ opacity:0; pointer-events:none; transition:opacity .3s; }
   body.fs-active.show-controls #topbar,
   body.fs-active.show-controls #bottomPanel,
   body.fs-active.show-controls #motionListPanel,
+  body.fs-active.show-controls #bgmListPanel,
   body.fs-active.show-controls #btnFullscreen{ opacity:1; pointer-events:auto; }
   /* カメラ表示はプライバシー配慮のためフルスクリーン中は常に非表示のまま */
   body.fs-active.show-controls #camPreview{ opacity:0; pointer-events:none; }
@@ -89,6 +91,14 @@
     white-space:nowrap; cursor:pointer; }
   .motion-item button{ padding:4px 8px; font-size:11px; flex-shrink:0; }
   .motion-empty{ padding:10px 4px; color:var(--text-dim); font-size:11.5px; line-height:1.5; }
+
+  #bgmListPanel{ position:fixed; top:calc(env(safe-area-inset-top,0px) + 54px); left:280px;
+    width:260px; max-width:calc(100vw - 300px); max-height:50vh; z-index:20;
+    background:var(--panel); border:1px solid var(--border); border-radius:10px;
+    backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px);
+    display:flex; flex-direction:column; overflow:hidden; }
+  #bgmListPanel.hidden{ display:none; }
+  #bgmListItems{ overflow-y:auto; padding:4px 6px; }
 
   #log{ position:relative; background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:34px 10px 8px;
     max-height:110px; overflow-y:auto; font-size:10.5px; font-family:ui-monospace,Menlo,monospace;
@@ -131,6 +141,8 @@
   <button id="btnVroidHub">🌐 VRoid Hub</button>
   <input type="file" id="vrmaFile" accept=".vrma" multiple style="display:none">
   <button id="btnMotionList">🎞 モーションリスト</button>
+  <input type="file" id="bgmFile" accept="audio/*" multiple style="display:none">
+  <button id="btnBgmList">🎵 BGMリスト</button>
   <button id="btnCam">▶ カメラ開始</button>
   <button id="btnCalib">🎯 中央校正</button>
   <button id="btnGyro">🧭 ジャイロ有効化</button>
@@ -154,6 +166,21 @@
   <div id="motionListItems"></div>
 </div>
 
+<div id="bgmListPanel" class="hidden">
+  <button class="panel-close-btn" id="btnCloseBgmList" aria-label="閉じる">×</button>
+  <div class="motion-controls">
+    <button id="btnBgm">▶</button>
+    <button id="btnBgmRandom" class="on">🔀 ランダム:ON</button>
+    <button id="btnBgmRepeat">🔁 リピート:OFF</button>
+    <button id="btnAddBgm">➕ 追加</button>
+  </div>
+  <div class="motion-progress-row">
+    <input type="range" id="bgmProgress" min="0" max="1000" step="1" value="0">
+  </div>
+  <div id="bgmListItems"></div>
+</div>
+<audio id="bgmPlayer" preload="auto"></audio>
+
 <div id="bottomPanel">
   <div id="sliders" class="hidden">
     <button class="panel-close-btn" id="btnCloseSliders" aria-label="閉じる">×</button>
@@ -167,6 +194,7 @@
     <div class="slider-row"><label>ミラー反転</label><button id="flipToggle" class="toggle-btn">OFF</button></div>
     <div class="slider-row"><label>ジャイロ感度</label><input type="range" id="gsens" min="0" max="3" step="0.05" value="1"><span id="gsensV">1.0</span></div>
     <div class="slider-row"><label>ジャイロ反転</label><button id="gflipToggle" class="toggle-btn">OFF</button></div>
+    <div class="slider-row"><label>回転量</label><input type="range" id="modelRotY" min="-180" max="180" step="1" value="0"><span id="modelRotYV">0</span>°</div>
     <div style="border-top:1px solid var(--border); margin:6px 0 4px; padding-top:4px; color:var(--accent); font-size:10.5px;">— 本格off-axisモード用 —</div>
     <div class="slider-row"><label>画面-モデル距離</label><input type="range" id="screenZ" min="0.1" max="1.5" step="0.05" value="0.4"><span id="screenZV">0.40</span></div>
     <div class="slider-row"><label>目との距離(cm)</label><input type="range" id="eyeDistCm" min="15" max="80" step="1" value="40"><span id="eyeDistCmV">40</span></div>
@@ -275,6 +303,7 @@ window.addEventListener('resize', () => {
 
 /* ---------------- VRM / VRMA 読み込み ---------------- */
 let currentVRM = null;
+let baseModelRotY = 0; // VRM読込時の基準向き(回転量スライダーはこれに加算される)
 let mixer = null;
 let currentAction = null;
 const clock = new THREE.Clock();
@@ -370,6 +399,7 @@ function loadVRM(url, label){
         if(vrm.meta && vrm.meta.metaVersion === '0'){
           VRMUtils.rotateVRM0(vrm);
         }
+        baseModelRotY = vrm.scene.rotation.y; // ユーザーの回転量スライダーはこの基準角に加算する
         mixer = new THREE.AnimationMixer(vrm.scene);
         mixer.addEventListener('finished', (e) => {
           if(e.action === currentAction) onMotionFinished();
@@ -618,6 +648,171 @@ document.getElementById('btnMotionList').addEventListener('click', () => {
   }
 })();
 
+/* ---------------- BGMリスト & 再生制御(モーションリストと同様の構成) ---------------- */
+const bgmPlayer = document.getElementById('bgmPlayer');
+let bgmClips = []; // { name, url }
+let lastBgmIndex = -1;
+let bgmRandom = true;
+let bgmRepeat = false;
+let seekingBgm = false;
+
+function playBgm(index){
+  if(!bgmClips.length) return;
+  const entry = bgmClips[index];
+  bgmPlayer.src = entry.url;
+  bgmPlayer.loop = bgmRepeat;
+  bgmPlayer.currentTime = 0;
+  bgmPlayer.play().catch(err => log(`BGM再生エラー(${entry.name}): ${err.message || err}`, 'err'));
+  lastBgmIndex = index;
+  updateBgmPlayPauseButton();
+  updateBgmListUI();
+  log(`BGM再生: ${entry.name}`, 'ok');
+}
+
+function playRandomBgm(){
+  if(!bgmClips.length) return;
+  let idx = 0;
+  if(bgmClips.length > 1){
+    do{ idx = Math.floor(Math.random() * bgmClips.length); }while(idx === lastBgmIndex);
+  }
+  playBgm(idx);
+}
+
+function playNextBgmSequential(){
+  if(!bgmClips.length) return;
+  playBgm((lastBgmIndex + 1) % bgmClips.length);
+}
+
+bgmPlayer.addEventListener('ended', () => {
+  if(bgmRepeat || !bgmClips.length) return;
+  if(bgmRandom) playRandomBgm();
+  else playNextBgmSequential();
+});
+
+function updateBgmPlayPauseButton(){
+  const btn = document.getElementById('btnBgm');
+  if(bgmPlayer.src && !bgmPlayer.paused && !bgmPlayer.ended){
+    btn.textContent = '⏸';
+    btn.classList.add('on');
+  }else{
+    btn.textContent = '▶';
+    btn.classList.remove('on');
+  }
+}
+
+document.getElementById('btnBgm').addEventListener('click', () => {
+  if(!bgmClips.length) return;
+  if(!bgmPlayer.src){ playBgm(lastBgmIndex >= 0 ? lastBgmIndex : 0); return; }
+  if(!bgmPlayer.paused){ bgmPlayer.pause(); }
+  else{ bgmPlayer.play().catch(()=>{}); }
+  updateBgmPlayPauseButton();
+});
+
+document.getElementById('btnBgmRandom').addEventListener('click', () => {
+  bgmRandom = !bgmRandom;
+  const btn = document.getElementById('btnBgmRandom');
+  btn.classList.toggle('on', bgmRandom);
+  btn.textContent = `🔀 ランダム:${bgmRandom ? 'ON' : 'OFF'}`;
+  log(`BGMランダム再生: ${bgmRandom ? 'ON' : 'OFF'}`, 'ok');
+});
+
+document.getElementById('btnBgmRepeat').addEventListener('click', () => {
+  bgmRepeat = !bgmRepeat;
+  const btn = document.getElementById('btnBgmRepeat');
+  btn.classList.toggle('on', bgmRepeat);
+  btn.textContent = `🔁 リピート:${bgmRepeat ? 'ON' : 'OFF'}`;
+  bgmPlayer.loop = bgmRepeat;
+  log(`BGMリピート再生: ${bgmRepeat ? 'ON' : 'OFF'}`, 'ok');
+});
+
+document.getElementById('btnAddBgm').addEventListener('click', () => {
+  document.getElementById('bgmFile').click();
+});
+
+document.getElementById('bgmFile').addEventListener('change', (e) => {
+  const files = Array.from(e.target.files || []);
+  e.target.value = '';
+  for(const file of files){
+    const url = URL.createObjectURL(file);
+    bgmClips.push({ name: file.name, url });
+    log(`BGMリストに追加: ${file.name}`, 'ok');
+  }
+  updateBgmListUI();
+  if(bgmPlayer.paused && bgmClips.length){
+    if(bgmRandom) playRandomBgm(); else playBgm(0);
+  }
+});
+
+function removeBgm(idx){
+  const removed = bgmClips.splice(idx, 1)[0];
+  if(!removed) return;
+  log(`BGMを削除しました: ${removed.name}`);
+  if(idx === lastBgmIndex){
+    bgmPlayer.pause();
+    bgmPlayer.removeAttribute('src');
+    bgmPlayer.load();
+    lastBgmIndex = -1;
+    if(bgmClips.length){
+      if(bgmRandom) playRandomBgm(); else playBgm(0);
+    }else{
+      updateBgmPlayPauseButton();
+    }
+  }else if(idx < lastBgmIndex){
+    lastBgmIndex -= 1;
+  }
+  updateBgmListUI();
+}
+
+function updateBgmListUI(){
+  const container = document.getElementById('bgmListItems');
+  if(!container) return;
+  container.innerHTML = '';
+  if(!bgmClips.length){
+    const empty = document.createElement('div');
+    empty.className = 'motion-empty';
+    empty.textContent = 'BGMがありません。➕ 追加 から音声ファイルを追加してください';
+    container.appendChild(empty);
+    return;
+  }
+  bgmClips.forEach((entry, idx) => {
+    const row = document.createElement('div');
+    row.className = 'motion-item' + (idx === lastBgmIndex ? ' playing' : '');
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'motion-name';
+    nameSpan.textContent = (idx === lastBgmIndex ? '▶ ' : '') + entry.name;
+    nameSpan.addEventListener('click', () => playBgm(idx));
+    const delBtn = document.createElement('button');
+    delBtn.textContent = '🗑';
+    delBtn.addEventListener('click', (ev) => { ev.stopPropagation(); removeBgm(idx); });
+    row.appendChild(nameSpan);
+    row.appendChild(delBtn);
+    container.appendChild(row);
+  });
+}
+
+document.getElementById('btnBgmList').addEventListener('click', () => {
+  const panel = document.getElementById('bgmListPanel');
+  panel.classList.toggle('hidden');
+  if(!panel.classList.contains('hidden')) updateBgmListUI();
+});
+
+/* BGM再生進捗バー */
+const bgmProgressEl = document.getElementById('bgmProgress');
+bgmProgressEl.addEventListener('pointerdown', () => { seekingBgm = true; });
+['pointerup','pointercancel'].forEach(evt => {
+  bgmProgressEl.addEventListener(evt, () => { seekingBgm = false; });
+});
+bgmProgressEl.addEventListener('input', () => {
+  if(!bgmPlayer.duration || !isFinite(bgmPlayer.duration)) return;
+  bgmPlayer.currentTime = (bgmProgressEl.value / 1000) * bgmPlayer.duration;
+});
+
+function updateBgmProgress(){
+  if(seekingBgm) return;
+  if(!bgmPlayer.src || !bgmPlayer.duration || !isFinite(bgmPlayer.duration)){ bgmProgressEl.value = 0; return; }
+  bgmProgressEl.value = Math.round((bgmPlayer.currentTime / bgmPlayer.duration) * 1000);
+}
+
 
 /* ---------------- カメラ映像 & 顔トラッキング ---------------- */
 const video = document.getElementById('cam');
@@ -698,7 +893,7 @@ const params = {
   sxy: 1.0, sz: 1.0, baseDist: 2.2, lookY: 1.0, smooth: 0.25, flip: 0,
   gsens: 1.0, gflip: 0,
   offAxis: false, screenZ: 0.4, eyeDistCm: 40, cmRange: 60,
-  texBudgetMB: 200
+  texBudgetMB: 200, modelRotY: 0
 };
 
 /* ---------------- 調整値の保存/復元(localStorage) ---------------- */
@@ -730,7 +925,7 @@ const SLIDER_BINDINGS = [
   { id:'sxy', key:'sxy' }, { id:'sz', key:'sz' },
   { id:'baseDist', key:'baseDist' }, { id:'lookY', key:'lookY' },
   { id:'smooth', key:'smooth' },
-  { id:'gsens', key:'gsens' },
+  { id:'gsens', key:'gsens' }, { id:'modelRotY', key:'modelRotY' },
   { id:'screenZ', key:'screenZ' }, { id:'eyeDistCm', key:'eyeDistCm' },
   { id:'cmRange', key:'cmRange' }, { id:'texBudget', key:'texBudgetMB' }
 ];
@@ -1040,6 +1235,7 @@ bindSlider('smooth','smooth', v=>v.toFixed(2));
 const applyFlipToggleUI = bindToggle('flipToggle','flip');
 bindSlider('gsens','gsens', v=>v.toFixed(2));
 const applyGflipToggleUI = bindToggle('gflipToggle','gflip');
+bindSlider('modelRotY','modelRotY', v=>v.toFixed(0));
 bindSlider('screenZ','screenZ', v=>v.toFixed(2));
 bindSlider('eyeDistCm','eyeDistCm', v=>v.toFixed(0));
 bindSlider('cmRange','cmRange', v=>v.toFixed(0));
@@ -1160,8 +1356,10 @@ let pinchStartBaseDist = null;
 let pinchStartEyeDist = null;
 
 let dragActive = false;
+let dragStartX = 0;
 let dragStartY = 0;
 let dragStartLookY = 0;
+let dragStartRotY = 0;
 let dragMoved = false;
 
 let lastTapTime = 0;
@@ -1183,10 +1381,12 @@ gestureEl.addEventListener('pointerdown', (e) => {
   if(activePointers.size === 1){
     dragActive = true;
     dragMoved = false;
+    dragStartX = e.clientX;
     dragStartY = e.clientY;
     dragStartLookY = params.lookY;
+    dragStartRotY = params.modelRotY;
   }else if(activePointers.size === 2){
-    dragActive = false; // 2本指になったら縦スワイプ判定は無効化しピンチへ切替
+    dragActive = false; // 2本指になったら1本指ジェスチャー判定は無効化しピンチへ切替
     const pts = pointersArray();
     pinchStartDist = dist2(pts[0], pts[1]);
     pinchStartBaseDist = params.baseDist;
@@ -1211,12 +1411,16 @@ gestureEl.addEventListener('pointermove', (e) => {
   }
 
   if(activePointers.size === 1 && dragActive){
+    const dx = e.clientX - dragStartX;
     const dy = e.clientY - dragStartY;
-    if(Math.abs(dy) > 6) dragMoved = true;
+    if(Math.abs(dy) > 6 || Math.abs(dx) > 6) dragMoved = true;
     if(dragMoved){
       // 上方向スワイプで視線先を低く、下方向スワイプで高く(反転済み)
       const deltaNorm = dy / window.innerHeight;
       syncSliderUI('lookY', clamp(dragStartLookY + deltaNorm * 2.4, 0, 2));
+      // 横スワイプでモデルを体軸(Y軸)中心に左右回転
+      const deltaNormX = dx / window.innerWidth;
+      syncSliderUI('modelRotY', clamp(dragStartRotY + deltaNormX * 360, -180, 180));
     }
   }
 });
@@ -1252,8 +1456,12 @@ function animate(){
   requestAnimationFrame(animate);
   const delta = clock.getDelta();
   if(mixer) mixer.update(delta);
-  if(currentVRM) currentVRM.update(delta);
+  if(currentVRM){
+    currentVRM.update(delta);
+    currentVRM.scene.rotation.y = baseModelRotY + THREE.MathUtils.degToRad(params.modelRotY);
+  }
   updateMotionProgress();
+  updateBgmProgress();
   detectFace();
   updateSmoothing();
   updateGyroSmoothing();
