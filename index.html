@@ -52,12 +52,14 @@
   body.fs-active #bottomPanel,
   body.fs-active #motionListPanel,
   body.fs-active #bgmListPanel,
+  body.fs-active #backgroundListPanel,
   body.fs-active #btnFullscreen,
   body.fs-active #camPreview{ opacity:0; pointer-events:none; transition:opacity .3s; }
   body.fs-active.show-controls #topbar,
   body.fs-active.show-controls #bottomPanel,
   body.fs-active.show-controls #motionListPanel,
   body.fs-active.show-controls #bgmListPanel,
+  body.fs-active.show-controls #backgroundListPanel,
   body.fs-active.show-controls #btnFullscreen{ opacity:1; pointer-events:auto; }
   /* カメラ表示はプライバシー配慮のためフルスクリーン中は常に非表示のまま */
   body.fs-active.show-controls #camPreview{ opacity:0; pointer-events:none; }
@@ -99,6 +101,15 @@
     display:flex; flex-direction:column; overflow:hidden; }
   #bgmListPanel.hidden{ display:none; }
   #bgmListItems{ overflow-y:auto; padding:4px 6px; }
+
+  #backgroundListPanel{ position:fixed; top:calc(env(safe-area-inset-top,0px) + 54px); left:550px;
+    width:260px; max-width:calc(100vw - 570px); max-height:50vh; z-index:20;
+    background:var(--panel); border:1px solid var(--border); border-radius:10px;
+    backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px);
+    display:flex; flex-direction:column; overflow:hidden; }
+  #backgroundListPanel.hidden{ display:none; }
+  #backgroundListItems{ overflow-y:auto; padding:6px 6px 4px; flex:1; }
+  .bg-add-row{ padding:6px 8px; border-top:1px solid var(--border); display:flex; justify-content:flex-end; }
 
   #log{ position:relative; background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:34px 10px 8px;
     max-height:110px; overflow-y:auto; font-size:10.5px; font-family:ui-monospace,Menlo,monospace;
@@ -143,6 +154,8 @@
   <button id="btnMotionList">🎞 モーションリスト</button>
   <input type="file" id="bgmFile" accept="audio/*" multiple style="display:none">
   <button id="btnBgmList">🎵 BGMリスト</button>
+  <input type="file" id="bgGlbFile" accept=".glb,.gltf" multiple style="display:none">
+  <button id="btnBgList">🏞 背景リスト</button>
   <button id="btnCam">▶ カメラ開始</button>
   <button id="btnCalib">🎯 中央校正</button>
   <button id="btnGyro">🧭 ジャイロ有効化</button>
@@ -180,6 +193,14 @@
   <div id="bgmListItems"></div>
 </div>
 <audio id="bgmPlayer" preload="auto"></audio>
+
+<div id="backgroundListPanel" class="hidden">
+  <button class="panel-close-btn" id="btnCloseBgList" aria-label="閉じる">×</button>
+  <div id="backgroundListItems"></div>
+  <div class="bg-add-row">
+    <button id="btnAddBackground">➕ 追加</button>
+  </div>
+</div>
 
 <div id="bottomPanel">
   <div id="sliders" class="hidden">
@@ -813,6 +834,123 @@ function updateBgmProgress(){
   bgmProgressEl.value = Math.round((bgmPlayer.currentTime / bgmPlayer.duration) * 1000);
 }
 
+/* ---------------- 背景リスト(GLB) ---------------- */
+// 「GLM」は一般的な3D形式ではないため、three.js/glTFエコシステムで標準的なGLB(glTFバイナリ)として扱う
+const bgGlbLoader = new GLTFLoader();
+let backgroundClips = []; // { name, object }
+let activeBackgroundIndex = -1;
+
+async function loadBackgroundGlb(url, label){
+  log(`背景読込中: ${label}`);
+  let arrayBuffer;
+  try{
+    const res = await fetch(url);
+    if(!res.ok) throw new Error(`HTTP ${res.status}`);
+    arrayBuffer = await res.arrayBuffer();
+  }catch(err){
+    log(`背景取得エラー(${label}): ${err.message || err}`, 'err');
+    throw err;
+  }
+
+  try{
+    const info = await inspectGlbTextureMemory(arrayBuffer);
+    if(info && info.textureCount > 0){
+      log(`背景テクスチャ事前チェック: ${info.textureCount}枚 / 最大${info.maxDim}px / 推定GPUメモリ約${info.estimatedMB.toFixed(0)}MB`);
+      if(info.estimatedMB > params.texBudgetMB){
+        const msg = `⚠ 背景のテクスチャ推定GPUメモリ約${info.estimatedMB.toFixed(0)}MBが上限${params.texBudgetMB}MBを超えています。クラッシュ回避のため読み込みを中止しました(${label})`;
+        log(msg, 'err');
+        throw new Error('texture_budget_exceeded');
+      }
+    }
+  }catch(err){
+    if(err.message === 'texture_budget_exceeded') throw err;
+    log(`背景テクスチャ事前チェックをスキップして読み込みを継続します: ${err.message || err}`, 'warn');
+  }
+
+  const path = THREE.LoaderUtils.extractUrlBase(url);
+  return new Promise((resolve, reject) => {
+    bgGlbLoader.parse(arrayBuffer, path, (gltf) => {
+      gltf.scene.visible = false;
+      scene.add(gltf.scene);
+      log(`背景読込完了: ${label}`, 'ok');
+      resolve({ name: label, object: gltf.scene });
+    }, (err) => { log(`背景読込エラー(${label}): ${err.message || err}`, 'err'); reject(err); });
+  });
+}
+
+function setActiveBackground(idx){
+  backgroundClips.forEach((b, i) => { b.object.visible = (i === idx); });
+  activeBackgroundIndex = idx;
+  updateBackgroundListUI();
+  if(idx >= 0) log(`背景を切替: ${backgroundClips[idx].name}`, 'ok');
+}
+
+document.getElementById('btnAddBackground').addEventListener('click', () => {
+  document.getElementById('bgGlbFile').click();
+});
+
+document.getElementById('bgGlbFile').addEventListener('change', async (e) => {
+  const files = Array.from(e.target.files || []);
+  e.target.value = '';
+  for(const file of files){
+    const url = URL.createObjectURL(file);
+    try{
+      const entry = await loadBackgroundGlb(url, file.name);
+      backgroundClips.push(entry);
+      log(`背景リストに追加: ${file.name}`, 'ok');
+      if(activeBackgroundIndex === -1) setActiveBackground(backgroundClips.length - 1);
+    }catch(err){ /* エラーはloadBackgroundGlb内でログ済み */ }
+  }
+  updateBackgroundListUI();
+});
+
+function removeBackground(idx){
+  const removed = backgroundClips.splice(idx, 1)[0];
+  if(!removed) return;
+  scene.remove(removed.object);
+  log(`背景を削除しました: ${removed.name}`);
+  if(idx === activeBackgroundIndex){
+    activeBackgroundIndex = -1;
+    if(backgroundClips.length) setActiveBackground(0);
+  }else if(idx < activeBackgroundIndex){
+    activeBackgroundIndex -= 1;
+  }
+  updateBackgroundListUI();
+}
+
+function updateBackgroundListUI(){
+  const container = document.getElementById('backgroundListItems');
+  if(!container) return;
+  container.innerHTML = '';
+  if(!backgroundClips.length){
+    const empty = document.createElement('div');
+    empty.className = 'motion-empty';
+    empty.textContent = '背景がありません。右下の➕追加からGLBファイルを追加してください';
+    container.appendChild(empty);
+    return;
+  }
+  backgroundClips.forEach((entry, idx) => {
+    const row = document.createElement('div');
+    row.className = 'motion-item' + (idx === activeBackgroundIndex ? ' playing' : '');
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'motion-name';
+    nameSpan.textContent = (idx === activeBackgroundIndex ? '▶ ' : '') + entry.name;
+    nameSpan.addEventListener('click', () => setActiveBackground(idx));
+    const delBtn = document.createElement('button');
+    delBtn.textContent = '🗑';
+    delBtn.addEventListener('click', (ev) => { ev.stopPropagation(); removeBackground(idx); });
+    row.appendChild(nameSpan);
+    row.appendChild(delBtn);
+    container.appendChild(row);
+  });
+}
+
+document.getElementById('btnBgList').addEventListener('click', () => {
+  const panel = document.getElementById('backgroundListPanel');
+  panel.classList.toggle('hidden');
+  if(!panel.classList.contains('hidden')) updateBackgroundListUI();
+});
+
 
 /* ---------------- カメラ映像 & 顔トラッキング ---------------- */
 const video = document.getElementById('cam');
@@ -1127,7 +1265,9 @@ function updateSmoothing(){
 
 function performCenterCalibration(){
   calib = { x: smoothed.x, y: smoothed.y, width: smoothed.width };
-  let msg = `中央校正しました (x:${calib.x.toFixed(2)} y:${calib.y.toFixed(2)} w:${calib.width.toFixed(2)})`;
+  syncSliderUI('lookY', 1);
+  syncSliderUI('modelRotY', 0);
+  let msg = `中央校正しました (x:${calib.x.toFixed(2)} y:${calib.y.toFixed(2)} w:${calib.width.toFixed(2)}) / 視線先高さ・回転量をリセット`;
   if(gyroEnabled && gyroRaw.has){
     gyroBaseline = { beta: gyroSmoothed.beta, gamma: gyroSmoothed.gamma };
     msg += ` / ジャイロ基準(beta:${gyroBaseline.beta.toFixed(1)} gamma:${gyroBaseline.gamma.toFixed(1)})`;
@@ -1269,6 +1409,18 @@ const dismissiblePanels = [
     exclude: [document.getElementById('btnMotionList')]
   },
   {
+    panel: document.getElementById('bgmListPanel'),
+    isVisible: (el) => !el.classList.contains('hidden'),
+    hide: (el) => { el.classList.add('hidden'); },
+    exclude: [document.getElementById('btnBgmList')]
+  },
+  {
+    panel: document.getElementById('backgroundListPanel'),
+    isVisible: (el) => !el.classList.contains('hidden'),
+    hide: (el) => { el.classList.add('hidden'); },
+    exclude: [document.getElementById('btnBgList')]
+  },
+  {
     panel: document.getElementById('sliders'),
     isVisible: (el) => !el.classList.contains('hidden'),
     hide: (el) => { el.classList.add('hidden'); },
@@ -1291,6 +1443,12 @@ document.getElementById('btnCloseHint').addEventListener('click', () => {
 });
 document.getElementById('btnCloseMotionList').addEventListener('click', () => {
   document.getElementById('motionListPanel').classList.add('hidden');
+});
+document.getElementById('btnCloseBgmList').addEventListener('click', () => {
+  document.getElementById('bgmListPanel').classList.add('hidden');
+});
+document.getElementById('btnCloseBgList').addEventListener('click', () => {
+  document.getElementById('backgroundListPanel').classList.add('hidden');
 });
 document.getElementById('btnCloseSliders').addEventListener('click', () => {
   document.getElementById('sliders').classList.add('hidden');
