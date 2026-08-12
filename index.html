@@ -1167,7 +1167,14 @@ async function connectRealtime(){
 
   ws.addEventListener('open', () => {
     const instructions = document.getElementById('realtimeInstructions').value.trim();
-    const setupMsg = { setup: { model: `models/${geminiTokenModel}` } };
+    const setupMsg = {
+      setup: {
+        model: `models/${geminiTokenModel}`,
+        responseModalities: ['AUDIO'],
+        inputAudioTranscription: {},
+        outputAudioTranscription: {}
+      }
+    };
     if(instructions){
       setupMsg.setup.systemInstruction = { parts: [{ text: instructions }] };
     }
