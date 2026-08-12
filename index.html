@@ -1185,9 +1185,19 @@ async function connectRealtime(){
     ws.send(JSON.stringify(setupMsg));
   });
 
-  ws.addEventListener('message', (e) => {
+  ws.addEventListener('message', async (e) => {
+    let text;
     try{
-      const evt = JSON.parse(e.data);
+      if(typeof e.data === 'string'){
+        text = e.data;
+      }else if(e.data instanceof Blob){
+        text = await e.data.text();
+      }else if(e.data instanceof ArrayBuffer){
+        text = new TextDecoder('utf-8').decode(e.data);
+      }else{
+        text = String(e.data);
+      }
+      const evt = JSON.parse(text);
 
       if(evt.setupComplete){
         setRealtimeStatus('接続完了');
@@ -1222,7 +1232,7 @@ async function connectRealtime(){
         log(`Gemini Live: 未処理のメッセージ ${JSON.stringify(evt).slice(0, 500)}`, 'warn');
       }
     }catch(err){
-      log(`Gemini Live: メッセージ解析エラー ${err.message || err} / raw: ${String(e.data).slice(0, 300)}`, 'warn');
+      log(`Gemini Live: メッセージ解析エラー ${err.message || err} / raw: ${String(text !== undefined ? text : e.data).slice(0, 300)}`, 'warn');
     }
   });
 
