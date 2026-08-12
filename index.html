@@ -237,8 +237,7 @@
     <div class="slider-row"><label>左右cm換算</label><input type="range" id="cmRange" min="10" max="120" step="1" value="60"><span id="cmRangeV">60</span></div>
     <div class="slider-row"><label>テクスチャ上限</label><input type="range" id="texBudget" min="50" max="500" step="10" value="200"><span id="texBudgetV">200</span>MB</div>
     <div style="border-top:1px solid var(--border); margin:6px 0 4px; padding-top:4px; color:var(--accent); font-size:10.5px;">— 🎙️ 会話(Gemini Live)の既定値 —</div>
-    <div class="slider-row"><label>会話Worker URL</label><input type="text" id="defaultRealtimeWorkerUrl" class="text-input" placeholder="https://xxxx.workers.dev"></div>
-    <div class="slider-row"><label>会話 指示</label><input type="text" id="defaultRealtimeInstructions" class="text-input" placeholder="例: 明るく元気な口調で話してください"></div>
+    <div class="slider-row"><label>会話 指示(既定)</label><input type="text" id="defaultRealtimeInstructions" class="text-input" placeholder="例: 明るく元気な口調で話してください"></div>
   </div>
   <div id="log" class="hidden">
     <button class="panel-close-btn" id="btnCloseLog" aria-label="閉じる">×</button>
@@ -247,8 +246,14 @@
   <div id="realtimePanel" class="hidden">
     <button class="panel-close-btn" id="btnCloseRealtime" aria-label="閉じる">×</button>
     <div class="slider-row">
-      <label>Worker URL</label>
-      <input type="text" id="realtimeWorkerUrl" class="text-input" placeholder="https://xxxx.workers.dev">
+      <label>Gemini APIキー</label>
+      <input type="password" id="realtimeApiKey" class="text-input" placeholder="AIzaSy... (ご自身のキー)" autocomplete="off">
+    </div>
+    <div style="font-size:9.5px; color:var(--text-dim); padding:0 2px 4px;">
+      ※ このキーはあなたの端末のブラウザ内(localStorage)にのみ保存され、Gemini(Google)への通信以外には送信されません。
+      共有・公共PCでは使用後に消去してください。キー未取得の場合は
+      <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" style="color:var(--accent);">Google AI Studio</a>
+      で無料発行できます。
     </div>
     <div class="slider-row">
       <label>指示(任意)</label>
@@ -257,6 +262,7 @@
     <div class="motion-controls" style="border-bottom:none; padding-left:0; padding-right:0;">
       <button id="btnRealtimeConnect">🎙️ 接続</button>
       <button id="btnRealtimeMute">🔇 ミュート</button>
+      <button id="btnRealtimeClearKey">🗑️ キー消去</button>
     </div>
     <div id="realtimeStatus">未接続</div>
     <div id="realtimeTranscript"></div>
@@ -988,19 +994,22 @@ document.getElementById('btnBgList').addEventListener('click', () => {
 });
 
 /* ---------------- Gemini Live API 音声会話 + 簡易リップシンク ----------------
-   接続はブラウザ→(自前のCloudflare Worker)→Gemini Liveの順で行う。
-   Workerがサーバー側でGEMINI_API_KEYを使い短命なephemeralトークン(auth_tokens/...)を
-   発行し、ブラウザはそのトークンだけでGeminiとWebSocket接続する(実キーはブラウザに渡らない)。
-   同梱の gemini-live-token-worker.js をCloudflare Workersにデプロイして使用する。
+   各利用者が自分自身のGemini APIキー(Google AI Studioで無料発行)を入力し、
+   そのキーで各自のGemini無料/有料枠を使って会話する(BYOK方式)。
+   Cloudflare Workerは不要: ブラウザから直接、短命なephemeralトークン(auth_tokens/...)を
+   発行してWebSocket接続する。トークン発行自体がCORS等で失敗した場合は、
+   APIキーを使った直接接続にフォールバックする。
+   いずれの場合もAPIキーは入力した本人のブラウザ内(localStorage)にのみ保持され、
+   Google以外の第三者(サーバー等)には送信されない。
 
    WebRTCではなくWebSocket + 生PCMのやり取りになる点がOpenAI Realtimeとの違い:
      送信: マイクを16kHz/16bit/モノラルPCMにダウンミックスしてbase64でrealtimeInputに送信
      受信: serverContentのinlineData(24kHz/16bit PCM, base64)をWeb Audio APIで順次再生
    リップシンクは受信した再生音声をAnalyserNodeに通して音量(RMS)から簡易的に算出する。
 ------------------------------------------------------------------------- */
-const REALTIME_URL_STORAGE_KEY = 'vrmFaceTrackingViewer.realtimeWorkerUrl';
+const REALTIME_API_KEY_STORAGE_KEY = 'vrmFaceTrackingViewer.realtimeApiKey';
 const REALTIME_INSTRUCTIONS_STORAGE_KEY = 'vrmFaceTrackingViewer.realtimeInstructions';
-const realtimeWorkerUrlEl = document.getElementById('realtimeWorkerUrl');
+const realtimeApiKeyEl = document.getElementById('realtimeApiKey');
 
 // 調整パネルの既定値入力と、会話パネルの実際の入力欄を同じ値で連動させるヘルパー。
 // 片方を編集するともう片方にも反映され、localStorageに保存される。保存値が無ければdefaultValueを使う。
@@ -1019,11 +1028,20 @@ function linkTextSetting(storageKey, defaultValue, elIds){
   });
 }
 
-linkTextSetting(
-  REALTIME_URL_STORAGE_KEY,
-  'https://realtime-token-worker.pluteus3.workers.dev',
-  ['realtimeWorkerUrl', 'defaultRealtimeWorkerUrl']
-);
+// APIキーはこの端末のブラウザにのみ保存(公開の既定値は持たせない: 個人の秘密情報のため)
+try{
+  const savedApiKey = localStorage.getItem(REALTIME_API_KEY_STORAGE_KEY);
+  if(savedApiKey) realtimeApiKeyEl.value = savedApiKey;
+}catch(e){ /* 読めない環境は無視 */ }
+realtimeApiKeyEl.addEventListener('change', () => {
+  try{ localStorage.setItem(REALTIME_API_KEY_STORAGE_KEY, realtimeApiKeyEl.value.trim()); }catch(e){}
+});
+document.getElementById('btnRealtimeClearKey').addEventListener('click', () => {
+  realtimeApiKeyEl.value = '';
+  try{ localStorage.removeItem(REALTIME_API_KEY_STORAGE_KEY); }catch(e){}
+  log('保存されていたGemini APIキーをこの端末から消去しました', 'ok');
+});
+
 linkTextSetting(
   REALTIME_INSTRUCTIONS_STORAGE_KEY,
   '可愛らしい女性の声で話して下さい',
@@ -1148,35 +1166,53 @@ function startMicCapture(stream){
   geminiCaptureProcessor = processor;
 }
 
+const GEMINI_LIVE_MODEL = 'gemini-3.1-flash-live-preview';
+
+// ブラウザから直接、入力されたAPIキーで短命なephemeralトークンを発行する。
+// (このリクエスト自体にAPIキーが載るが、他人には送信されず、本人のGoogleアカウントへの通信のみ)
+async function mintEphemeralToken(apiKey){
+  const now = Date.now();
+  const res = await fetch('https://generativelanguage.googleapis.com/v1beta/auth_tokens', {
+    method: 'POST',
+    headers: {
+      'x-goog-api-key': apiKey,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      uses: 1,
+      expireTime: new Date(now + 30 * 60 * 1000).toISOString(),
+      newSessionExpireTime: new Date(now + 5 * 60 * 1000).toISOString()
+    })
+  });
+  if(!res.ok){
+    const bodyText = await res.text().catch(() => '');
+    throw new Error(`HTTP ${res.status}${bodyText ? ' - ' + bodyText.slice(0, 200) : ''}`);
+  }
+  const data = await res.json();
+  if(!data.name) throw new Error('レスポンスにトークン(name)が含まれていません');
+  return data.name;
+}
+
 async function connectRealtime(){
-  const workerUrl = realtimeWorkerUrlEl.value.trim();
-  if(!workerUrl){
-    log('Gemini Live用のWorker URLを入力してください', 'warn');
+  const apiKey = realtimeApiKeyEl.value.trim();
+  if(!apiKey){
+    log('ご自身のGemini APIキーを入力してください(Google AI Studioで無料発行できます)', 'warn');
     return;
   }
 
+  geminiTokenModel = GEMINI_LIVE_MODEL;
+  let wsUrl;
   setRealtimeStatus('トークン取得中...');
-  let tokenData;
   try{
-    const res = await fetch(workerUrl);
-    if(!res.ok){
-      const bodyText = await res.text().catch(() => '');
-      throw new Error(`HTTP ${res.status}${bodyText ? ' - ' + bodyText.slice(0, 300) : ''}`);
-    }
-    tokenData = await res.json();
+    const ephemeralToken = await mintEphemeralToken(apiKey);
+    wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained?access_token=${encodeURIComponent(ephemeralToken)}`;
+    log('ephemeralトークンを取得しました(このセッションのみ有効な短命トークンです)', 'ok');
   }catch(err){
-    log(`トークン取得エラー: ${err.message || err}`, 'err');
-    setRealtimeStatus('トークン取得失敗');
-    return;
+    // ブラウザからのトークン発行がCORS等で失敗した場合は、APIキーで直接接続するフォールバック。
+    // (この場合APIキー自体が接続URLに載るが、本人のブラウザ内にとどまり、Google以外へは送信されない)
+    log(`ephemeralトークン取得に失敗したためAPIキーで直接接続します: ${err.message || err}`, 'warn');
+    wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${encodeURIComponent(apiKey)}`;
   }
-
-  const ephemeralToken = tokenData.name;
-  if(!ephemeralToken){
-    log('Workerの応答にトークン(name)が含まれていません', 'err');
-    setRealtimeStatus('トークン取得失敗');
-    return;
-  }
-  geminiTokenModel = tokenData.model || 'gemini-3.1-flash-live-preview';
 
   try{
     realtimeMicStream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -1187,7 +1223,6 @@ async function connectRealtime(){
   }
 
   setRealtimeStatus('接続中...');
-  const wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained?access_token=${encodeURIComponent(ephemeralToken)}`;
   const ws = new WebSocket(wsUrl);
   geminiWs = ws;
 
