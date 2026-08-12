@@ -236,6 +236,9 @@
     <div class="slider-row"><label>目との距離(cm)</label><input type="range" id="eyeDistCm" min="15" max="80" step="1" value="40"><span id="eyeDistCmV">40</span></div>
     <div class="slider-row"><label>左右cm換算</label><input type="range" id="cmRange" min="10" max="120" step="1" value="60"><span id="cmRangeV">60</span></div>
     <div class="slider-row"><label>テクスチャ上限</label><input type="range" id="texBudget" min="50" max="500" step="10" value="200"><span id="texBudgetV">200</span>MB</div>
+    <div style="border-top:1px solid var(--border); margin:6px 0 4px; padding-top:4px; color:var(--accent); font-size:10.5px;">— 🎙️ 会話(Gemini Live)の既定値 —</div>
+    <div class="slider-row"><label>会話Worker URL</label><input type="text" id="defaultRealtimeWorkerUrl" class="text-input" placeholder="https://xxxx.workers.dev"></div>
+    <div class="slider-row"><label>会話 指示</label><input type="text" id="defaultRealtimeInstructions" class="text-input" placeholder="例: 明るく元気な口調で話してください"></div>
   </div>
   <div id="log" class="hidden">
     <button class="panel-close-btn" id="btnCloseLog" aria-label="閉じる">×</button>
@@ -996,14 +999,36 @@ document.getElementById('btnBgList').addEventListener('click', () => {
    リップシンクは受信した再生音声をAnalyserNodeに通して音量(RMS)から簡易的に算出する。
 ------------------------------------------------------------------------- */
 const REALTIME_URL_STORAGE_KEY = 'vrmFaceTrackingViewer.realtimeWorkerUrl';
+const REALTIME_INSTRUCTIONS_STORAGE_KEY = 'vrmFaceTrackingViewer.realtimeInstructions';
 const realtimeWorkerUrlEl = document.getElementById('realtimeWorkerUrl');
-try{
-  const savedWorkerUrl = localStorage.getItem(REALTIME_URL_STORAGE_KEY);
-  if(savedWorkerUrl) realtimeWorkerUrlEl.value = savedWorkerUrl;
-}catch(e){ /* 保存値が読めない環境は無視 */ }
-realtimeWorkerUrlEl.addEventListener('change', () => {
-  try{ localStorage.setItem(REALTIME_URL_STORAGE_KEY, realtimeWorkerUrlEl.value.trim()); }catch(e){}
-});
+
+// 調整パネルの既定値入力と、会話パネルの実際の入力欄を同じ値で連動させるヘルパー。
+// 片方を編集するともう片方にも反映され、localStorageに保存される。保存値が無ければdefaultValueを使う。
+function linkTextSetting(storageKey, defaultValue, elIds){
+  let saved = null;
+  try{ saved = localStorage.getItem(storageKey); }catch(e){ /* 読めない環境は無視 */ }
+  const value = (saved !== null && saved !== '') ? saved : defaultValue;
+  const els = elIds.map(id => document.getElementById(id)).filter(Boolean);
+  els.forEach(el => { el.value = value; });
+  els.forEach(el => {
+    el.addEventListener('change', () => {
+      const v = el.value.trim();
+      try{ localStorage.setItem(storageKey, v); }catch(e){ /* 保存できない環境は無視 */ }
+      els.forEach(other => { if(other !== el) other.value = v; });
+    });
+  });
+}
+
+linkTextSetting(
+  REALTIME_URL_STORAGE_KEY,
+  'https://realtime-token-worker.pluteus3.workers.dev',
+  ['realtimeWorkerUrl', 'defaultRealtimeWorkerUrl']
+);
+linkTextSetting(
+  REALTIME_INSTRUCTIONS_STORAGE_KEY,
+  '可愛らしい女性の声で話して下さい',
+  ['realtimeInstructions', 'defaultRealtimeInstructions']
+);
 
 let geminiWs = null;
 let geminiCaptureCtx = null;       // マイク取り込み用(16kHz)
