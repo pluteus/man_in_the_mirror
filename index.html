@@ -1178,6 +1178,7 @@ async function connectRealtime(){
     if(instructions){
       setupMsg.setup.systemInstruction = { parts: [{ text: instructions }] };
     }
+    log(`Gemini Liveへsetup送信: ${JSON.stringify(setupMsg)}`);
     ws.send(JSON.stringify(setupMsg));
   });
 
@@ -1211,8 +1212,15 @@ async function connectRealtime(){
         }
       }else if(evt.goAway){
         log('Gemini Live: セッションがまもなく終了します', 'warn');
+      }else if(evt.error){
+        log(`Gemini Liveエラー: ${JSON.stringify(evt.error)}`, 'err');
+      }else{
+        // 想定外のメッセージ形式。原因調査用に内容をそのままログへ出す。
+        log(`Gemini Live: 未処理のメッセージ ${JSON.stringify(evt).slice(0, 500)}`, 'warn');
       }
-    }catch(err){ /* JSON以外のイベントは無視 */ }
+    }catch(err){
+      log(`Gemini Live: メッセージ解析エラー ${err.message || err} / raw: ${String(e.data).slice(0, 300)}`, 'warn');
+    }
   });
 
   ws.addEventListener('error', () => {
@@ -1222,7 +1230,7 @@ async function connectRealtime(){
 
   ws.addEventListener('close', (e) => {
     if(geminiWs !== ws) return; // 既に新しい接続に置き換わっている場合は無視
-    if(e.code !== 1000) log(`Gemini Liveから切断されました (code: ${e.code})`, 'warn');
+    if(e.code !== 1000) log(`Gemini Liveから切断されました (code: ${e.code}, reason: ${e.reason || '(なし)'})`, 'warn');
     disconnectRealtime();
   });
 }
