@@ -244,7 +244,7 @@
     <button class="panel-close-btn" id="btnCloseRealtime" aria-label="閉じる">×</button>
     <div class="slider-row">
       <label>Worker URL</label>
-      <input type="text" id="realtimeWorkerUrl" class="text-input" placeholder="https://realtime-token-worker.pluteus3.workers.dev">
+      <input type="text" id="realtimeWorkerUrl" class="text-input" placeholder="https://xxxx.workers.dev">
     </div>
     <div class="slider-row">
       <label>指示(任意)</label>
@@ -256,7 +256,6 @@
     </div>
     <div id="realtimeStatus">未接続</div>
     <div id="realtimeTranscript"></div>
-    <audio id="realtimeRemoteAudio" autoplay></audio>
   </div>
 </div>
 
@@ -984,11 +983,16 @@ document.getElementById('btnBgList').addEventListener('click', () => {
   if(!panel.classList.contains('hidden')) updateBackgroundListUI();
 });
 
-/* ---------------- Realtime API 音声会話 + 簡易リップシンク ----------------
-   接続はブラウザ→(自前のCloudflare Worker)→OpenAIの順で行う。
-   Workerがサーバー側でOPENAI_API_KEYを使い短命なephemeralトークン(ek_...)を発行し、
-   ブラウザはそのトークンだけでOpenAIとWebRTC接続する(実キーはブラウザに渡らない)。
-   同梱の realtime-token-worker.js をCloudflare Workersにデプロイして使用する。
+/* ---------------- Gemini Live API 音声会話 + 簡易リップシンク ----------------
+   接続はブラウザ→(自前のCloudflare Worker)→Gemini Liveの順で行う。
+   Workerがサーバー側でGEMINI_API_KEYを使い短命なephemeralトークン(auth_tokens/...)を
+   発行し、ブラウザはそのトークンだけでGeminiとWebSocket接続する(実キーはブラウザに渡らない)。
+   同梱の gemini-live-token-worker.js をCloudflare Workersにデプロイして使用する。
+
+   WebRTCではなくWebSocket + 生PCMのやり取りになる点がOpenAI Realtimeとの違い:
+     送信: マイクを16kHz/16bit/モノラルPCMにダウンミックスしてbase64でrealtimeInputに送信
+     受信: serverContentのinlineData(24kHz/16bit PCM, base64)をWeb Audio APIで順次再生
+   リップシンクは受信した再生音声をAnalyserNodeに通して音量(RMS)から簡易的に算出する。
 ------------------------------------------------------------------------- */
 const REALTIME_URL_STORAGE_KEY = 'vrmFaceTrackingViewer.realtimeWorkerUrl';
 const realtimeWorkerUrlEl = document.getElementById('realtimeWorkerUrl');
@@ -1000,10 +1004,14 @@ realtimeWorkerUrlEl.addEventListener('change', () => {
   try{ localStorage.setItem(REALTIME_URL_STORAGE_KEY, realtimeWorkerUrlEl.value.trim()); }catch(e){}
 });
 
-let realtimePc = null;
-let realtimeDataChannel = null;
+let geminiWs = null;
+let geminiCaptureCtx = null;       // マイク取り込み用(16kHz)
+let geminiCaptureProcessor = null;
+let geminiScheduledSources = [];   // 再生予約済みのAudioBufferSourceNode一覧(割り込み時に停止するため)
+let geminiNextPlayTime = 0;
+let geminiTokenModel = '';
 let realtimeMicStream = null;
-let realtimeAudioCtx = null;
+let realtimeAudioCtx = null;       // 受信音声の再生(24kHz) & リップシンク解析用
 let realtimeAnalyser = null;
 let realtimeMuted = false;
 
@@ -1019,19 +1027,6 @@ function addRealtimeTranscript(text){
   line.textContent = text;
   el.appendChild(line);
   el.scrollTop = el.scrollHeight;
-}
-
-function setupLipSyncAnalyser(stream){
-  try{
-    if(!realtimeAudioCtx) realtimeAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    const source = realtimeAudioCtx.createMediaStreamSource(stream);
-    const analyser = realtimeAudioCtx.createAnalyser();
-    analyser.fftSize = 256;
-    source.connect(analyser);
-    realtimeAnalyser = analyser;
-  }catch(err){
-    log(`リップシンク解析の初期化に失敗: ${err.message || err}`, 'warn');
-  }
 }
 
 // 音量(RMS)ベースの簡易口パク。表情プリセット'aa'(母音「あ」の口)の重みを音量に応じて動かすだけで、
@@ -1050,10 +1045,87 @@ function updateLipSync(){
   try{ currentVRM.expressionManager.setValue('aa', mouth); }catch(e){ /* 表情プリセット非対応のVRMは無視 */ }
 }
 
+function ensurePlaybackGraph(){
+  if(realtimeAudioCtx) return;
+  realtimeAudioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
+  realtimeAnalyser = realtimeAudioCtx.createAnalyser();
+  realtimeAnalyser.fftSize = 256;
+  realtimeAnalyser.connect(realtimeAudioCtx.destination);
+  geminiNextPlayTime = realtimeAudioCtx.currentTime;
+}
+
+// Gemini Liveから届いたbase64 PCM(24kHz/16bit/モノラル)を順番が途切れないよう予約再生する
+function playAudioChunk(base64Data){
+  ensurePlaybackGraph();
+  try{
+    const binary = atob(base64Data);
+    const bytes = new Uint8Array(binary.length);
+    for(let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    const int16 = new Int16Array(bytes.buffer);
+    const float32 = new Float32Array(int16.length);
+    for(let i = 0; i < int16.length; i++) float32[i] = int16[i] / 32768;
+
+    const buffer = realtimeAudioCtx.createBuffer(1, float32.length, 24000);
+    buffer.copyToChannel(float32, 0);
+    const src = realtimeAudioCtx.createBufferSource();
+    src.buffer = buffer;
+    src.connect(realtimeAnalyser);
+
+    const startAt = Math.max(realtimeAudioCtx.currentTime, geminiNextPlayTime);
+    src.start(startAt);
+    geminiNextPlayTime = startAt + buffer.duration;
+    geminiScheduledSources.push(src);
+    src.addEventListener('ended', () => {
+      const idx = geminiScheduledSources.indexOf(src);
+      if(idx >= 0) geminiScheduledSources.splice(idx, 1);
+    });
+  }catch(err){
+    log(`音声再生エラー: ${err.message || err}`, 'warn');
+  }
+}
+
+// ユーザーの割り込み発話(バージイン)時にGeminiからinterrupted通知が来るので、予約済み再生を全停止する
+function stopPlayback(){
+  geminiScheduledSources.forEach(src => { try{ src.stop(); }catch(e){} });
+  geminiScheduledSources = [];
+  if(realtimeAudioCtx) geminiNextPlayTime = realtimeAudioCtx.currentTime;
+}
+
+// マイク音声を16kHz/16bit PCMにダウンミックスしてrealtimeInputとして逐次送信する
+function startMicCapture(stream){
+  geminiCaptureCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+  const source = geminiCaptureCtx.createMediaStreamSource(stream);
+  const processor = geminiCaptureCtx.createScriptProcessor(4096, 1, 1);
+  const silentGain = geminiCaptureCtx.createGain();
+  silentGain.gain.value = 0; // ローカルスピーカーへの回り込み(ハウリング)を防ぐ
+  source.connect(processor);
+  processor.connect(silentGain);
+  silentGain.connect(geminiCaptureCtx.destination);
+
+  processor.onaudioprocess = (e) => {
+    if(realtimeMuted) return;
+    if(!geminiWs || geminiWs.readyState !== WebSocket.OPEN) return;
+    const input = e.inputBuffer.getChannelData(0);
+    const int16 = new Int16Array(input.length);
+    for(let i = 0; i < input.length; i++){
+      const s = Math.max(-1, Math.min(1, input[i]));
+      int16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+    }
+    const bytes = new Uint8Array(int16.buffer);
+    let binary = '';
+    for(let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+    const base64 = btoa(binary);
+    geminiWs.send(JSON.stringify({
+      realtimeInput: { audio: { data: base64, mimeType: 'audio/pcm;rate=16000' } }
+    }));
+  };
+  geminiCaptureProcessor = processor;
+}
+
 async function connectRealtime(){
   const workerUrl = realtimeWorkerUrlEl.value.trim();
   if(!workerUrl){
-    log('Realtime用のWorker URLを入力してください', 'warn');
+    log('Gemini Live用のWorker URLを入力してください', 'warn');
     return;
   }
 
@@ -1072,12 +1144,13 @@ async function connectRealtime(){
     return;
   }
 
-  const ephemeralKey = tokenData.value || (tokenData.client_secret && tokenData.client_secret.value);
-  if(!ephemeralKey){
-    log('Workerの応答にトークン(value)が含まれていません', 'err');
+  const ephemeralToken = tokenData.name;
+  if(!ephemeralToken){
+    log('Workerの応答にトークン(name)が含まれていません', 'err');
     setRealtimeStatus('トークン取得失敗');
     return;
   }
+  geminiTokenModel = tokenData.model || 'gemini-3.1-flash-live-preview';
 
   try{
     realtimeMicStream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -1088,98 +1161,73 @@ async function connectRealtime(){
   }
 
   setRealtimeStatus('接続中...');
-  const pc = new RTCPeerConnection();
-  realtimePc = pc;
+  const wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained?access_token=${encodeURIComponent(ephemeralToken)}`;
+  const ws = new WebSocket(wsUrl);
+  geminiWs = ws;
 
-  realtimeMicStream.getAudioTracks().forEach(track => pc.addTrack(track, realtimeMicStream));
-
-  const remoteAudioEl = document.getElementById('realtimeRemoteAudio');
-  pc.ontrack = (e) => {
-    remoteAudioEl.srcObject = e.streams[0];
-    setupLipSyncAnalyser(e.streams[0]);
-  };
-
-  const dc = pc.createDataChannel('oai-events');
-  realtimeDataChannel = dc;
-  dc.addEventListener('open', () => {
+  ws.addEventListener('open', () => {
     const instructions = document.getElementById('realtimeInstructions').value.trim();
+    const setupMsg = { setup: { model: `models/${geminiTokenModel}` } };
     if(instructions){
-      dc.send(JSON.stringify({ type: 'session.update', session: { instructions } }));
+      setupMsg.setup.systemInstruction = { parts: [{ text: instructions }] };
     }
+    ws.send(JSON.stringify(setupMsg));
   });
-  dc.addEventListener('message', (e) => {
+
+  ws.addEventListener('message', (e) => {
     try{
       const evt = JSON.parse(e.data);
-      if(evt.type === 'conversation.item.input_audio_transcription.completed' && evt.transcript){
-        addRealtimeTranscript(`🧑 ${evt.transcript}`);
-      }else if(evt.type === 'response.audio_transcript.done' && evt.transcript){
-        addRealtimeTranscript(`🤖 ${evt.transcript}`);
-      }else if(evt.type === 'error'){
-        log(`Realtimeエラー: ${JSON.stringify(evt.error)}`, 'err');
+
+      if(evt.setupComplete){
+        setRealtimeStatus('接続完了');
+        const btn = document.getElementById('btnRealtimeConnect');
+        btn.textContent = '🔌 切断';
+        btn.classList.add('on');
+        log('Gemini Liveに接続しました', 'ok');
+        startMicCapture(realtimeMicStream);
+        return;
+      }
+
+      if(evt.serverContent){
+        const sc = evt.serverContent;
+        if(sc.interrupted) stopPlayback();
+        if(sc.modelTurn && sc.modelTurn.parts){
+          for(const part of sc.modelTurn.parts){
+            if(part.inlineData && part.inlineData.data) playAudioChunk(part.inlineData.data);
+          }
+        }
+        if(sc.inputTranscription && sc.inputTranscription.text){
+          addRealtimeTranscript(`🧑 ${sc.inputTranscription.text}`);
+        }
+        if(sc.outputTranscription && sc.outputTranscription.text){
+          addRealtimeTranscript(`🤖 ${sc.outputTranscription.text}`);
+        }
+      }else if(evt.goAway){
+        log('Gemini Live: セッションがまもなく終了します', 'warn');
       }
     }catch(err){ /* JSON以外のイベントは無視 */ }
   });
 
-  let offer;
-  try{
-    offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-  }catch(err){
-    log(`WebRTCオファー作成エラー: ${err.message || err}`, 'err');
-    disconnectRealtime();
-    return;
-  }
-
-  let answerSdp;
-  try{
-    const sdpRes = await fetch('https://api.openai.com/v1/realtime/calls', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${ephemeralKey}`,
-        'Content-Type': 'application/sdp'
-      },
-      body: offer.sdp
-    });
-    if(!sdpRes.ok){
-      const bodyText = await sdpRes.text().catch(() => '');
-      throw new Error(`HTTP ${sdpRes.status}${bodyText ? ' - ' + bodyText.slice(0, 300) : ''}`);
-    }
-    answerSdp = await sdpRes.text();
-  }catch(err){
-    log(`Realtime接続エラー: ${err.message || err}`, 'err');
+  ws.addEventListener('error', () => {
+    log('Gemini LiveでWebSocketエラーが発生しました', 'err');
     setRealtimeStatus('接続失敗');
-    disconnectRealtime();
-    return;
-  }
+  });
 
-  try{
-    await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp });
-  }catch(err){
-    log(`WebRTC応答設定エラー: ${err.message || err}`, 'err');
+  ws.addEventListener('close', (e) => {
+    if(geminiWs !== ws) return; // 既に新しい接続に置き換わっている場合は無視
+    if(e.code !== 1000) log(`Gemini Liveから切断されました (code: ${e.code})`, 'warn');
     disconnectRealtime();
-    return;
-  }
-
-  pc.addEventListener('connectionstatechange', () => {
-    setRealtimeStatus(`接続状態: ${pc.connectionState}`);
-    const btn = document.getElementById('btnRealtimeConnect');
-    if(pc.connectionState === 'connected'){
-      btn.textContent = '🔌 切断';
-      btn.classList.add('on');
-      log('Realtime APIに接続しました', 'ok');
-    }
-    if(['disconnected', 'failed', 'closed'].includes(pc.connectionState)){
-      disconnectRealtime();
-    }
   });
 }
 
 function disconnectRealtime(){
-  if(realtimeDataChannel){ try{ realtimeDataChannel.close(); }catch(e){} realtimeDataChannel = null; }
-  if(realtimePc){ try{ realtimePc.close(); }catch(e){} realtimePc = null; }
-  if(realtimeMicStream){ realtimeMicStream.getTracks().forEach(t => t.stop()); realtimeMicStream = null; }
+  if(geminiWs){ try{ geminiWs.close(); }catch(e){} geminiWs = null; }
+  if(geminiCaptureProcessor){ try{ geminiCaptureProcessor.disconnect(); }catch(e){} geminiCaptureProcessor.onaudioprocess = null; geminiCaptureProcessor = null; }
+  if(geminiCaptureCtx){ try{ geminiCaptureCtx.close(); }catch(e){} geminiCaptureCtx = null; }
+  stopPlayback();
   if(realtimeAudioCtx){ try{ realtimeAudioCtx.close(); }catch(e){} realtimeAudioCtx = null; }
   realtimeAnalyser = null;
+  if(realtimeMicStream){ realtimeMicStream.getTracks().forEach(t => t.stop()); realtimeMicStream = null; }
   setRealtimeStatus('未接続');
   const btn = document.getElementById('btnRealtimeConnect');
   if(btn){ btn.textContent = '🎙️ 接続'; btn.classList.remove('on'); }
@@ -1189,7 +1237,7 @@ function disconnectRealtime(){
 }
 
 document.getElementById('btnRealtimeConnect').addEventListener('click', () => {
-  if(realtimePc){ disconnectRealtime(); log('Realtime APIから切断しました'); }
+  if(geminiWs){ disconnectRealtime(); log('Gemini Liveから切断しました'); }
   else{ connectRealtime(); }
 });
 
