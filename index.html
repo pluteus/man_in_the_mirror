@@ -15,6 +15,9 @@
     overflow:hidden; overscroll-behavior:none; touch-action:manipulation; }
   #canvas-container{ position:fixed; inset:0; }
   #canvas-container canvas{ display:block; width:100%; height:100%; touch-action:none; }
+  #outCamBg{ position:fixed; inset:0; width:100%; height:100%; object-fit:cover;
+    z-index:-1; display:none; background:#000; }
+  #outCamBg.on{ display:block; }
 
   /* モデル表示エリアを最大限確保するため、右上の2要素は小さく半透明なオーバーレイにする */
   #camPreview{ position:fixed; top:calc(env(safe-area-inset-top,0px) + 8px); right:8px;
@@ -154,6 +157,7 @@
 </head>
 <body>
 
+<video id="outCamBg" playsinline muted autoplay></video>
 <div id="canvas-container"></div>
 
 <div id="camPreview"><video id="cam" playsinline muted></video><canvas id="camMosaic"></canvas><div class="dot"></div></div>
@@ -171,7 +175,8 @@
   <input type="file" id="bgGlbFile" accept=".glb,.gltf" multiple style="display:none">
   <button id="btnBgList">🏞 背景リスト</button>
   <button id="btnRealtime">🎙️ 会話</button>
-  <button id="btnCam">▶ カメラ開始</button>
+  <button id="btnCam">▶ インカメラ</button>
+  <button id="btnOutCam">📷 アウトカメラ</button>
   <button id="btnCalib">🎯 中央校正</button>
   <button id="btnGyro">🧭 ジャイロ有効化</button>
   <button id="btnCalibScreen">📏 画面校正</button>
@@ -343,7 +348,8 @@ scene.background = new THREE.Color(0x0a0e14);
 const camera = new THREE.PerspectiveCamera(30, window.innerWidth/window.innerHeight, 0.05, 50);
 camera.position.set(0, 1.0, 2.2);
 
-const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:false });
+const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true });
+renderer.setClearColor(0x000000, 0); // scene.backgroundが色の時は不透明に描画されるため常時これで問題ない
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputEncoding = THREE.sRGBEncoding;
@@ -1387,7 +1393,7 @@ document.getElementById('btnCam').addEventListener('click', async () => {
   if(camRunning){
     video.srcObject && video.srcObject.getTracks().forEach(t => t.stop());
     camRunning = false;
-    btn.textContent = '▶ カメラ開始';
+    btn.textContent = '▶ インカメラ';
     btn.classList.remove('on');
     log('カメラ停止');
     return;
@@ -1402,11 +1408,52 @@ document.getElementById('btnCam').addEventListener('click', async () => {
     video.srcObject = stream;
     await video.play();
     camRunning = true;
-    btn.textContent = '■ カメラ停止';
+    btn.textContent = '■ インカメラ停止';
     btn.classList.add('on');
     log('カメラ開始・顔トラッキング開始', 'ok');
   }catch(err){
     log(`カメラ起動エラー: ${err.message || err}`, 'err');
+  }
+});
+
+/* ---------------- アウトカメラ(背面カメラ)映像をキャラクターの背景として表示 ---------------- */
+const outCamVideo = document.getElementById('outCamBg');
+let outCamStream = null;
+let savedSceneBackground = scene.background; // アウトカメラOFF復帰用に元の背景を保持
+
+document.getElementById('btnOutCam').addEventListener('click', async () => {
+  const btn = document.getElementById('btnOutCam');
+
+  if(outCamStream){
+    outCamStream.getTracks().forEach(t => t.stop());
+    outCamStream = null;
+    outCamVideo.pause();
+    outCamVideo.srcObject = null;
+    outCamVideo.classList.remove('on');
+    scene.background = savedSceneBackground;
+    btn.textContent = '📷 アウトカメラ';
+    btn.classList.remove('on');
+    log('アウトカメラ表示をOFFにしました');
+    return;
+  }
+
+  try{
+    log('アウトカメラ許可を要求中...');
+    outCamStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' }, width:{ideal:1280}, height:{ideal:720} },
+      audio: false
+    });
+    outCamVideo.srcObject = outCamStream;
+    await outCamVideo.play();
+    outCamVideo.classList.add('on');
+    savedSceneBackground = scene.background;
+    scene.background = null; // 透明化してWebGLキャンバスの下のアウトカメラ映像を見せる
+    btn.textContent = '📷 アウトカメラ表示中';
+    btn.classList.add('on');
+    log('アウトカメラ映像をキャラクターの背景に表示します', 'ok');
+  }catch(err){
+    outCamStream = null;
+    log(`アウトカメラ起動エラー: ${err.message || err}`, 'err');
   }
 });
 
