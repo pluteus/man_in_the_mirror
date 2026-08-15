@@ -15,9 +15,7 @@
     overflow:hidden; overscroll-behavior:none; touch-action:manipulation; }
   #canvas-container{ position:fixed; inset:0; }
   #canvas-container canvas{ display:block; width:100%; height:100%; touch-action:none; }
-  #outCamBg{ position:fixed; inset:0; width:100%; height:100%; object-fit:cover;
-    z-index:-1; display:none; background:#000; }
-  #outCamBg.on{ display:block; }
+  #outCamBg{ position:fixed; width:2px; height:2px; opacity:0; pointer-events:none; }
 
   /* モデル表示エリアを最大限確保するため、右上の2要素は小さく半透明なオーバーレイにする */
   #camPreview{ position:fixed; top:calc(env(safe-area-inset-top,0px) + 8px); right:8px;
@@ -87,7 +85,7 @@
   #realtimeStatus{ padding:6px 2px 2px; font-size:11px; color:var(--text-dim); }
   #realtimeTranscript{ max-height:120px; overflow-y:auto; padding:4px 2px 2px; font-size:11px;
     line-height:1.5; color:var(--text); user-select:text; -webkit-user-select:text; }
-  #realtimeTranscript div{ white-space:pre-wrap; word-break:break-all; padding:2px 0; }
+  #realtimeTranscript div{ white-space:pre-wrap; word-break:break-all; padding:2px 0; user-select:text; -webkit-user-select:text; }
 
   #motionListPanel{ position:fixed; top:calc(env(safe-area-inset-top,0px) + 54px); left:10px;
     width:260px; max-width:calc(100vw - 20px); max-height:50vh; z-index:20;
@@ -132,7 +130,7 @@
   #logContent{ padding:34px 10px 8px; max-height:110px; overflow-y:auto;
     font-size:10.5px; font-family:ui-monospace,Menlo,monospace; color:var(--text-dim);
     user-select:text; -webkit-user-select:text; }
-  #logContent div{ white-space:pre-wrap; word-break:break-all; }
+  #logContent div{ white-space:pre-wrap; word-break:break-all; user-select:text; -webkit-user-select:text; }
   #logContent .ok{ color:var(--ok); } #logContent .warn{ color:var(--warn); } #logContent .err{ color:var(--err); }
 
   #centerHint{ position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); z-index:30;
@@ -1417,9 +1415,13 @@ document.getElementById('btnCam').addEventListener('click', async () => {
   }
 });
 
-/* ---------------- アウトカメラ(背面カメラ)映像をキャラクターの背景として表示 ---------------- */
+/* ---------------- アウトカメラ(背面カメラ)映像をキャラクターの背景として表示 ----------------
+   DOM上の<video>をWebGLキャンバスの下に透過合成する方式は端末によってはうまく透けず
+   黒くなる問題があったため、THREE.VideoTextureとしてscene.backgroundに直接描画する方式にした。
+   (videoタグ自体は非表示のまま、フレームをテクスチャとして読み取るためだけに存在する) */
 const outCamVideo = document.getElementById('outCamBg');
 let outCamStream = null;
+let outCamTexture = null;
 let savedSceneBackground = scene.background; // アウトカメラOFF復帰用に元の背景を保持
 
 document.getElementById('btnOutCam').addEventListener('click', async () => {
@@ -1430,7 +1432,7 @@ document.getElementById('btnOutCam').addEventListener('click', async () => {
     outCamStream = null;
     outCamVideo.pause();
     outCamVideo.srcObject = null;
-    outCamVideo.classList.remove('on');
+    if(outCamTexture){ outCamTexture.dispose(); outCamTexture = null; }
     scene.background = savedSceneBackground;
     btn.textContent = '📷 アウトカメラ';
     btn.classList.remove('on');
@@ -1458,9 +1460,13 @@ document.getElementById('btnOutCam').addEventListener('click', async () => {
     });
     outCamVideo.srcObject = outCamStream;
     await outCamVideo.play();
-    outCamVideo.classList.add('on');
+
+    outCamTexture = new THREE.VideoTexture(outCamVideo);
+    if('colorSpace' in outCamTexture) outCamTexture.colorSpace = THREE.SRGBColorSpace;
+    else if('encoding' in outCamTexture) outCamTexture.encoding = THREE.sRGBEncoding;
+
     savedSceneBackground = scene.background;
-    scene.background = null; // 透明化してWebGLキャンバスの下のアウトカメラ映像を見せる
+    scene.background = outCamTexture;
     btn.textContent = '📷 アウトカメラ表示中';
     btn.classList.add('on');
     log('アウトカメラ映像をキャラクターの背景に表示します', 'ok');
