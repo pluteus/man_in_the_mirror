@@ -175,6 +175,7 @@
   <button id="btnRealtime">🎙️ 会話</button>
   <button id="btnCam">▶ インカメラ</button>
   <button id="btnOutCam">📷 アウトカメラ</button>
+  <button id="btnScreenshot">📸 撮影</button>
   <button id="btnCalib">🎯 中央校正</button>
   <button id="btnGyro">🧭 ジャイロ有効化</button>
   <button id="btnCalibScreen">📏 画面校正</button>
@@ -346,7 +347,7 @@ scene.background = new THREE.Color(0x0a0e14);
 const camera = new THREE.PerspectiveCamera(30, window.innerWidth/window.innerHeight, 0.05, 50);
 camera.position.set(0, 1.0, 2.2);
 
-const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true, premultipliedAlpha:false });
+const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true, premultipliedAlpha:false, preserveDrawingBuffer:true });
 renderer.setClearColor(0x000000, 0); // scene.backgroundが色の時は不透明に描画されるため常時これで問題ない
 renderer.domElement.style.background = 'transparent'; // 一部端末でキャンバスの透過合成が効かない対策
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -361,6 +362,7 @@ scene.add(dirLight);
 
 const grid = new THREE.GridHelper(4, 16, 0x263040, 0x1a2230);
 grid.position.y = 0;
+grid.visible = false; // 床グリッドは非表示(必要ならtrueに戻せば復活可)
 scene.add(grid);
 
 window.addEventListener('resize', () => {
@@ -1483,6 +1485,31 @@ document.getElementById('btnOutCam').addEventListener('click', async () => {
   }catch(err){
     outCamStream = null;
     log(`アウトカメラ起動エラー: ${err.message || err}`, 'err');
+  }
+});
+
+/* ---------------- 📸 撮影(モデル+背景のみをスクリーンショット保存) ----------------
+   ボタンやパネルはHTML側の別レイヤーでありWebGLキャンバスには含まれないため、
+   キャンバス自体をtoDataURLで書き出すだけで自然にUIを除いた画像になる。 */
+document.getElementById('btnScreenshot').addEventListener('click', () => {
+  try{
+    renderer.render(scene, camera); // 直前の描画内容を確実にバッファへ反映してから取得
+    const dataUrl = renderer.domElement.toDataURL('image/png');
+
+    const ts = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const filename = `vrm_screenshot_${ts.getFullYear()}${pad(ts.getMonth()+1)}${pad(ts.getDate())}_${pad(ts.getHours())}${pad(ts.getMinutes())}${pad(ts.getSeconds())}.png`;
+
+    const a = document.createElement('a');
+    a.href = dataUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    log(`スクリーンショットを保存しました: ${filename}`, 'ok');
+  }catch(err){
+    // 外部URL由来のテクスチャ(CORS未対応)が混ざっているとcanvasが「汚染」され保存できない場合がある
+    log(`スクリーンショット保存エラー: ${err.message || err}(外部素材のCORS制限が原因の場合があります)`, 'err');
   }
 });
 
