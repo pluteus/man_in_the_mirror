@@ -1439,6 +1439,18 @@ document.getElementById('btnOutCam').addEventListener('click', async () => {
 
   try{
     log('アウトカメラ許可を要求中...');
+
+    // 多くのスマホ(特にAndroid)は前面/背面カメラを同時に起動できないため、
+    // インカメラ動作中ならアウトカメラ開始前に一旦停止する(顔トラッキングも止まる点に注意)
+    if(camRunning){
+      const camBtn = document.getElementById('btnCam');
+      video.srcObject && video.srcObject.getTracks().forEach(t => t.stop());
+      camRunning = false;
+      camBtn.textContent = '▶ インカメラ';
+      camBtn.classList.remove('on');
+      log('端末の制約上、前面/背面カメラは同時起動できないためインカメラを停止しました', 'warn');
+    }
+
     outCamStream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: { ideal: 'environment' }, width:{ideal:1280}, height:{ideal:720} },
       audio: false
@@ -1451,6 +1463,13 @@ document.getElementById('btnOutCam').addEventListener('click', async () => {
     btn.textContent = '📷 アウトカメラ表示中';
     btn.classList.add('on');
     log('アウトカメラ映像をキャラクターの背景に表示します', 'ok');
+
+    // 映像取得に成功していても実際に有効なフレームが来ているとは限らないため、少し待って確認する
+    setTimeout(() => {
+      if(outCamStream && outCamVideo.videoWidth === 0){
+        log('⚠ アウトカメラの映像が取得できていないようです(端末が前面/背面カメラの同時利用に対応していない可能性があります)。一度ページを再読み込みしてお試しください。', 'err');
+      }
+    }, 1500);
   }catch(err){
     outCamStream = null;
     log(`アウトカメラ起動エラー: ${err.message || err}`, 'err');
