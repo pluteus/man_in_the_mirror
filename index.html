@@ -348,8 +348,9 @@ scene.background = new THREE.Color(0x0a0e14);
 const camera = new THREE.PerspectiveCamera(30, window.innerWidth/window.innerHeight, 0.05, 50);
 camera.position.set(0, 1.0, 2.2);
 
-const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true });
+const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true, premultipliedAlpha:false });
 renderer.setClearColor(0x000000, 0); // scene.backgroundが色の時は不透明に描画されるため常時これで問題ない
+renderer.domElement.style.background = 'transparent'; // 一部端末でキャンバスの透過合成が効かない対策
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputEncoding = THREE.sRGBEncoding;
@@ -1466,8 +1467,11 @@ document.getElementById('btnOutCam').addEventListener('click', async () => {
 
     // 映像取得に成功していても実際に有効なフレームが来ているとは限らないため、少し待って確認する
     setTimeout(() => {
-      if(outCamStream && outCamVideo.videoWidth === 0){
+      if(!outCamStream) return;
+      if(outCamVideo.videoWidth === 0){
         log('⚠ アウトカメラの映像が取得できていないようです(端末が前面/背面カメラの同時利用に対応していない可能性があります)。一度ページを再読み込みしてお試しください。', 'err');
+      }else{
+        log(`アウトカメラ映像サイズ: ${outCamVideo.videoWidth}x${outCamVideo.videoHeight}`);
       }
     }, 1500);
   }catch(err){
