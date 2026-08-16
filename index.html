@@ -1174,6 +1174,7 @@ let geminiTokenModel = '';
 let realtimeMicStream = null;
 let realtimeAudioCtx = null;       // 受信音声の再生(24kHz) & リップシンク解析用
 let realtimeAnalyser = null;
+let realtimeRecDest = null;        // 録画時にAIの発話音声を拾うためのタップ(MediaStreamDestination)
 let realtimeMuted = false;
 
 function setRealtimeStatus(text){
@@ -1212,6 +1213,8 @@ function ensurePlaybackGraph(){
   realtimeAnalyser = realtimeAudioCtx.createAnalyser();
   realtimeAnalyser.fftSize = 256;
   realtimeAnalyser.connect(realtimeAudioCtx.destination);
+  realtimeRecDest = realtimeAudioCtx.createMediaStreamDestination(); // 通常再生とは別に、録画用に同じ音声をタップする
+  realtimeAnalyser.connect(realtimeRecDest);
   geminiNextPlayTime = realtimeAudioCtx.currentTime;
 }
 
@@ -1623,14 +1626,17 @@ document.getElementById('btnScreenshot').addEventListener('click', () => {
   }
 });
 
-/* ---------------- ⏺ 録画(モデル+背景のみをMP4で録画保存) ----------------
+/* ---------------- ⏺ 録画(モデル+背景 + Gemini Liveの会話音声をMP4で録画保存) ----------------
    撮影と同様、WebGLキャンバス自体をcaptureStream()でキャプチャするため、
    ボタンやパネルなど別レイヤーのUIは映り込まない。
+   録画開始時にGemini Live会話が有効な場合は、AIの発話音声(realtimeRecDest)と
+   マイク入力(realtimeMicStream)の両方をオーディオトラックとして合成する。
    MediaRecorderがvideo/mp4に対応している端末(Safari/iOS等)ではmp4で保存し、
    非対応の端末(Chrome/Android等)ではwebmにフォールバックする。 */
 let recMediaRecorder = null;
 let recChunks = [];
-let recStream = null;
+let recStream = null;       // MediaRecorderに渡す合成後のストリーム(映像+音声)
+let recVideoStream = null;  // 自前で生成したキャンバスキャプチャ(録画終了時にこれだけ停止する)
 let recIsRecording = false;
 
 function recPickMimeType(){
@@ -1661,7 +1667,23 @@ function recStart(){
       log('この端末で保存可能な動画形式が見つかりませんでした', 'err');
       return;
     }
-    recStream = renderer.domElement.captureStream(30); // モデル+背景のみを描画しているキャンバスを30fpsでキャプチャ
+
+    // Gemini Live会話が有効なら、AI発話を録画用にタップできるようにしておく
+    if(geminiWs && geminiWs.readyState === WebSocket.OPEN) ensurePlaybackGraph();
+
+    recVideoStream = renderer.domElement.captureStream(30); // モデル+背景のみを描画しているキャンバスを30fpsでキャプチャ
+    const audioTracks = [];
+    const audioParts = [];
+    if(realtimeRecDest && realtimeRecDest.stream.getAudioTracks().length){
+      audioTracks.push(...realtimeRecDest.stream.getAudioTracks());
+      audioParts.push('AIの発話音声');
+    }
+    if(realtimeMicStream && realtimeMicStream.getAudioTracks().length){
+      audioTracks.push(...realtimeMicStream.getAudioTracks());
+      audioParts.push('マイク入力');
+    }
+    recStream = new MediaStream([...recVideoStream.getVideoTracks(), ...audioTracks]);
+
     recChunks = [];
     recMediaRecorder = new MediaRecorder(recStream, { mimeType, videoBitsPerSecond: 8_000_000 });
     recMediaRecorder.ondataavailable = (e) => { if(e.data && e.data.size > 0) recChunks.push(e.data); };
@@ -1680,18 +1702,19 @@ function recStart(){
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-      if(ext === 'mp4'){
-        log(`録画を保存しました: ${filename}`, 'ok');
-      }else{
-        log(`録画を保存しました(この端末はmp4非対応のためwebm形式で保存): ${filename}`, 'ok');
-      }
-      if(recStream){ recStream.getTracks().forEach(t => t.stop()); recStream = null; }
+      const formatNote = ext === 'mp4' ? '' : '(この端末はmp4非対応のためwebm形式で保存)';
+      log(`録画を保存しました${formatNote}: ${filename}`, 'ok');
+      // キャンバスキャプチャは自前で生成したものだけを停止する。
+      // マイク/AI音声トラックはGemini Live会話が使い続けるため停止しない。
+      if(recVideoStream){ recVideoStream.getTracks().forEach(t => t.stop()); recVideoStream = null; }
+      recStream = null;
     };
     recMediaRecorder.start();
     recIsRecording = true;
     btnRecord.textContent = '⏹ 停止';
     btnRecord.classList.add('recording');
-    log('録画を開始しました', 'ok');
+    const audioNote = audioParts.length ? `(${audioParts.join('+')}を含む)` : '(会話が接続されていないため映像のみ)';
+    log(`録画を開始しました${audioNote}`, 'ok');
   }catch(err){
     recIsRecording = false;
     log(`録画開始エラー: ${err.message || err}`, 'err');
