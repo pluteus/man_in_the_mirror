@@ -40,6 +40,8 @@
     -webkit-backdrop-filter:blur(8px); white-space:nowrap; }
   button:active, .file-btn:active{ background:#1c2531; }
   button.on{ border-color:var(--accent); color:var(--accent); }
+  #btnRecord.recording{ border-color:var(--err); color:var(--err); animation:recBlink 1s ease-in-out infinite; }
+  @keyframes recBlink{ 0%,100%{ opacity:1; } 50%{ opacity:.45; } }
   input[type=file]{ display:none; }
 
   /* 各パネル右上の×閉じるボタン */
@@ -176,6 +178,7 @@
   <button id="btnCam">▶ インカメラ</button>
   <button id="btnOutCam">📷 アウトカメラ</button>
   <button id="btnScreenshot">📸 撮影</button>
+  <button id="btnRecord">⏺ 録画</button>
   <button id="btnCalib">🎯 中央校正</button>
   <button id="btnGyro">🧭 ジャイロ有効化</button>
   <button id="btnCalibScreen">📏 画面校正</button>
@@ -1618,6 +1621,94 @@ document.getElementById('btnScreenshot').addEventListener('click', () => {
     // 外部URL由来のテクスチャ(CORS未対応)が混ざっているとcanvasが「汚染」され保存できない場合がある
     log(`スクリーンショット保存エラー: ${err.message || err}(外部素材のCORS制限が原因の場合があります)`, 'err');
   }
+});
+
+/* ---------------- ⏺ 録画(モデル+背景のみをMP4で録画保存) ----------------
+   撮影と同様、WebGLキャンバス自体をcaptureStream()でキャプチャするため、
+   ボタンやパネルなど別レイヤーのUIは映り込まない。
+   MediaRecorderがvideo/mp4に対応している端末(Safari/iOS等)ではmp4で保存し、
+   非対応の端末(Chrome/Android等)ではwebmにフォールバックする。 */
+let recMediaRecorder = null;
+let recChunks = [];
+let recStream = null;
+let recIsRecording = false;
+
+function recPickMimeType(){
+  const candidates = [
+    'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
+    'video/mp4;codecs=h264',
+    'video/mp4',
+    'video/webm;codecs=vp9',
+    'video/webm;codecs=vp8',
+    'video/webm'
+  ];
+  for(const c of candidates){
+    if(window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(c)) return c;
+  }
+  return '';
+}
+
+const btnRecord = document.getElementById('btnRecord');
+
+function recStart(){
+  try{
+    if(!window.MediaRecorder){
+      log('この端末は録画機能(MediaRecorder)に対応していません', 'err');
+      return;
+    }
+    const mimeType = recPickMimeType();
+    if(!mimeType){
+      log('この端末で保存可能な動画形式が見つかりませんでした', 'err');
+      return;
+    }
+    recStream = renderer.domElement.captureStream(30); // モデル+背景のみを描画しているキャンバスを30fpsでキャプチャ
+    recChunks = [];
+    recMediaRecorder = new MediaRecorder(recStream, { mimeType, videoBitsPerSecond: 8_000_000 });
+    recMediaRecorder.ondataavailable = (e) => { if(e.data && e.data.size > 0) recChunks.push(e.data); };
+    recMediaRecorder.onstop = () => {
+      const outType = mimeType.split(';')[0];
+      const blob = new Blob(recChunks, { type: outType });
+      const ext = outType === 'video/mp4' ? 'mp4' : 'webm';
+      const ts = new Date();
+      const pad = (n) => String(n).padStart(2, '0');
+      const filename = `vrm_recording_${ts.getFullYear()}${pad(ts.getMonth()+1)}${pad(ts.getDate())}_${pad(ts.getHours())}${pad(ts.getMinutes())}${pad(ts.getSeconds())}.${ext}`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      if(ext === 'mp4'){
+        log(`録画を保存しました: ${filename}`, 'ok');
+      }else{
+        log(`録画を保存しました(この端末はmp4非対応のためwebm形式で保存): ${filename}`, 'ok');
+      }
+      if(recStream){ recStream.getTracks().forEach(t => t.stop()); recStream = null; }
+    };
+    recMediaRecorder.start();
+    recIsRecording = true;
+    btnRecord.textContent = '⏹ 停止';
+    btnRecord.classList.add('recording');
+    log('録画を開始しました', 'ok');
+  }catch(err){
+    recIsRecording = false;
+    log(`録画開始エラー: ${err.message || err}`, 'err');
+  }
+}
+
+function recStop(){
+  if(recMediaRecorder && recMediaRecorder.state !== 'inactive'){
+    recMediaRecorder.stop();
+  }
+  recIsRecording = false;
+  btnRecord.textContent = '⏺ 録画';
+  btnRecord.classList.remove('recording');
+}
+
+btnRecord.addEventListener('click', () => {
+  if(recIsRecording){ recStop(); } else { recStart(); }
 });
 
 /* ---------------- 頭部位置 推定 ---------------- */
