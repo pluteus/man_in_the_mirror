@@ -166,7 +166,9 @@
   <label class="file-btn" for="vrmFile">📂 VRM選択</label>
   <input type="file" id="vrmFile" accept=".vrm">
   <button id="btnVroidHub">🌐 VRoid Hub</button>
-  <input type="file" id="vrmaFile" accept=".vrma,.fbx" multiple style="display:none">
+  <button id="btnPmxFolder">📁 PMXモデル</button>
+  <input type="file" id="pmxFolder" webkitdirectory multiple style="display:none">
+  <input type="file" id="vrmaFile" accept=".vrma,.fbx,.vmd" multiple style="display:none">
   <button id="btnMotionList">🎞 モーションリスト</button>
   <input type="file" id="bgmFile" accept="audio/*" multiple style="display:none">
   <button id="btnBgmList">🎵 BGMリスト</button>
@@ -190,7 +192,7 @@
     <button id="btnMotion">▶</button>
     <button id="btnRandom" class="on">🔀 ランダム:ON</button>
     <button id="btnRepeat">🔁 リピート:OFF</button>
-    <button id="btnAddMotion" title="VRMA または Mixamo FBXモーションを追加">➕ 追加</button>
+    <button id="btnAddMotion" title="VRM: .vrma / Mixamo FBX、PMX: .vmd を追加">➕ 追加</button>
   </div>
   <div class="motion-progress-row">
     <input type="range" id="motionProgress" min="0" max="1000" step="1" value="0">
@@ -315,6 +317,8 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+import { MMDLoader } from 'three/addons/loaders/MMDLoader.js';
+import { MMDAnimationHelper } from 'three/addons/animation/MMDAnimationHelper.js';
 import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
 import { VRMAnimationLoaderPlugin, createVRMAnimationClip } from '@pixiv/three-vrm-animation';
 import { FaceLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
@@ -376,6 +380,18 @@ window.addEventListener('resize', () => {
 let currentVRM = null;
 let baseModelRotY = 0; // VRM読込時の基準向き(回転量スライダーはこれに加算される)
 let mixer = null;
+
+/* ---------------- PMX / VMD (MMD) 読み込み ----------------
+   VRMとPMXは共存させず、読み込んだ方だけをシーンに表示する(modelTypeで切替)。
+   モーションリストはVRM用/PMX用を別々に保持し、モデル種別を切り替えると
+   対応するリストに自動で入れ替わる(vmdMotionClipsStash/vrmMotionClipsStash)。
+   物理演算(揺れもの)はammo.jsを追加導入しないため無効化している。 */
+let modelType = 'vrm'; // 'vrm' | 'pmx'
+let currentPMX = null;       // 読み込み中のPMX SkinnedMesh
+let mmdHelper = null;        // MMDAnimationHelper(IK/グラント処理用、物理は無効)
+let pmxMixer = null;         // currentPMX用のTHREE.AnimationMixer(mmdHelper経由で取得)
+let vrmMotionClipsStash = []; // モデル種別切替時の退避用
+let pmxMotionClipsStash = [];
 let currentAction = null;
 const clock = new THREE.Clock();
 
@@ -464,6 +480,12 @@ function loadVRM(url, label){
       vrmLoader.parse(arrayBuffer, path, (gltf) => {
         const vrm = gltf.userData.vrm;
         if(currentVRM){ scene.remove(currentVRM.scene); }
+        if(currentPMX){
+          if(mmdHelper) mmdHelper.remove(currentPMX);
+          scene.remove(currentPMX);
+          currentPMX = null;
+          pmxMixer = null;
+        }
         currentVRM = vrm;
         scene.add(vrm.scene);
         // VRM0.x モデルは正面が-Z向きなので、+Z向き(VRM1.0基準)に揃える
@@ -476,6 +498,7 @@ function loadVRM(url, label){
           if(e.action === currentAction) onMotionFinished();
         });
         currentAction = null;
+        switchModelType('vrm');
         document.getElementById('centerHint').style.display = 'none';
         log(`VRM読込完了: ${label}`, 'ok');
         resolve(vrm);
@@ -496,7 +519,7 @@ function loadVRMA(url, label){
         return;
       }
       const clip = createVRMAnimationClip(vrmAnimations[0], currentVRM);
-      resolve({ name: label, clip });
+      resolve({ name: label, clip, type: 'vrm' });
     }, undefined, (err) => { log(`モーション読込エラー(${label}): ${err.message || err}`, 'err'); reject(err); });
   });
 }
@@ -597,7 +620,7 @@ function loadMixamoFBX(url, label){
     fbxLoader.load(url, (asset) => {
       try{
         const clip = retargetMixamoClip(asset, currentVRM);
-        resolve({ name: label, clip });
+        resolve({ name: label, clip, type: 'vrm' });
       }catch(err){
         log(`FBXモーション変換エラー(${label}): ${err.message || err}`, 'err');
         reject(err);
@@ -616,6 +639,114 @@ document.getElementById('vrmFile').addEventListener('change', (e) => {
 document.getElementById('btnVroidHub').addEventListener('click', () => {
   window.open('https://hub.vroid.com', '_blank', 'noopener');
   log('VRoid Hubを新しいタブで開きました。モデルページで「このモデルを利用する」からVRMファイルをダウンロードし、📂 VRM選択で読み込んでください', 'ok');
+});
+
+/* ---------------- PMXモデル + VMDモーション(MMD) ---------------- */
+function switchModelType(newType){
+  if(modelType === newType) return;
+  // 現在のモーションリストを退避し、切替先の退避リストを復元
+  if(modelType === 'vrm') vrmMotionClipsStash = motionClips; else pmxMotionClipsStash = motionClips;
+  motionClips = (newType === 'vrm') ? vrmMotionClipsStash : pmxMotionClipsStash;
+  lastMotionIndex = -1;
+  if(currentAction){ currentAction.stop(); currentAction = null; }
+  modelType = newType;
+  updateMotionListUI();
+  updatePlayPauseButton();
+}
+
+// フォルダ選択で取得したFileリストから、PMXが参照する外部テクスチャをblob URLへ解決するための
+// URLModifierを組み立てる。webkitRelativePathでサブフォルダ構成を維持したまま照合する。
+function buildPmxUrlResolver(pmxFile, allFiles){
+  const pmxRelPath = (pmxFile.webkitRelativePath || pmxFile.name).replace(/\\/g, '/');
+  const pmxDir = pmxRelPath.includes('/') ? pmxRelPath.slice(0, pmxRelPath.lastIndexOf('/') + 1) : '';
+
+  const fileMap = new Map(); // 正規化した相対パス(またはファイル名のみ) → blob URL
+  for(const f of allFiles){
+    const rel = (f.webkitRelativePath || f.name).replace(/\\/g, '/');
+    const relToModel = (rel.startsWith(pmxDir) ? rel.slice(pmxDir.length) : rel).toLowerCase();
+    const blobUrl = URL.createObjectURL(f);
+    fileMap.set(relToModel, blobUrl);
+    const baseName = relToModel.split('/').pop();
+    if(!fileMap.has(baseName)) fileMap.set(baseName, blobUrl); // ファイル名だけでも引けるようにしておく
+  }
+
+  const pmxUrl = fileMap.get(pmxRelPath.slice(pmxDir.length).toLowerCase()) || URL.createObjectURL(pmxFile);
+
+  const urlModifier = (url) => {
+    let normalized = url;
+    try{ normalized = decodeURIComponent(url); }catch(e){ /* そのまま使う */ }
+    normalized = normalized.replace(/\\/g, '/').toLowerCase();
+    for(const [key, blobUrl] of fileMap){
+      if(normalized.endsWith(key)) return blobUrl;
+    }
+    return url;
+  };
+
+  return { pmxUrl, urlModifier };
+}
+
+function loadPMXFromFiles(pmxFile, allFiles){
+  return new Promise((resolve, reject) => {
+    log(`PMX読込中: ${pmxFile.name}`);
+    const { pmxUrl, urlModifier } = buildPmxUrlResolver(pmxFile, allFiles);
+
+    const manager = new THREE.LoadingManager();
+    manager.setURLModifier(urlModifier);
+    const loader = new MMDLoader(manager);
+
+    loader.load(pmxUrl, (mesh) => {
+      if(currentVRM){ scene.remove(currentVRM.scene); currentVRM = null; }
+      if(currentPMX){
+        if(mmdHelper) mmdHelper.remove(currentPMX);
+        scene.remove(currentPMX);
+      }
+      currentPMX = mesh;
+      scene.add(mesh);
+      baseModelRotY = mesh.rotation.y;
+
+      if(!mmdHelper) mmdHelper = new MMDAnimationHelper();
+      mmdHelper.add(mesh, { physics: false }); // ammo.js未導入のため物理(揺れもの)は無効
+      pmxMixer = mmdHelper.objects.get(mesh).mixer;
+      pmxMixer.addEventListener('finished', (e) => {
+        if(e.action === currentAction) onMotionFinished();
+      });
+
+      switchModelType('pmx');
+      document.getElementById('centerHint').style.display = 'none';
+      log(`PMX読込完了: ${pmxFile.name}(物理演算は無効化しています)`, 'ok');
+      resolve(mesh);
+    }, undefined, (err) => {
+      log(`PMX読込エラー(${pmxFile.name}): ${err.message || err}`, 'err');
+      reject(err);
+    });
+  });
+}
+
+function loadVMD(url, label){
+  return new Promise((resolve, reject) => {
+    if(!currentPMX || !pmxMixer){ log('先にPMXモデルを読み込んでください', 'warn'); reject(new Error('no pmx')); return; }
+    log(`VMDモーション読込中: ${label}`);
+    const loader = new MMDLoader();
+    loader.loadAnimation(url, currentPMX, (clip) => {
+      resolve({ name: label, clip, type: 'pmx' });
+    }, undefined, (err) => { log(`VMD読込エラー(${label}): ${err.message || err}`, 'err'); reject(err); });
+  });
+}
+
+document.getElementById('btnPmxFolder').addEventListener('click', () => {
+  document.getElementById('pmxFolder').click();
+});
+
+document.getElementById('pmxFolder').addEventListener('change', async (e) => {
+  const files = Array.from(e.target.files || []);
+  e.target.value = '';
+  if(!files.length) return;
+  const pmxFile = files.find(f => /\.pmx$/i.test(f.name));
+  if(!pmxFile){
+    log('選択したフォルダに.pmxファイルが見つかりません', 'err');
+    return;
+  }
+  loadPMXFromFiles(pmxFile, files).catch(() => {});
 });
 
 /* ---------------- モーションリスト & 再生制御 ---------------- */
@@ -640,10 +771,12 @@ async function loadMotionList(files){
 }
 
 function playMotion(index){
-  if(!motionClips.length || !mixer) return;
+  if(!motionClips.length) return;
   const entry = motionClips[index];
+  const activeMixer = entry.type === 'pmx' ? pmxMixer : mixer;
+  if(!activeMixer) return;
   if(currentAction){ currentAction.stop(); }
-  currentAction = mixer.clipAction(entry.clip);
+  currentAction = activeMixer.clipAction(entry.clip);
   currentAction.reset();
   currentAction.setLoop(repeatMode ? THREE.LoopRepeat : THREE.LoopOnce);
   currentAction.clampWhenFinished = !repeatMode;
@@ -750,12 +883,19 @@ document.getElementById('vrmaFile').addEventListener('change', async (e) => {
   e.target.value = ''; // 同じファイルを連続追加できるようリセット
   for(const file of files){
     const url = URL.createObjectURL(file);
-    const isFBX = /\.fbx$/i.test(file.name);
+    const ext = (file.name.split('.').pop() || '').toLowerCase();
     try{
-      const entry = isFBX ? await loadMixamoFBX(url, file.name) : await loadVRMA(url, file.name);
+      let entry;
+      if(ext === 'vmd'){
+        if(modelType !== 'pmx'){ log(`.vmdはPMXモデル用です。先にPMXモデルを読み込んでください: ${file.name}`, 'warn'); continue; }
+        entry = await loadVMD(url, file.name);
+      }else{
+        if(modelType !== 'vrm'){ log(`${ext === 'fbx' ? 'FBX' : '.vrma'}はVRMモデル用です。PMXモデルには.vmdを追加してください: ${file.name}`, 'warn'); continue; }
+        entry = (ext === 'fbx') ? await loadMixamoFBX(url, file.name) : await loadVRMA(url, file.name);
+      }
       motionClips.push(entry);
       log(`モーションリストに追加: ${file.name}`, 'ok');
-    }catch(err){ /* エラーはloadVRMA/loadMixamoFBX内でログ済み */ }
+    }catch(err){ /* エラーはloadVRMA/loadMixamoFBX/loadVMD内でログ済み */ }
   }
   updateMotionListUI();
   if(!currentAction && motionClips.length){
@@ -1895,6 +2035,7 @@ function updateOffAxisFromHead(totalDx, totalDy, depthRatio){
 
   // モデルは画面(z=0)の奥側に置くことで「窓の中」の錯覚を作る
   if(currentVRM){ currentVRM.scene.position.z = -params.screenZ; }
+  if(currentPMX){ currentPMX.position.z = -params.screenZ; }
 
   updateOffAxisCamera(pe, pa, pb, pc, 0.01, 50);
 }
@@ -1927,6 +2068,7 @@ function updateCameraFromFace(){
   }
 
   if(currentVRM){ currentVRM.scene.position.z = 0; }
+  if(currentPMX){ currentPMX.position.z = 0; }
   const range = 1.6 * params.sxy;
   const camX = totalDx * range;
   const camY = totalDy * range * 0.85;
@@ -2227,6 +2369,10 @@ function animate(){
   if(currentVRM){
     currentVRM.update(delta);
     currentVRM.scene.rotation.y = baseModelRotY + THREE.MathUtils.degToRad(params.modelRotY);
+  }
+  if(mmdHelper && currentPMX){
+    mmdHelper.update(delta); // 内部でpmxMixer.update()相当 + IK/グラント処理も行う
+    currentPMX.rotation.y = baseModelRotY + THREE.MathUtils.degToRad(params.modelRotY);
   }
   updateMotionProgress();
   updateBgmProgress();
