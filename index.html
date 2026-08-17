@@ -270,6 +270,7 @@
       <button id="btnRealtimeConnect">🎙️ 接続</button>
       <button id="btnRealtimeMute">🔇 ミュート</button>
       <button id="btnAutoGesture" class="on">🎭 自動ジェスチャー:ON</button>
+      <button id="btnSendVideo">📷 映像を送信:OFF</button>
       <button id="btnRealtimeClearKey">🗑️ キー消去</button>
     </div>
     <div id="realtimeStatus">未接続</div>
@@ -1372,6 +1373,48 @@ function startMicCapture(stream){
 
 const GEMINI_LIVE_MODEL = 'gemini-3.1-flash-live-preview';
 
+/* ---------------- 📷 会話中にカメラ映像を認識させる ----------------
+   Gemini LiveのrealtimeInputはaudioと同じ形式でvideo(JPEG)も受け付けるため、
+   アウトカメラ(背景用)が起動していればそちらを、無ければインカメラ(顔トラッキング用)の
+   映像を、Google推奨の上限に合わせて1秒に1回JPEGでキャプチャして送信する。
+   映像を外部に送る機能なので、既定はOFF。ユーザーがONにした時だけ送信する。 */
+let sendVideoEnabled = false;
+let videoSendInterval = null;
+const videoSendCanvas = document.createElement('canvas');
+const videoSendCtx = videoSendCanvas.getContext('2d');
+
+function captureAndSendVideoFrame(){
+  if(!geminiWs || geminiWs.readyState !== WebSocket.OPEN) return;
+  let sourceVideo = null;
+  if(outCamStream && outCamVideo.videoWidth > 0){
+    sourceVideo = outCamVideo; // アウトカメラ優先(「これ何?」のようにモノを見せて聞くケースを想定)
+  }else if(camRunning && video.videoWidth > 0){
+    sourceVideo = video; // アウトカメラが無ければインカメラ映像を使う
+  }
+  if(!sourceVideo) return;
+
+  const maxDim = 640; // 送信サイズを抑えて帯域・コストを節約
+  const scale = Math.min(1, maxDim / Math.max(sourceVideo.videoWidth, sourceVideo.videoHeight));
+  const w = Math.max(1, Math.round(sourceVideo.videoWidth * scale));
+  const h = Math.max(1, Math.round(sourceVideo.videoHeight * scale));
+  videoSendCanvas.width = w;
+  videoSendCanvas.height = h;
+  videoSendCtx.drawImage(sourceVideo, 0, 0, w, h);
+  const dataUrl = videoSendCanvas.toDataURL('image/jpeg', 0.7);
+  const base64 = dataUrl.split(',')[1];
+  geminiWs.send(JSON.stringify({
+    realtimeInput: { video: { data: base64, mimeType: 'image/jpeg' } }
+  }));
+}
+
+function startVideoSend(){
+  if(videoSendInterval) return;
+  videoSendInterval = setInterval(captureAndSendVideoFrame, 1000); // Live APIの推奨上限: 最大1fps
+}
+function stopVideoSend(){
+  if(videoSendInterval){ clearInterval(videoSendInterval); videoSendInterval = null; }
+}
+
 // ブラウザから直接、入力されたAPIキーで短命なephemeralトークンを発行する。
 // (このリクエスト自体にAPIキーが載るが、他人には送信されず、本人のGoogleアカウントへの通信のみ)
 async function mintEphemeralToken(apiKey){
@@ -1470,6 +1513,7 @@ async function connectRealtime(){
         btn.classList.add('on');
         log('Gemini Liveに接続しました', 'ok');
         startMicCapture(realtimeMicStream);
+        if(sendVideoEnabled) startVideoSend();
         return;
       }
 
@@ -1521,6 +1565,7 @@ function disconnectRealtime(){
   if(geminiWs){ try{ geminiWs.close(); }catch(e){} geminiWs = null; }
   if(geminiCaptureProcessor){ try{ geminiCaptureProcessor.disconnect(); }catch(e){} geminiCaptureProcessor.onaudioprocess = null; geminiCaptureProcessor = null; }
   if(geminiCaptureCtx){ try{ geminiCaptureCtx.close(); }catch(e){} geminiCaptureCtx = null; }
+  stopVideoSend();
   stopPlayback();
   if(realtimeAudioCtx){ try{ realtimeAudioCtx.close(); }catch(e){} realtimeAudioCtx = null; }
   realtimeAnalyser = null;
@@ -1553,6 +1598,19 @@ document.getElementById('btnAutoGesture').addEventListener('click', () => {
   btn.classList.toggle('on', autoGestureEnabled);
   btn.textContent = `🎭 自動ジェスチャー:${autoGestureEnabled ? 'ON' : 'OFF'}`;
   if(!autoGestureEnabled) pendingEmotionMotionIndex = null;
+});
+
+document.getElementById('btnSendVideo').addEventListener('click', () => {
+  sendVideoEnabled = !sendVideoEnabled;
+  const btn = document.getElementById('btnSendVideo');
+  btn.classList.toggle('on', sendVideoEnabled);
+  btn.textContent = `📷 映像を送信:${sendVideoEnabled ? 'ON' : 'OFF'}`;
+  if(sendVideoEnabled){
+    log('カメラ映像をGeminiに送信します(アウトカメラ優先、無ければインカメラ)。会話中は見えているものについて質問できます', 'ok');
+    if(geminiWs && geminiWs.readyState === WebSocket.OPEN) startVideoSend();
+  }else{
+    stopVideoSend();
+  }
 });
 
 document.getElementById('btnRealtime').addEventListener('click', () => {
