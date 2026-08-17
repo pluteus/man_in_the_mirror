@@ -269,6 +269,7 @@
     <div class="motion-controls" style="border-bottom:none; padding-left:0; padding-right:0;">
       <button id="btnRealtimeConnect">🎙️ 接続</button>
       <button id="btnRealtimeMute">🔇 ミュート</button>
+      <button id="btnAutoGesture" class="on">🎭 自動ジェスチャー:ON</button>
       <button id="btnRealtimeClearKey">🗑️ キー消去</button>
     </div>
     <div id="realtimeStatus">未接続</div>
@@ -627,6 +628,7 @@ let motionClips = []; // { name, clip }
 let lastMotionIndex = -1;
 let randomPlayback = true;
 let repeatMode = false;
+let pendingEmotionMotionIndex = null; // 現在のモーション終了後に再生する、会話内容に応じたジェスチャー
 
 async function loadMotionList(files){
   motionClips = [];
@@ -642,15 +644,35 @@ async function loadMotionList(files){
   updateMotionListUI();
 }
 
-function playMotion(index){
+const MOTION_CROSSFADE_SEC = 0.35; // モーション切替時のクロスフェード時間
+
+function playMotion(index, opts = {}){
   if(!motionClips.length || !mixer) return;
   const entry = motionClips[index];
-  if(currentAction){ currentAction.stop(); }
-  currentAction = mixer.clipAction(entry.clip);
-  currentAction.reset();
-  currentAction.setLoop(repeatMode ? THREE.LoopRepeat : THREE.LoopOnce);
-  currentAction.clampWhenFinished = !repeatMode;
-  currentAction.play();
+  const useCrossfade = opts.crossfade !== false; // 既定でクロスフェードON。第2引数で{crossfade:false}を渡せば即切替。
+  const duration = opts.duration || MOTION_CROSSFADE_SEC;
+
+  const prevAction = currentAction;
+  const nextAction = mixer.clipAction(entry.clip);
+
+  nextAction.reset();
+  nextAction.enabled = true;
+  nextAction.setLoop(repeatMode ? THREE.LoopRepeat : THREE.LoopOnce);
+  nextAction.clampWhenFinished = !repeatMode;
+  nextAction.setEffectiveTimeScale(1);
+  nextAction.setEffectiveWeight(1);
+
+  if(useCrossfade && prevAction && prevAction !== nextAction){
+    // 前のモーションをフェードアウトしつつ、新しいモーションをフェードインして重ねて再生する
+    prevAction.fadeOut(duration);
+    nextAction.fadeIn(duration);
+    nextAction.play();
+  }else{
+    if(prevAction && prevAction !== nextAction) prevAction.stop();
+    nextAction.play();
+  }
+
+  currentAction = nextAction;
   lastMotionIndex = index;
   updatePlayPauseButton();
   updateMotionListUI();
@@ -671,8 +693,68 @@ function playNextSequential(){
   playMotion((lastMotionIndex + 1) % motionClips.length);
 }
 
+/* ---------------- 🎭 会話中の自律ジェスチャー ----------------
+   Gemini Liveの発話(outputTranscription)をターン単位でまとめ、簡易的なキーワード分類で
+   感情/内容を推定し、モーションファイル名にマッチするクリップを自動再生する。
+   マッチするクリップが無ければ、従来通り全モーションからのランダム再生にフォールバックする。
+   「モーション再生をしていない間」だけ即再生し、何か再生中なら現在のモーションが終わってから
+   切り替える(pendingEmotionMotionIndexで予約)。 */
+const GESTURE_KEYWORDS = {
+  joy:       { text: /嬉し|楽し|最高|やった|うれし|わーい|happy|glad|great|awesome|joy/i,      motion: /嬉|喜|楽|happy|joy|laugh|笑/i },
+  sad:       { text: /悲し|残念|ごめん|すみません|つら|申し訳|sorry|sad/i,                       motion: /悲|sad|cry|泣/i },
+  surprised: { text: /まさか|えっ|びっくり|驚|wow|すごい|マジ|surprise/i,                        motion: /驚|surprise|びっくり/i },
+  angry:     { text: /怒|許せ|ムカ|angry|イライラ/i,                                             motion: /怒|angry/i },
+  thinking:  { text: /うーん|えーと|そうですね|考え|think|hmm/i,                                  motion: /考|think|hmm/i },
+  greeting:  { text: /こんにちは|はじめまして|おはよう|こんばんは|hello|hi\b|よろしく/i,          motion: /挨拶|礼|お辞儀|wave|hello|greet|bow/i },
+  agree:     { text: /はい|そうです|その通り|了解|わかりました|yes|sure|オッケー/i,                motion: /肯定|頷|うなず|yes|nod/i },
+  deny:      { text: /いいえ|違います|no\b|ちがう/i,                                              motion: /否定|首を振|no\b|shake/i },
+  love:      { text: /好き|大好き|love|愛/i,                                                      motion: /好き|love|heart|愛/i }
+};
+
+function classifyEmotion(text){
+  for(const [category, rule] of Object.entries(GESTURE_KEYWORDS)){
+    if(rule.text.test(text)) return category;
+  }
+  return null;
+}
+
+function pickGestureMotionIndex(category){
+  if(!motionClips.length) return -1;
+  let candidates = [];
+  if(category){
+    const rule = GESTURE_KEYWORDS[category];
+    candidates = motionClips.map((m, i) => i).filter(i => rule.motion.test(motionClips[i].name));
+  }
+  const pool = candidates.length ? candidates : motionClips.map((m, i) => i); // マッチ無しなら全体からランダム
+  if(pool.length > 1){
+    let idx;
+    do{ idx = pool[Math.floor(Math.random() * pool.length)]; }while(idx === lastMotionIndex);
+    return idx;
+  }
+  return pool[0];
+}
+
+function triggerAutoGesture(text){
+  if(!autoGestureEnabled || !text || !text.trim() || !motionClips.length) return;
+  const category = classifyEmotion(text);
+  const idx = pickGestureMotionIndex(category);
+  if(idx < 0) return;
+  if(!currentAction || !currentAction.isRunning()){
+    playMotion(idx);
+    log(`自動ジェスチャー再生: ${motionClips[idx].name}${category ? ` (${category})` : ''}`, 'ok');
+  }else{
+    pendingEmotionMotionIndex = idx; // 再生中なら、今のモーションが終わり次第切り替える
+  }
+}
+
 function onMotionFinished(){
   if(repeatMode || !motionClips.length) return;
+  if(pendingEmotionMotionIndex !== null){
+    const idx = pendingEmotionMotionIndex;
+    pendingEmotionMotionIndex = null;
+    playMotion(idx);
+    return;
+  }
   if(randomPlayback) playRandomMotion();
   else playNextSequential();
 }
@@ -1176,6 +1258,8 @@ let realtimeAudioCtx = null;       // 受信音声の再生(24kHz) & リップ�
 let realtimeAnalyser = null;
 let realtimeRecDest = null;        // 録画時にAIの発話音声を拾うためのタップ(MediaStreamDestination)
 let realtimeMuted = false;
+let autoGestureEnabled = true;     // 会話中、内容/感情に応じて自動でジェスチャーモーションを再生するか
+let currentTurnOutputText = '';    // AIの発話(outputTranscription)をターン単位で蓄積するバッファ
 
 function setRealtimeStatus(text){
   const el = document.getElementById('realtimeStatus');
@@ -1391,7 +1475,7 @@ async function connectRealtime(){
 
       if(evt.serverContent){
         const sc = evt.serverContent;
-        if(sc.interrupted) stopPlayback();
+        if(sc.interrupted){ stopPlayback(); currentTurnOutputText = ''; pendingEmotionMotionIndex = null; }
         if(sc.modelTurn && sc.modelTurn.parts){
           for(const part of sc.modelTurn.parts){
             if(part.inlineData && part.inlineData.data) playAudioChunk(part.inlineData.data);
@@ -1402,6 +1486,11 @@ async function connectRealtime(){
         }
         if(sc.outputTranscription && sc.outputTranscription.text){
           addRealtimeTranscript(`🤖 ${sc.outputTranscription.text}`);
+          currentTurnOutputText += sc.outputTranscription.text; // ターン内の発話をまとめて後で感情分類する
+        }
+        if(sc.turnComplete){
+          triggerAutoGesture(currentTurnOutputText);
+          currentTurnOutputText = '';
         }
       }else if(evt.goAway){
         log('Gemini Live: セッションがまもなく終了します', 'warn');
@@ -1456,6 +1545,14 @@ document.getElementById('btnRealtimeMute').addEventListener('click', () => {
   const btn = document.getElementById('btnRealtimeMute');
   btn.classList.toggle('on', realtimeMuted);
   btn.textContent = realtimeMuted ? '🔇 ミュート中' : '🔇 ミュート';
+});
+
+document.getElementById('btnAutoGesture').addEventListener('click', () => {
+  autoGestureEnabled = !autoGestureEnabled;
+  const btn = document.getElementById('btnAutoGesture');
+  btn.classList.toggle('on', autoGestureEnabled);
+  btn.textContent = `🎭 自動ジェスチャー:${autoGestureEnabled ? 'ON' : 'OFF'}`;
+  if(!autoGestureEnabled) pendingEmotionMotionIndex = null;
 });
 
 document.getElementById('btnRealtime').addEventListener('click', () => {
