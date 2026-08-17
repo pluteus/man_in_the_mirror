@@ -1491,15 +1491,29 @@ async function initFaceLandmarker(){
   const filesetResolver = await FilesetResolver.forVisionTasks(
     "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
   );
-  faceLandmarker = await FaceLandmarker.createFromOptions(filesetResolver, {
-    baseOptions: {
-      modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
-      delegate: "GPU"
-    },
-    runningMode: "VIDEO",
-    numFaces: 1
-  });
-  log('顔認識モデル準備完了', 'ok');
+  try{
+    faceLandmarker = await FaceLandmarker.createFromOptions(filesetResolver, {
+      baseOptions: {
+        modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+        delegate: "GPU"
+      },
+      runningMode: "VIDEO",
+      numFaces: 1
+    });
+    log('顔認識モデル準備完了', 'ok');
+  }catch(err){
+    // 一部端末(Chromebook等)ではGPUデリゲートの初期化に失敗することがあるためCPUで再試行する
+    log(`GPUでの顔認識モデル初期化に失敗したためCPUで再試行します: ${err.message || err}`, 'warn');
+    faceLandmarker = await FaceLandmarker.createFromOptions(filesetResolver, {
+      baseOptions: {
+        modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+        delegate: "CPU"
+      },
+      runningMode: "VIDEO",
+      numFaces: 1
+    });
+    log('顔認識モデル準備完了(CPUモード)', 'ok');
+  }
 }
 
 document.getElementById('btnCam').addEventListener('click', async () => {
@@ -1522,6 +1536,7 @@ document.getElementById('btnCam').addEventListener('click', async () => {
     video.srcObject = stream;
     await video.play();
     camRunning = true;
+    detectFaceErrorLogged = false;
     btn.textContent = '■ インカメラ停止';
     btn.classList.add('on');
     log('カメラ開始・顔トラッキング開始', 'ok');
@@ -1953,21 +1968,33 @@ function updateGyroSmoothing(){
   gyroSmoothed.gamma += (gyroRaw.gamma - gyroSmoothed.gamma) * a;
 }
 
+let detectFaceErrorLogged = false; // 毎フレーム同じエラーでログが埋まらないよう、初回のみ表示する
+
 function detectFace(){
   if(!camRunning || !faceLandmarker) return;
   if(video.readyState < 2) return;
   if(video.currentTime === lastVideoTime) return;
   lastVideoTime = video.currentTime;
 
-  const result = faceLandmarker.detectForVideo(video, performance.now());
-  if(result.faceLandmarks && result.faceLandmarks.length > 0){
-    const lm = result.faceLandmarks[0];
-    const nose = lm[1];      // 鼻先
-    const rightEdge = lm[454]; // 顔右端付近(画像上)
-    const leftEdge = lm[234];  // 顔左端付近(画像上)
-    raw.x = nose.x; // 0=左, 1=右 (ミラーされていない生カメラ座標)
-    raw.y = nose.y; // 0=上, 1=下
-    raw.width = Math.abs(rightEdge.x - leftEdge.x); // 顔幅(奥行きの目安)
+  try{
+    const result = faceLandmarker.detectForVideo(video, performance.now());
+    if(result.faceLandmarks && result.faceLandmarks.length > 0){
+      const lm = result.faceLandmarks[0];
+      const nose = lm[1];      // 鼻先
+      const rightEdge = lm[454]; // 顔右端付近(画像上)
+      const leftEdge = lm[234];  // 顔左端付近(画像上)
+      raw.x = nose.x; // 0=左, 1=右 (ミラーされていない生カメラ座標)
+      raw.y = nose.y; // 0=上, 1=下
+      raw.width = Math.abs(rightEdge.x - leftEdge.x); // 顔幅(奥行きの目安)
+    }
+  }catch(err){
+    // ここで例外を握りつぶさないと、animate()内でこの後に続くrenderer.render()が
+    // 呼ばれずモデルの描画・カメラ映像更新が完全に止まってしまう(画面が動かないだけで
+    // アプリ側log()には何も出ない状態になる)。そのため必ずcatchし、初回だけログに出す。
+    if(!detectFaceErrorLogged){
+      detectFaceErrorLogged = true;
+      log(`顔認識処理でエラーが発生しました(トラッキングを一時停止): ${err.message || err}`, 'err');
+    }
   }
 }
 
