@@ -492,7 +492,6 @@ function loadVRM(url, label){
 function loadVRMA(url, label){
   return new Promise((resolve, reject) => {
     if(!currentVRM){ log('先にVRMを読み込んでください', 'warn'); reject(new Error('no vrm')); return; }
-    log(`モーション読込中: ${label}`);
     vrmaLoader.load(url, (gltf) => {
       const vrmAnimations = gltf.userData.vrmAnimations;
       if(!vrmAnimations || !vrmAnimations.length){
@@ -598,7 +597,6 @@ function retargetMixamoClip(asset, vrm){
 function loadMixamoFBX(url, label){
   return new Promise((resolve, reject) => {
     if(!currentVRM){ log('先にVRMを読み込んでください', 'warn'); reject(new Error('no vrm')); return; }
-    log(`FBXモーション読込中: ${label}`);
     fbxLoader.load(url, (asset) => {
       try{
         const clip = retargetMixamoClip(asset, currentVRM);
@@ -623,38 +621,111 @@ document.getElementById('btnVroidHub').addEventListener('click', () => {
   log('VRoid Hubを新しいタブで開きました。モデルページで「このモデルを利用する」からVRMファイルをダウンロードし、📂 VRM選択で読み込んでください', 'ok');
 });
 
-/* ---------------- モーションリスト & 再生制御 ---------------- */
-const defaultMotionFiles = ['VRMA_01.vrma','VRMA_02.vrma','VRMA_03.vrma','VRMA_04.vrma','VRMA_05.vrma','VRMA_06.vrma','VRMA_07.vrma'];
-let motionClips = []; // { name, clip }
+/* ---------------- モーションリスト & 再生制御 ----------------
+   VRMAファイルが増えると全件を事前ロードするのは重いため、追加時はファイル名(URL)だけを
+   リストに登録し、実際のクリップ読込は再生する直前に行う「遅延読込」方式にしている。
+   さらに、今のモーションを再生している間に「次に再生される見込みのモーション」を
+   バックグラウンドで先読みしておくことで、切り替え時の待ち時間を減らしている。 */
+const DEFAULT_MOTION_LIST_URL = './vrma.txt'; // 1行につき1ファイル名(相対パス)。#始まりはコメント扱い
+const FALLBACK_DEFAULT_MOTION_FILES = ['VRMA_01.vrma','VRMA_02.vrma','VRMA_03.vrma','VRMA_04.vrma','VRMA_05.vrma','VRMA_06.vrma','VRMA_07.vrma'];
+
+let motionClips = []; // { name, url, isFBX, clip:null|AnimationClip, loadPromise:null|Promise }
 let lastMotionIndex = -1;
 let randomPlayback = true;
 let repeatMode = false;
 let pendingEmotionMotionIndex = null; // 現在のモーション終了後に再生する、会話内容に応じたジェスチャー
+let preloadedNextIndex = -1;          // 現在のモーション再生中に先読みしておく「次に再生予定」のインデックス
 
-async function loadMotionList(files){
-  motionClips = [];
-  for(const name of files){
-    try{
-      const entry = await loadVRMA(`./${name}`, name);
-      motionClips.push(entry);
-    }catch(err){
-      log(`モーションリストへの追加をスキップ: ${name}`, 'warn');
-    }
+function makeMotionEntry(name, url){
+  return { name, url, isFBX: /\.fbx$/i.test(name), clip: null, loadPromise: null };
+}
+
+// vrma.txtからデフォルトモーションのファイル名リストを取得する。読めない場合は従来のVRMA_01〜07にフォールバック。
+async function loadDefaultMotionFileNames(){
+  try{
+    const res = await fetch(DEFAULT_MOTION_LIST_URL);
+    if(!res.ok) throw new Error(`HTTP ${res.status}`);
+    const text = await res.text();
+    const files = text.split(/\r?\n/).map(line => line.trim()).filter(line => line && !line.startsWith('#'));
+    if(!files.length) throw new Error('vrma.txtが空です');
+    log(`vrma.txtから${files.length}件のモーションファイル名を読み込みました`, 'ok');
+    return files;
+  }catch(err){
+    log(`vrma.txtの読込に失敗したため既定のモーションリストを使用します: ${err.message || err}`, 'warn');
+    return FALLBACK_DEFAULT_MOTION_FILES;
   }
-  log(`モーションリスト読込完了 (${motionClips.length}/${files.length}件)`, motionClips.length ? 'ok' : 'warn');
+}
+
+// ファイル名のリストから、クリップ未読込のエントリだけをmotionClipsに登録する(即時・軽量)
+function loadMotionList(files){
+  motionClips = files.map(name => makeMotionEntry(name, `./${name}`));
+  log(`モーションリストを登録しました(${motionClips.length}件・ファイル名のみ、再生時に順次読込みます)`, motionClips.length ? 'ok' : 'warn');
   updateMotionListUI();
+}
+
+// エントリのクリップを読込む(未読込なら開始、読込中なら同じPromiseを返す、読込済みならそのまま返す)
+function ensureClipLoaded(entry){
+  if(entry.clip) return Promise.resolve(entry.clip);
+  if(entry.loadPromise) return entry.loadPromise;
+  entry.loadPromise = (entry.isFBX ? loadMixamoFBX(entry.url, entry.name) : loadVRMA(entry.url, entry.name))
+    .then((res) => {
+      entry.clip = res.clip;
+      entry.loadPromise = null;
+      updateMotionListUI();
+      return entry.clip;
+    })
+    .catch((err) => {
+      entry.loadPromise = null;
+      updateMotionListUI();
+      throw err;
+    });
+  return entry.loadPromise;
+}
+
+// 現在の再生モードから「次に再生されるであろう」インデックスを予測し、先読みを開始する
+function schedulePreloadNext(fromIndex){
+  preloadedNextIndex = -1;
+  if(repeatMode || motionClips.length < 2) return;
+  let idx;
+  if(randomPlayback){
+    do{ idx = Math.floor(Math.random() * motionClips.length); }while(idx === fromIndex);
+  }else{
+    idx = (fromIndex + 1) % motionClips.length;
+  }
+  preloadedNextIndex = idx;
+  ensureClipLoaded(motionClips[idx]).catch(() => {}); // 失敗時は実再生時に改めてエラー処理する
 }
 
 const MOTION_CROSSFADE_SEC = 0.35; // モーション切替時のクロスフェード時間
 
-function playMotion(index, opts = {}){
+async function playMotion(index, opts = {}){
   if(!motionClips.length || !mixer) return;
   const entry = motionClips[index];
+  if(!entry) return;
   const useCrossfade = opts.crossfade !== false; // 既定でクロスフェードON。第2引数で{crossfade:false}を渡せば即切替。
   const duration = opts.duration || MOTION_CROSSFADE_SEC;
 
+  const needsLoadLog = !entry.clip;
+  const clipPromise = ensureClipLoaded(entry);
+  if(needsLoadLog){
+    log(`モーション読込中: ${entry.name}`);
+    updateMotionListUI();
+  }
+
+  let clip;
+  try{
+    clip = await clipPromise;
+  }catch(err){
+    log(`モーション読込エラーのためスキップ: ${entry.name}`, 'err');
+    if(motionClips.length > 1 && motionClips[index] === entry){
+      playMotion((index + 1) % motionClips.length, opts);
+    }
+    return;
+  }
+  if(motionClips[index] !== entry) return; // 読込待ちの間にリストが変わっていたら中断(削除・入替対策)
+
   const prevAction = currentAction;
-  const nextAction = mixer.clipAction(entry.clip);
+  const nextAction = mixer.clipAction(clip);
 
   nextAction.reset();
   nextAction.enabled = true;
@@ -678,6 +749,8 @@ function playMotion(index, opts = {}){
   updatePlayPauseButton();
   updateMotionListUI();
   log(`再生: ${entry.name}`, 'ok');
+
+  schedulePreloadNext(index); // 再生開始と同時に、次に再生されそうなモーションの先読みを始める
 }
 
 function playRandomMotion(){
@@ -756,8 +829,13 @@ function onMotionFinished(){
     playMotion(idx);
     return;
   }
-  if(randomPlayback) playRandomMotion();
-  else playNextSequential();
+  if(preloadedNextIndex >= 0 && preloadedNextIndex < motionClips.length){
+    playMotion(preloadedNextIndex); // 既に先読み済みなので即座に切り替わる
+  }else if(randomPlayback){
+    playRandomMotion();
+  }else{
+    playNextSequential();
+  }
 }
 
 function updatePlayPauseButton(){
@@ -812,6 +890,7 @@ document.getElementById('btnRandom').addEventListener('click', () => {
   const btn = document.getElementById('btnRandom');
   btn.classList.toggle('on', randomPlayback);
   btn.textContent = `🔀 ランダム:${randomPlayback ? 'ON' : 'OFF'}`;
+  if(lastMotionIndex >= 0) schedulePreloadNext(lastMotionIndex); // モード変更に合わせて先読み対象を再計算
   log(`ランダム再生: ${randomPlayback ? 'ON' : 'OFF'}`, 'ok');
 });
 
@@ -824,6 +903,7 @@ document.getElementById('btnRepeat').addEventListener('click', () => {
     currentAction.setLoop(repeatMode ? THREE.LoopRepeat : THREE.LoopOnce);
     currentAction.clampWhenFinished = !repeatMode;
   }
+  if(lastMotionIndex >= 0) schedulePreloadNext(lastMotionIndex); // モード変更に合わせて先読み対象を再計算
   log(`リピート再生: ${repeatMode ? 'ON' : 'OFF'}`, 'ok');
 });
 
@@ -831,17 +911,13 @@ document.getElementById('btnAddMotion').addEventListener('click', () => {
   document.getElementById('vrmaFile').click();
 });
 
-document.getElementById('vrmaFile').addEventListener('change', async (e) => {
+document.getElementById('vrmaFile').addEventListener('change', (e) => {
   const files = Array.from(e.target.files || []);
   e.target.value = ''; // 同じファイルを連続追加できるようリセット
   for(const file of files){
     const url = URL.createObjectURL(file);
-    const isFBX = /\.fbx$/i.test(file.name);
-    try{
-      const entry = isFBX ? await loadMixamoFBX(url, file.name) : await loadVRMA(url, file.name);
-      motionClips.push(entry);
-      log(`モーションリストに追加: ${file.name}`, 'ok');
-    }catch(err){ /* エラーはloadVRMA/loadMixamoFBX内でログ済み */ }
+    motionClips.push(makeMotionEntry(file.name, url));
+    log(`モーションリストに追加(ファイル名のみ、再生時に読込みます): ${file.name}`, 'ok');
   }
   updateMotionListUI();
   if(!currentAction && motionClips.length){
@@ -852,10 +928,12 @@ document.getElementById('vrmaFile').addEventListener('change', async (e) => {
 function removeMotion(idx){
   const removed = motionClips.splice(idx, 1)[0];
   if(!removed) return;
+  if(removed.url && removed.url.startsWith('blob:')){ try{ URL.revokeObjectURL(removed.url); }catch(e){} }
   log(`モーションを削除しました: ${removed.name}`);
   if(idx === lastMotionIndex){
     if(currentAction){ currentAction.stop(); currentAction = null; }
     lastMotionIndex = -1;
+    preloadedNextIndex = -1;
     if(motionClips.length){
       if(randomPlayback) playRandomMotion(); else playMotion(0);
     }else{
@@ -883,7 +961,11 @@ function updateMotionListUI(){
     row.className = 'motion-item' + (idx === lastMotionIndex ? ' playing' : '');
     const nameSpan = document.createElement('span');
     nameSpan.className = 'motion-name';
-    nameSpan.textContent = (idx === lastMotionIndex ? '▶ ' : '') + entry.name;
+    let prefix = idx === lastMotionIndex ? '▶ ' : '';
+    let suffix = '';
+    if(entry.loadPromise) suffix = ' (読込中…)';
+    else if(!entry.clip) suffix = ' (未読込)';
+    nameSpan.textContent = prefix + entry.name + suffix;
     nameSpan.addEventListener('click', () => playMotion(idx));
     const delBtn = document.createElement('button');
     delBtn.textContent = '🗑';
@@ -900,14 +982,16 @@ document.getElementById('btnMotionList').addEventListener('click', () => {
   if(!panel.classList.contains('hidden')) updateMotionListUI();
 });
 
-// 起動時にデフォルトのVRMとモーションリスト(VRMA_01〜07)を自動読み込みし、ランダム再生を開始
+// 起動時にデフォルトのVRMを読込み、vrma.txtに書かれたファイル名リストをモーションリストとして登録(名前のみ・軽量)、
+// 実際のクリップはplayRandomMotion()が最初の1件を再生する際に遅延読込される
 (async () => {
   try{
     await loadVRM('./AliciaSolid.vrm', 'AliciaSolid.vrm');
-    await loadMotionList(defaultMotionFiles);
+    const files = await loadDefaultMotionFileNames();
+    loadMotionList(files);
     if(motionClips.length) playRandomMotion();
   }catch(err){
-    log('デフォルトアセットの自動読込に失敗しました。AliciaSolid.vrm と VRMA_01〜07.vrma を index.html と同じフォルダに配置してください', 'warn');
+    log('デフォルトアセットの自動読込に失敗しました。AliciaSolid.vrm と vrma.txt(またはVRMA_01〜07.vrma) を index.html と同じフォルダに配置してください', 'warn');
   }
 })();
 
