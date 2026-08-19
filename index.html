@@ -986,28 +986,51 @@ document.getElementById('btnMotionList').addEventListener('click', () => {
 const DEFAULT_VRM_LIST_URL = './vrm.txt';
 const FALLBACK_DEFAULT_VRM_FILE = 'AliciaSolid.vrm';
 
-async function pickDefaultVRMFileName(){
+async function readVRMFileNameList(){
   try{
     const res = await fetch(DEFAULT_VRM_LIST_URL);
     if(!res.ok) throw new Error(`HTTP ${res.status}`);
     const text = await res.text();
     const files = text.split(/\r?\n/).map(line => line.trim()).filter(line => line && !line.startsWith('#'));
     if(!files.length) throw new Error('vrm.txtが空です');
-    const picked = files[Math.floor(Math.random() * files.length)];
-    log(`vrm.txtから${files.length}件中「${picked}」をランダムに選択しました`, 'ok');
-    return picked;
+    return files;
   }catch(err){
-    log(`vrm.txtの読込に失敗したため既定のVRM(${FALLBACK_DEFAULT_VRM_FILE})を使用します: ${err.message || err}`, 'warn');
-    return FALLBACK_DEFAULT_VRM_FILE;
+    log(`vrm.txtの読込に失敗しました: ${err.message || err}`, 'warn');
+    return [];
   }
 }
 
-// 起動時にvrm.txtからランダムに選んだVRMを読込み、vrma.txtに書かれたファイル名リストをモーションリストとして登録(名前のみ・軽量)、
+// vrm.txtの候補からランダムな順で読込を試し、404等で失敗したら次の候補にフォールバックする。
+// 全滅した場合は最後にAliciaSolid.vrmを試す。
+async function loadRandomDefaultVRM(){
+  const files = await readVRMFileNameList();
+  if(files.length){
+    log(`vrm.txtから${files.length}件のVRM候補を読み込みました`, 'ok');
+    // Fisher-Yatesでシャッフルし、先頭から順に成功するまで試す
+    const shuffled = files.slice();
+    for(let i = shuffled.length - 1; i > 0; i--){
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    for(const name of shuffled){
+      try{
+        await loadVRM(`./${name}`, name);
+        return; // 成功
+      }catch(err){
+        log(`「${name}」の読込に失敗したため、別の候補を試します`, 'warn');
+      }
+    }
+    log('vrm.txtの候補が全て読み込めなかったため、既定のVRMを試します', 'warn');
+  }
+  await loadVRM(`./${FALLBACK_DEFAULT_VRM_FILE}`, FALLBACK_DEFAULT_VRM_FILE);
+}
+
+// 起動時にvrm.txtの候補からランダムに選んだVRMを読込み(失敗時は他候補→既定VRMへ自動フォールバック)、
+// vrma.txtに書かれたファイル名リストをモーションリストとして登録(名前のみ・軽量)、
 // 実際のクリップはplayRandomMotion()が最初の1件を再生する際に遅延読込される
 (async () => {
   try{
-    const vrmFileName = await pickDefaultVRMFileName();
-    await loadVRM(`./${vrmFileName}`, vrmFileName);
+    await loadRandomDefaultVRM();
     const files = await loadDefaultMotionFileNames();
     loadMotionList(files);
     if(motionClips.length) playRandomMotion();
