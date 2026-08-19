@@ -48,6 +48,13 @@
   .panel-close-btn{ position:absolute; top:6px; right:6px; width:26px; height:26px; padding:0;
     display:flex; align-items:center; justify-content:center; border-radius:50%;
     font-size:15px; line-height:1; z-index:6; }
+  /* ×閉じるボタンの左に並ぶ全削除ボタン */
+  .panel-clear-btn{ position:absolute; top:6px; right:38px; height:26px; padding:0 9px;
+    display:flex; align-items:center; justify-content:center; border-radius:13px;
+    font-size:11px; line-height:1; white-space:nowrap; z-index:6; }
+  /* パネル左上に表示する、現在選択中のファイル名 */
+  .panel-current-file{ position:absolute; top:0; left:10px; right:130px; height:34px; line-height:34px;
+    font-size:11px; color:var(--text-dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; z-index:5; }
   .toggle-btn{ flex:1; }
 
   /* フルスクリーン中はUIとカメラ表示を隠す。タップで数秒だけ再表示 */
@@ -188,6 +195,8 @@
 </div>
 
 <div id="motionListPanel" class="hidden">
+  <div class="panel-current-file" id="motionCurrentFile">(未選択)</div>
+  <button class="panel-clear-btn" id="btnClearMotionList" title="モーションリストを全削除">🗑全削除</button>
   <button class="panel-close-btn" id="btnCloseMotionList" aria-label="閉じる">×</button>
   <div class="motion-controls">
     <button id="btnMotion">▶</button>
@@ -202,6 +211,8 @@
 </div>
 
 <div id="bgmListPanel" class="hidden">
+  <div class="panel-current-file" id="bgmCurrentFile">(未選択)</div>
+  <button class="panel-clear-btn" id="btnClearBgmList" title="BGMリストを全削除">🗑全削除</button>
   <button class="panel-close-btn" id="btnCloseBgmList" aria-label="閉じる">×</button>
   <div class="motion-controls">
     <button id="btnBgm">▶</button>
@@ -217,6 +228,8 @@
 <audio id="bgmPlayer" preload="auto"></audio>
 
 <div id="backgroundListPanel" class="hidden">
+  <div class="panel-current-file" id="backgroundCurrentFile">(未選択)</div>
+  <button class="panel-clear-btn" id="btnClearBgList" title="背景リストを全削除">🗑全削除</button>
   <button class="panel-close-btn" id="btnCloseBgList" aria-label="閉じる">×</button>
   <div id="backgroundListItems"></div>
   <div class="bg-add-row">
@@ -946,7 +959,28 @@ function removeMotion(idx){
   updateMotionListUI();
 }
 
+function clearAllMotions(){
+  if(!motionClips.length) return;
+  if(currentAction){ currentAction.stop(); currentAction = null; }
+  motionClips.forEach(entry => { if(entry.url && entry.url.startsWith('blob:')){ try{ URL.revokeObjectURL(entry.url); }catch(e){} } });
+  motionClips = [];
+  lastMotionIndex = -1;
+  preloadedNextIndex = -1;
+  pendingEmotionMotionIndex = null;
+  log('モーションリストを全削除しました', 'ok');
+  updatePlayPauseButton();
+  updateMotionListUI();
+}
+
+document.getElementById('btnClearMotionList').addEventListener('click', clearAllMotions);
+
 function updateMotionListUI(){
+  const currentLabel = document.getElementById('motionCurrentFile');
+  if(currentLabel){
+    const name = (lastMotionIndex >= 0 && motionClips[lastMotionIndex]) ? motionClips[lastMotionIndex].name : '(未選択)';
+    currentLabel.textContent = name;
+    currentLabel.title = name;
+  }
   const container = document.getElementById('motionListItems');
   if(!container) return;
   container.innerHTML = '';
@@ -1156,7 +1190,28 @@ function removeBgm(idx){
   updateBgmListUI();
 }
 
+function clearAllBgm(){
+  if(!bgmClips.length) return;
+  bgmPlayer.pause();
+  bgmPlayer.removeAttribute('src');
+  bgmPlayer.load();
+  bgmClips.forEach(entry => { if(entry.url && entry.url.startsWith('blob:')){ try{ URL.revokeObjectURL(entry.url); }catch(e){} } });
+  bgmClips = [];
+  lastBgmIndex = -1;
+  log('BGMリストを全削除しました', 'ok');
+  updateBgmPlayPauseButton();
+  updateBgmListUI();
+}
+
+document.getElementById('btnClearBgmList').addEventListener('click', clearAllBgm);
+
 function updateBgmListUI(){
+  const currentLabel = document.getElementById('bgmCurrentFile');
+  if(currentLabel){
+    const name = (lastBgmIndex >= 0 && bgmClips[lastBgmIndex]) ? bgmClips[lastBgmIndex].name : '(未選択)';
+    currentLabel.textContent = name;
+    currentLabel.title = name;
+  }
   const container = document.getElementById('bgmListItems');
   if(!container) return;
   container.innerHTML = '';
@@ -1290,7 +1345,24 @@ function removeBackground(idx){
   updateBackgroundListUI();
 }
 
+function clearAllBackgrounds(){
+  if(!backgroundClips.length) return;
+  backgroundClips.forEach(entry => scene.remove(entry.object));
+  backgroundClips = [];
+  activeBackgroundIndex = -1;
+  log('背景リストを全削除しました', 'ok');
+  updateBackgroundListUI();
+}
+
+document.getElementById('btnClearBgList').addEventListener('click', clearAllBackgrounds);
+
 function updateBackgroundListUI(){
+  const currentLabel = document.getElementById('backgroundCurrentFile');
+  if(currentLabel){
+    const name = (activeBackgroundIndex >= 0 && backgroundClips[activeBackgroundIndex]) ? backgroundClips[activeBackgroundIndex].name : '(未選択)';
+    currentLabel.textContent = name;
+    currentLabel.title = name;
+  }
   const container = document.getElementById('backgroundListItems');
   if(!container) return;
   container.innerHTML = '';
@@ -1322,6 +1394,42 @@ document.getElementById('btnBgList').addEventListener('click', () => {
   panel.classList.toggle('hidden');
   if(!panel.classList.contains('hidden')) updateBackgroundListUI();
 });
+
+// glb.txtに書かれたファイル名リストから、起動時に読み込む背景の候補を取得する。読めない場合は既定の背景なしとする。
+// 実ファイルはglbフォルダ内から探す。
+const DEFAULT_BACKGROUND_LIST_URL = './glb.txt'; // 1行につき1ファイル名(相対パス)。#始まりはコメント扱い
+
+async function loadDefaultBackgroundFileNames(){
+  try{
+    const res = await fetch(DEFAULT_BACKGROUND_LIST_URL);
+    if(!res.ok) throw new Error(`HTTP ${res.status}`);
+    const text = await res.text();
+    const files = text.split(/\r?\n/).map(line => line.trim()).filter(line => line && !line.startsWith('#'));
+    if(!files.length) throw new Error('glb.txtが空です');
+    log(`glb.txtから${files.length}件の背景ファイル名を読み込みました`, 'ok');
+    return files;
+  }catch(err){
+    log(`glb.txtの読込に失敗したため既定の背景は読み込みません: ${err.message || err}`, 'warn');
+    return [];
+  }
+}
+
+// glb.txtの候補を順に読込み、背景リストに登録する(読込に失敗した候補はスキップ)。最初に成功した1件を表示状態にする。
+async function loadDefaultBackgrounds(){
+  const files = await loadDefaultBackgroundFileNames();
+  for(const name of files){
+    try{
+      const entry = await loadBackgroundGlb(`./glb/${name}`, name);
+      backgroundClips.push(entry);
+      if(activeBackgroundIndex === -1) setActiveBackground(backgroundClips.length - 1);
+    }catch(err){
+      log(`既定の背景「${name}」の読込に失敗したためスキップします`, 'warn');
+    }
+  }
+  updateBackgroundListUI();
+}
+
+loadDefaultBackgrounds();
 
 /* ---------------- Gemini Live API 音声会話 + 簡易リップシンク ----------------
    各利用者が自分自身のGemini APIキー(Google AI Studioで無料発行)を入力し、
