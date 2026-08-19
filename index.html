@@ -982,16 +982,37 @@ document.getElementById('btnMotionList').addEventListener('click', () => {
   if(!panel.classList.contains('hidden')) updateMotionListUI();
 });
 
-// 起動時にデフォルトのVRMを読込み、vrma.txtに書かれたファイル名リストをモーションリストとして登録(名前のみ・軽量)、
+// vrm.txtに書かれたファイル名リストから、起動時に読み込むVRMをランダムに1つ選ぶ。読めない場合はAliciaSolid.vrmにフォールバック。
+const DEFAULT_VRM_LIST_URL = './vrm.txt';
+const FALLBACK_DEFAULT_VRM_FILE = 'AliciaSolid.vrm';
+
+async function pickDefaultVRMFileName(){
+  try{
+    const res = await fetch(DEFAULT_VRM_LIST_URL);
+    if(!res.ok) throw new Error(`HTTP ${res.status}`);
+    const text = await res.text();
+    const files = text.split(/\r?\n/).map(line => line.trim()).filter(line => line && !line.startsWith('#'));
+    if(!files.length) throw new Error('vrm.txtが空です');
+    const picked = files[Math.floor(Math.random() * files.length)];
+    log(`vrm.txtから${files.length}件中「${picked}」をランダムに選択しました`, 'ok');
+    return picked;
+  }catch(err){
+    log(`vrm.txtの読込に失敗したため既定のVRM(${FALLBACK_DEFAULT_VRM_FILE})を使用します: ${err.message || err}`, 'warn');
+    return FALLBACK_DEFAULT_VRM_FILE;
+  }
+}
+
+// 起動時にvrm.txtからランダムに選んだVRMを読込み、vrma.txtに書かれたファイル名リストをモーションリストとして登録(名前のみ・軽量)、
 // 実際のクリップはplayRandomMotion()が最初の1件を再生する際に遅延読込される
 (async () => {
   try{
-    await loadVRM('./AliciaSolid.vrm', 'AliciaSolid.vrm');
+    const vrmFileName = await pickDefaultVRMFileName();
+    await loadVRM(`./${vrmFileName}`, vrmFileName);
     const files = await loadDefaultMotionFileNames();
     loadMotionList(files);
     if(motionClips.length) playRandomMotion();
   }catch(err){
-    log('デフォルトアセットの自動読込に失敗しました。AliciaSolid.vrm と vrma.txt(またはVRMA_01〜07.vrma) を index.html と同じフォルダに配置してください', 'warn');
+    log('デフォルトアセットの自動読込に失敗しました。VRM/vrma/vrm.txt/vrma.txt を index.html と同じフォルダに配置してください', 'warn');
   }
 })();
 
