@@ -1261,12 +1261,38 @@ function updateBgmProgress(){
   bgmProgressEl.value = Math.round((bgmPlayer.currentTime / bgmPlayer.duration) * 1000);
 }
 
-/* ---------------- 背景リスト(GLB) ---------------- */
+/* ---------------- 背景リスト(GLB) ----------------
+   モーションリストと同様に、glb.txtからは「ファイル名のみ」を即時・軽量に登録し、
+   実際のGLBデータは背景として選択された時点で初めて読込む(遅延読込)。
+   さらに別の背景に切り替えた瞬間、直前まで表示していた背景のジオメトリ/マテリアル/
+   テクスチャをdisposeしシーンからも取り除くことで、GPU/CPU双方のメモリを解放する。
+   （選択中の背景だけが常にメモリ上に存在する状態を保つ） */
 // 「GLM」は一般的な3D形式ではないため、three.js/glTFエコシステムで標準的なGLB(glTFバイナリ)として扱う
 const bgGlbLoader = new GLTFLoader();
-let backgroundClips = []; // { name, object }
+let backgroundClips = []; // { name, url, object:null|Object3D, loadPromise:null|Promise }
 let activeBackgroundIndex = -1;
 
+function makeBackgroundEntry(name, url){
+  return { name, url, object: null, loadPromise: null };
+}
+
+// Object3D配下のジオメトリ・マテリアル・テクスチャを再帰的に破棄する(メモリ解放用の汎用ヘルパー)
+function disposeObject3D(root){
+  if(!root) return;
+  root.traverse((obj) => {
+    if(obj.geometry) obj.geometry.dispose();
+    const materials = Array.isArray(obj.material) ? obj.material : (obj.material ? [obj.material] : []);
+    materials.forEach((mat) => {
+      Object.keys(mat).forEach((key) => {
+        const value = mat[key];
+        if(value && value.isTexture) value.dispose();
+      });
+      mat.dispose();
+    });
+  });
+}
+
+// GLBファイルを取得・パースしてObject3Dを返すだけの関数(シーンへの追加や表示状態の管理は呼び出し側で行う)
 async function loadBackgroundGlb(url, label){
   log(`背景読込中: ${label}`);
   let arrayBuffer;
@@ -1297,44 +1323,96 @@ async function loadBackgroundGlb(url, label){
   const path = THREE.LoaderUtils.extractUrlBase(url);
   return new Promise((resolve, reject) => {
     bgGlbLoader.parse(arrayBuffer, path, (gltf) => {
-      gltf.scene.visible = false;
-      scene.add(gltf.scene);
       log(`背景読込完了: ${label}`, 'ok');
-      resolve({ name: label, object: gltf.scene });
+      resolve(gltf.scene);
     }, (err) => { log(`背景読込エラー(${label}): ${err.message || err}`, 'err'); reject(err); });
   });
 }
 
-function setActiveBackground(idx){
-  backgroundClips.forEach((b, i) => { b.object.visible = (i === idx); });
+// エントリのGLBを読込む(未読込なら開始、読込中なら同じPromiseを返す、読込済みならそのまま返す)
+function ensureBackgroundLoaded(entry){
+  if(entry.object) return Promise.resolve(entry.object);
+  if(entry.loadPromise) return entry.loadPromise;
+  entry.loadPromise = loadBackgroundGlb(entry.url, entry.name)
+    .then((object) => {
+      entry.object = object;
+      object.visible = false;
+      scene.add(object);
+      entry.loadPromise = null;
+      updateBackgroundListUI();
+      return object;
+    })
+    .catch((err) => {
+      entry.loadPromise = null;
+      updateBackgroundListUI();
+      throw err;
+    });
+  return entry.loadPromise;
+}
+
+// エントリのGLBをシーンから外してdisposeし、メモリを解放する(ファイル名リストへの登録自体は維持)
+function releaseBackground(entry){
+  if(!entry || !entry.object) return;
+  scene.remove(entry.object);
+  disposeObject3D(entry.object);
+  entry.object = null;
+}
+
+async function setActiveBackground(idx){
+  if(idx === activeBackgroundIndex) return;
+  const prevEntry = (activeBackgroundIndex >= 0) ? backgroundClips[activeBackgroundIndex] : null;
+  const nextEntry = (idx >= 0) ? backgroundClips[idx] : null;
+
+  if(!nextEntry){
+    if(prevEntry) releaseBackground(prevEntry);
+    activeBackgroundIndex = -1;
+    updateBackgroundListUI();
+    return;
+  }
+
+  const needsLoadLog = !nextEntry.object;
+  if(needsLoadLog) updateBackgroundListUI();
+
+  let object;
+  try{
+    object = await ensureBackgroundLoaded(nextEntry);
+  }catch(err){
+    log(`背景切替エラーのため中止しました: ${nextEntry.name}`, 'err');
+    return;
+  }
+  if(backgroundClips[idx] !== nextEntry) return; // 読込待ちの間にリストが変わっていたら中断(削除・入替対策)
+
+  // 切替先の読込が完了してから直前の背景を解放する(切替失敗時に無背景になるのを防ぐ)
+  if(prevEntry && prevEntry !== nextEntry) releaseBackground(prevEntry);
+
+  object.visible = true;
   activeBackgroundIndex = idx;
   updateBackgroundListUI();
-  if(idx >= 0) log(`背景を切替: ${backgroundClips[idx].name}`, 'ok');
+  log(`背景を切替: ${nextEntry.name}`, 'ok');
 }
 
 document.getElementById('btnAddBackground').addEventListener('click', () => {
   document.getElementById('bgGlbFile').click();
 });
 
-document.getElementById('bgGlbFile').addEventListener('change', async (e) => {
+document.getElementById('bgGlbFile').addEventListener('change', (e) => {
   const files = Array.from(e.target.files || []);
   e.target.value = '';
   for(const file of files){
     const url = URL.createObjectURL(file);
-    try{
-      const entry = await loadBackgroundGlb(url, file.name);
-      backgroundClips.push(entry);
-      log(`背景リストに追加: ${file.name}`, 'ok');
-      if(activeBackgroundIndex === -1) setActiveBackground(backgroundClips.length - 1);
-    }catch(err){ /* エラーはloadBackgroundGlb内でログ済み */ }
+    const entry = makeBackgroundEntry(file.name, url);
+    backgroundClips.push(entry);
+    log(`背景リストに追加: ${file.name}(ファイル名のみ・選択時に読込みます)`, 'ok');
+    if(activeBackgroundIndex === -1) setActiveBackground(backgroundClips.length - 1);
   }
   updateBackgroundListUI();
 });
 
 function removeBackground(idx){
-  const removed = backgroundClips.splice(idx, 1)[0];
+  const removed = backgroundClips[idx];
   if(!removed) return;
-  scene.remove(removed.object);
+  if(removed.object) releaseBackground(removed); // 選択中(=読込済み)だった場合はメモリを解放してから削除
+  backgroundClips.splice(idx, 1);
   log(`背景を削除しました: ${removed.name}`);
   if(idx === activeBackgroundIndex){
     activeBackgroundIndex = -1;
@@ -1347,7 +1425,7 @@ function removeBackground(idx){
 
 function clearAllBackgrounds(){
   if(!backgroundClips.length) return;
-  backgroundClips.forEach(entry => scene.remove(entry.object));
+  backgroundClips.forEach(entry => releaseBackground(entry));
   backgroundClips = [];
   activeBackgroundIndex = -1;
   log('背景リストを全削除しました', 'ok');
@@ -1414,19 +1492,19 @@ async function loadDefaultBackgroundFileNames(){
   }
 }
 
-// glb.txtの候補を順に読込み、背景リストに登録する(読込に失敗した候補はスキップ)。最初に成功した1件を表示状態にする。
+// ファイル名のリストから、GLB未読込のエントリだけをbackgroundClipsに登録する(即時・軽量)
+function loadBackgroundList(files){
+  backgroundClips = files.map(name => makeBackgroundEntry(name, `./glb/${name}`));
+  log(`背景リストを登録しました(${backgroundClips.length}件・ファイル名のみ、選択時に読込みます)`, backgroundClips.length ? 'ok' : 'warn');
+  activeBackgroundIndex = -1;
+  updateBackgroundListUI();
+  if(backgroundClips.length) setActiveBackground(0); // 最初の1件だけ実データを読込んで表示する
+}
+
+// glb.txtの候補を背景リストに登録する(実データの読込は選択時まで行わない)
 async function loadDefaultBackgrounds(){
   const files = await loadDefaultBackgroundFileNames();
-  for(const name of files){
-    try{
-      const entry = await loadBackgroundGlb(`./glb/${name}`, name);
-      backgroundClips.push(entry);
-      if(activeBackgroundIndex === -1) setActiveBackground(backgroundClips.length - 1);
-    }catch(err){
-      log(`既定の背景「${name}」の読込に失敗したためスキップします`, 'warn');
-    }
-  }
-  updateBackgroundListUI();
+  loadBackgroundList(files);
 }
 
 loadDefaultBackgrounds();
