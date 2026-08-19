@@ -281,7 +281,7 @@
 <div id="centerHint">
   <button class="panel-close-btn" id="btnCloseHint" aria-label="閉じる">×</button>
   <b>顔トラッキングVRMビューア</b><br>
-  起動時に AliciaSolid.vrm と VRMA_01〜07.vrma を自動読み込みし、ランダムにモーション再生します<br>
+  起動時に vrmフォルダ内の AliciaSolid.vrm と vrmaフォルダ内の VRMA_01〜07.vrma を自動読み込みし、ランダムにモーション再生します<br>
   (同フォルダに配置されている必要があります。無い場合は 📂 / 🎞モーションリスト内の➕追加 から手動選択してください)<br><br>
   ① ▶ カメラ開始（顔認識のためカメラ許可が必要）<br>
   ② 正面を向いた状態で 🎯 中央校正 をタップ<br>
@@ -641,6 +641,7 @@ function makeMotionEntry(name, url){
 }
 
 // vrma.txtからデフォルトモーションのファイル名リストを取得する。読めない場合は従来のVRMA_01〜07にフォールバック。
+// 実ファイルはvrmaフォルダ内から探す。
 async function loadDefaultMotionFileNames(){
   try{
     const res = await fetch(DEFAULT_MOTION_LIST_URL);
@@ -658,7 +659,7 @@ async function loadDefaultMotionFileNames(){
 
 // ファイル名のリストから、クリップ未読込のエントリだけをmotionClipsに登録する(即時・軽量)
 function loadMotionList(files){
-  motionClips = files.map(name => makeMotionEntry(name, `./${name}`));
+  motionClips = files.map(name => makeMotionEntry(name, `./vrma/${name}`));
   log(`モーションリストを登録しました(${motionClips.length}件・ファイル名のみ、再生時に順次読込みます)`, motionClips.length ? 'ok' : 'warn');
   updateMotionListUI();
 }
@@ -983,6 +984,7 @@ document.getElementById('btnMotionList').addEventListener('click', () => {
 });
 
 // vrm.txtに書かれたファイル名リストから、起動時に読み込むVRMをランダムに1つ選ぶ。読めない場合はAliciaSolid.vrmにフォールバック。
+// 実ファイルはvrmフォルダ内から探す。
 const DEFAULT_VRM_LIST_URL = './vrm.txt';
 const FALLBACK_DEFAULT_VRM_FILE = 'AliciaSolid.vrm';
 
@@ -1014,7 +1016,7 @@ async function loadRandomDefaultVRM(){
     }
     for(const name of shuffled){
       try{
-        await loadVRM(`./${name}`, name);
+        await loadVRM(`./vrm/${name}`, name);
         return; // 成功
       }catch(err){
         log(`「${name}」の読込に失敗したため、別の候補を試します`, 'warn');
@@ -1022,7 +1024,7 @@ async function loadRandomDefaultVRM(){
     }
     log('vrm.txtの候補が全て読み込めなかったため、既定のVRMを試します', 'warn');
   }
-  await loadVRM(`./${FALLBACK_DEFAULT_VRM_FILE}`, FALLBACK_DEFAULT_VRM_FILE);
+  await loadVRM(`./vrm/${FALLBACK_DEFAULT_VRM_FILE}`, FALLBACK_DEFAULT_VRM_FILE);
 }
 
 // 起動時にvrm.txtの候補からランダムに選んだVRMを読込み(失敗時は他候補→既定VRMへ自動フォールバック)、
@@ -1035,7 +1037,7 @@ async function loadRandomDefaultVRM(){
     loadMotionList(files);
     if(motionClips.length) playRandomMotion();
   }catch(err){
-    log('デフォルトアセットの自動読込に失敗しました。VRM/vrma/vrm.txt/vrma.txt を index.html と同じフォルダに配置してください', 'warn');
+    log('デフォルトアセットの自動読込に失敗しました。vrm.txt/vrma.txt は index.html と同じフォルダに、VRMファイルはvrmフォルダに、VRMAファイルはvrmaフォルダに配置してください', 'warn');
   }
 })();
 
