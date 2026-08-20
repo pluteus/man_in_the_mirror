@@ -45,7 +45,9 @@
   #topbar{ position:fixed; left:10px; right:178px;
     top:calc(env(safe-area-inset-top,0px) + 10px); bottom:calc(env(safe-area-inset-bottom,0px) + 10px);
     display:flex; flex-wrap:wrap-reverse; align-content:flex-start; justify-content:flex-start;
-    gap:6px; z-index:20; overflow-y:auto; }
+    gap:6px; z-index:20; overflow-y:auto;
+    pointer-events:none; } /* topbar自体は透過させ、ボタン以外の空白部分でキャンバスのジェスチャー/ピンチズーム禁止を邪魔しないようにする */
+  #topbar > *{ pointer-events:auto; }
   button, .file-btn{ background:var(--panel); border:1px solid var(--border); color:var(--text);
     padding:8px 12px; border-radius:8px; font-size:12px; backdrop-filter:blur(8px);
     -webkit-backdrop-filter:blur(8px); white-space:nowrap; }
@@ -176,15 +178,15 @@
 <button id="btnFullscreen" title="フルスクリーン">⛶</button>
 
 <div id="topbar">
-  <button id="btnCharacterList">🧑 キャラクターリスト</button>
+  <button id="btnCharacterList">🧑 キャラクター</button>
   <input type="file" id="characterVrmFile" accept=".vrm" multiple style="display:none">
   <button id="btnVroidHub">🌐 VRoid Hub</button>
   <input type="file" id="vrmaFile" accept=".vrma,.fbx" multiple style="display:none">
-  <button id="btnMotionList">🎞 モーションリスト</button>
+  <button id="btnMotionList">🎞 モーション</button>
   <input type="file" id="bgmFile" accept="audio/*" multiple style="display:none">
-  <button id="btnBgmList">🎵 BGMリスト</button>
+  <button id="btnBgmList">🎵 BGM</button>
   <input type="file" id="bgGlbFile" accept=".glb,.gltf" multiple style="display:none">
-  <button id="btnBgList">🏞 背景リスト</button>
+  <button id="btnBgList">🏞 背景</button>
   <button id="btnRealtime">🎙️ 会話</button>
   <button id="btnCam">▶ インカメラ</button>
   <button id="btnOutCam">📷 アウトカメラ</button>
