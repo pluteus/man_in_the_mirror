@@ -42,7 +42,7 @@
 
   /* それ以外のボタン群は画面左下を起点に、右・上へ向かって順に敷き詰める
      (flex-wrap:wrap-reverseにより、最初のボタンが左下に来て、収まりきらない分は上の行に積まれる) */
-  #topbar{ position:fixed; left:10px; right:178px;
+  #topbar{ position:fixed; left:10px; right:10px;
     top:calc(env(safe-area-inset-top,0px) + 10px); bottom:calc(env(safe-area-inset-bottom,0px) + 10px);
     display:flex; flex-wrap:wrap-reverse; align-content:flex-start; justify-content:flex-start;
     gap:6px; z-index:20; overflow-y:auto;
@@ -3018,6 +3018,13 @@ function animate(){
   if(currentVRM){
     currentVRM.update(delta);
     currentVRM.scene.rotation.y = baseModelRotY + THREE.MathUtils.degToRad(params.modelRotY);
+  }
+  // 背景もキャラクターと同じY軸回転量を適用し、中心軸を揃えて追随させる(「背景なし」の時はobjectがnull)
+  if(activeBackgroundIndex >= 0){
+    const activeBgEntry = backgroundClips[activeBackgroundIndex];
+    if(activeBgEntry && activeBgEntry.object){
+      activeBgEntry.object.rotation.y = THREE.MathUtils.degToRad(params.modelRotY);
+    }
   }
   updateMotionProgress();
   updateBgmProgress();
