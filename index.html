@@ -33,7 +33,13 @@
     font-size:16px; opacity:.55; transition:opacity .3s; }
   #btnFullscreen:active{ opacity:.9; }
 
-  #topbar{ position:fixed; top:calc(env(safe-area-inset-top,0px) + 10px); left:10px; right:132px;
+  /* ❔ヘルプボタン(about.htmlを開く)。フルスクリーンボタンのすぐ左に配置 */
+  #btnHelp{ position:fixed; top:calc(env(safe-area-inset-top,0px) + 8px); right:130px;
+    z-index:21; width:40px; height:40px; padding:0; display:flex; align-items:center; justify-content:center;
+    font-size:16px; opacity:.55; transition:opacity .3s; }
+  #btnHelp:active{ opacity:.9; }
+
+  #topbar{ position:fixed; top:calc(env(safe-area-inset-top,0px) + 10px); left:10px; right:178px;
     display:flex; gap:6px; flex-wrap:wrap; z-index:20; }
   button, .file-btn{ background:var(--panel); border:1px solid var(--border); color:var(--text);
     padding:8px 12px; border-radius:8px; font-size:12px; backdrop-filter:blur(8px);
@@ -64,13 +70,15 @@
   body.fs-active #bgmListPanel,
   body.fs-active #backgroundListPanel,
   body.fs-active #btnFullscreen,
+  body.fs-active #btnHelp,
   body.fs-active #camPreview{ opacity:0; pointer-events:none; transition:opacity .3s; }
   body.fs-active.show-controls #topbar,
   body.fs-active.show-controls #bottomPanel,
   body.fs-active.show-controls #motionListPanel,
   body.fs-active.show-controls #bgmListPanel,
   body.fs-active.show-controls #backgroundListPanel,
-  body.fs-active.show-controls #btnFullscreen{ opacity:1; pointer-events:auto; }
+  body.fs-active.show-controls #btnFullscreen,
+  body.fs-active.show-controls #btnHelp{ opacity:1; pointer-events:auto; }
   /* カメラ表示はプライバシー配慮のためフルスクリーン中は常に非表示のまま */
   body.fs-active.show-controls #camPreview{ opacity:0; pointer-events:none; }
 
@@ -96,12 +104,15 @@
     line-height:1.5; color:var(--text); user-select:text; -webkit-user-select:text; }
   #realtimeTranscript div{ white-space:pre-wrap; word-break:break-all; padding:2px 0; user-select:text; -webkit-user-select:text; }
 
-  #motionListPanel{ position:fixed; top:calc(env(safe-area-inset-top,0px) + 54px); left:10px;
-    width:260px; max-width:calc(100vw - 20px); max-height:50vh; z-index:20;
-    background:var(--panel); border:1px solid var(--border); border-radius:10px;
+  /* モーション/BGM/背景リストなどのポップアップは、画面幅に関わらずはみ出さないよう常に画面中央に表示する */
+  #motionListPanel, #bgmListPanel, #backgroundListPanel{
+    position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
+    width:280px; max-width:calc(100vw - 24px);
+    max-height:calc(100vh - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px) - 24px);
+    z-index:20; background:var(--panel); border:1px solid var(--border); border-radius:10px;
     backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px);
     display:flex; flex-direction:column; overflow:hidden; padding-top:34px; }
-  #motionListPanel.hidden{ display:none; }
+  #motionListPanel.hidden, #bgmListPanel.hidden, #backgroundListPanel.hidden{ display:none; }
   .motion-controls{ display:flex; gap:6px; flex-wrap:wrap; padding:8px 8px 6px; border-bottom:1px solid var(--border); }
   .motion-controls button{ flex:1; min-width:0; padding:7px 4px; font-size:11px; }
   .motion-progress-row{ padding:6px 10px 8px; border-bottom:1px solid var(--border); }
@@ -116,20 +127,8 @@
   .motion-item button{ padding:4px 8px; font-size:11px; flex-shrink:0; }
   .motion-empty{ padding:10px 4px; color:var(--text-dim); font-size:11.5px; line-height:1.5; }
 
-  #bgmListPanel{ position:fixed; top:calc(env(safe-area-inset-top,0px) + 54px); left:280px;
-    width:260px; max-width:calc(100vw - 300px); max-height:50vh; z-index:20;
-    background:var(--panel); border:1px solid var(--border); border-radius:10px;
-    backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px);
-    display:flex; flex-direction:column; overflow:hidden; padding-top:34px; }
-  #bgmListPanel.hidden{ display:none; }
   #bgmListItems{ overflow-y:auto; padding:4px 6px; }
 
-  #backgroundListPanel{ position:fixed; top:calc(env(safe-area-inset-top,0px) + 54px); left:550px;
-    width:260px; max-width:calc(100vw - 570px); max-height:50vh; z-index:20;
-    background:var(--panel); border:1px solid var(--border); border-radius:10px;
-    backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px);
-    display:flex; flex-direction:column; overflow:hidden; padding-top:34px; }
-  #backgroundListPanel.hidden{ display:none; }
   #backgroundListItems{ overflow-y:auto; padding:6px 6px 4px; flex:1; }
   .bg-add-row{ padding:6px 8px; border-top:1px solid var(--border); display:flex; justify-content:flex-end; }
 
@@ -142,10 +141,7 @@
   #logContent div{ white-space:pre-wrap; word-break:break-all; user-select:text; -webkit-user-select:text; }
   #logContent .ok{ color:var(--ok); } #logContent .warn{ color:var(--warn); } #logContent .err{ color:var(--err); }
 
-  #centerHint{ position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); z-index:30;
-    background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:34px 20px 16px;
-    font-size:13px; text-align:center; line-height:1.6; backdrop-filter:blur(8px); max-width:80%; }
-  #centerHint b{ color:var(--accent); }
+
 
   #calibOverlay{ position:fixed; inset:0; z-index:40; background:rgba(6,9,14,0.94);
     display:none; flex-direction:column; align-items:center; justify-content:center; gap:18px;
@@ -169,6 +165,7 @@
 
 <div id="camPreview"><video id="cam" playsinline muted></video><canvas id="camMosaic"></canvas><div class="dot"></div></div>
 
+<button id="btnHelp" title="ヘルプ">❔</button>
 <button id="btnFullscreen" title="フルスクリーン">⛶</button>
 
 <div id="topbar">
@@ -289,16 +286,6 @@
     <div id="realtimeStatus">未接続</div>
     <div id="realtimeTranscript"></div>
   </div>
-</div>
-
-<div id="centerHint">
-  <button class="panel-close-btn" id="btnCloseHint" aria-label="閉じる">×</button>
-  <b>顔トラッキングVRMビューア</b><br>
-  起動時に vrmフォルダ内の AliciaSolid.vrm と vrmaフォルダ内の VRMA_01〜07.vrma を自動読み込みし、ランダムにモーション再生します<br>
-  (同フォルダに配置されている必要があります。無い場合は 📂 / 🎞モーションリスト内の➕追加 から手動選択してください)<br><br>
-  ① ▶ カメラ開始（顔認識のためカメラ許可が必要）<br>
-  ② 正面を向いた状態で 🎯 中央校正 をタップ<br>
-  以後、顔の動きに合わせて画面がのぞき窓のように動きます
 </div>
 
 <div id="calibOverlay">
@@ -494,7 +481,6 @@ function loadVRM(url, label){
           if(e.action === currentAction) onMotionFinished();
         });
         currentAction = null;
-        document.getElementById('centerHint').style.display = 'none';
         log(`VRM読込完了: ${label}`, 'ok');
         resolve(vrm);
       }, (err) => { log(`VRM読込エラー(${label}): ${err.message || err}`, 'err'); reject(err); });
@@ -1273,7 +1259,12 @@ let backgroundClips = []; // { name, url, object:null|Object3D, loadPromise:null
 let activeBackgroundIndex = -1;
 
 function makeBackgroundEntry(name, url){
-  return { name, url, object: null, loadPromise: null };
+  return { name, url, isNone:false, object: null, loadPromise: null };
+}
+
+// 「背景なし」を表す特別なエントリ(リストの先頭に常時固定表示・削除不可・実データを持たない)
+function makeNoBackgroundEntry(){
+  return { name: '背景なし', url: null, isNone: true, object: null, loadPromise: null };
 }
 
 // Object3D配下のジオメトリ・マテリアル・テクスチャを再帰的に破棄する(メモリ解放用の汎用ヘルパー)
@@ -1330,7 +1321,9 @@ async function loadBackgroundGlb(url, label){
 }
 
 // エントリのGLBを読込む(未読込なら開始、読込中なら同じPromiseを返す、読込済みならそのまま返す)
+// 「背景なし」エントリは実データを持たないため常に即時解決する
 function ensureBackgroundLoaded(entry){
+  if(entry.isNone) return Promise.resolve(null);
   if(entry.object) return Promise.resolve(entry.object);
   if(entry.loadPromise) return entry.loadPromise;
   entry.loadPromise = loadBackgroundGlb(entry.url, entry.name)
@@ -1385,7 +1378,7 @@ async function setActiveBackground(idx){
   // 切替先の読込が完了してから直前の背景を解放する(切替失敗時に無背景になるのを防ぐ)
   if(prevEntry && prevEntry !== nextEntry) releaseBackground(prevEntry);
 
-  object.visible = true;
+  if(object) object.visible = true; // 「背景なし」の場合はobjectがnullなのでそのまま
   activeBackgroundIndex = idx;
   updateBackgroundListUI();
   log(`背景を切替: ${nextEntry.name}`, 'ok');
@@ -1410,13 +1403,13 @@ document.getElementById('bgGlbFile').addEventListener('change', (e) => {
 
 function removeBackground(idx){
   const removed = backgroundClips[idx];
-  if(!removed) return;
+  if(!removed || removed.isNone) return; // 「背景なし」は固定項目のため削除不可
   if(removed.object) releaseBackground(removed); // 選択中(=読込済み)だった場合はメモリを解放してから削除
   backgroundClips.splice(idx, 1);
   log(`背景を削除しました: ${removed.name}`);
   if(idx === activeBackgroundIndex){
     activeBackgroundIndex = -1;
-    if(backgroundClips.length) setActiveBackground(0);
+    setActiveBackground(0); // 「背景なし」に戻す
   }else if(idx < activeBackgroundIndex){
     activeBackgroundIndex -= 1;
   }
@@ -1424,12 +1417,13 @@ function removeBackground(idx){
 }
 
 function clearAllBackgrounds(){
-  if(!backgroundClips.length) return;
-  backgroundClips.forEach(entry => releaseBackground(entry));
-  backgroundClips = [];
+  if(backgroundClips.length <= 1) return; // 「背景なし」しか無ければ何もしない
+  backgroundClips.filter(entry => !entry.isNone).forEach(entry => releaseBackground(entry));
+  backgroundClips = backgroundClips.filter(entry => entry.isNone); // 「背景なし」だけ残す
   activeBackgroundIndex = -1;
   log('背景リストを全削除しました', 'ok');
   updateBackgroundListUI();
+  setActiveBackground(0); // 「背景なし」に戻す
 }
 
 document.getElementById('btnClearBgList').addEventListener('click', clearAllBackgrounds);
@@ -1444,13 +1438,6 @@ function updateBackgroundListUI(){
   const container = document.getElementById('backgroundListItems');
   if(!container) return;
   container.innerHTML = '';
-  if(!backgroundClips.length){
-    const empty = document.createElement('div');
-    empty.className = 'motion-empty';
-    empty.textContent = '背景がありません。右下の➕追加からGLBファイルを追加してください';
-    container.appendChild(empty);
-    return;
-  }
   backgroundClips.forEach((entry, idx) => {
     const row = document.createElement('div');
     row.className = 'motion-item' + (idx === activeBackgroundIndex ? ' playing' : '');
@@ -1458,11 +1445,13 @@ function updateBackgroundListUI(){
     nameSpan.className = 'motion-name';
     nameSpan.textContent = (idx === activeBackgroundIndex ? '▶ ' : '') + entry.name;
     nameSpan.addEventListener('click', () => setActiveBackground(idx));
-    const delBtn = document.createElement('button');
-    delBtn.textContent = '🗑';
-    delBtn.addEventListener('click', (ev) => { ev.stopPropagation(); removeBackground(idx); });
     row.appendChild(nameSpan);
-    row.appendChild(delBtn);
+    if(!entry.isNone){ // 「背景なし」は固定項目のため削除ボタンを出さない
+      const delBtn = document.createElement('button');
+      delBtn.textContent = '🗑';
+      delBtn.addEventListener('click', (ev) => { ev.stopPropagation(); removeBackground(idx); });
+      row.appendChild(delBtn);
+    }
     container.appendChild(row);
   });
 }
@@ -1493,12 +1482,18 @@ async function loadDefaultBackgroundFileNames(){
 }
 
 // ファイル名のリストから、GLB未読込のエントリだけをbackgroundClipsに登録する(即時・軽量)
+// リストの先頭には常に「背景なし」を追加し、既定の背景はファイルリストの中からランダムに1つ選ぶ
 function loadBackgroundList(files){
-  backgroundClips = files.map(name => makeBackgroundEntry(name, `./glb/${name}`));
-  log(`背景リストを登録しました(${backgroundClips.length}件・ファイル名のみ、選択時に読込みます)`, backgroundClips.length ? 'ok' : 'warn');
+  backgroundClips = [makeNoBackgroundEntry(), ...files.map(name => makeBackgroundEntry(name, `./glb/${name}`))];
+  log(`背景リストを登録しました(${files.length}件・ファイル名のみ、選択時に読込みます)`, backgroundClips.length ? 'ok' : 'warn');
   activeBackgroundIndex = -1;
   updateBackgroundListUI();
-  if(backgroundClips.length) setActiveBackground(0); // 最初の1件だけ実データを読込んで表示する
+  if(files.length){
+    const randomIdx = 1 + Math.floor(Math.random() * files.length); // 「背景なし」を除いた範囲からランダム選択
+    setActiveBackground(randomIdx);
+  }else{
+    setActiveBackground(0); // 候補が無ければ「背景なし」のまま
+  }
 }
 
 // glb.txtの候補を背景リストに登録する(実データの読込は選択時まで行わない)
@@ -2610,12 +2605,6 @@ document.getElementById('btnLog').addEventListener('click', () => {
 /* ---------------- 枠外タップで閉じる ---------------- */
 const dismissiblePanels = [
   {
-    panel: document.getElementById('centerHint'),
-    isVisible: (el) => el.style.display !== 'none',
-    hide: (el) => { el.style.display = 'none'; },
-    exclude: []
-  },
-  {
     panel: document.getElementById('motionListPanel'),
     isVisible: (el) => !el.classList.contains('hidden'),
     hide: (el) => { el.classList.add('hidden'); },
@@ -2657,9 +2646,6 @@ document.addEventListener('pointerdown', (e) => {
 });
 
 // 右上×ボタン:各パネルを確実に閉じる
-document.getElementById('btnCloseHint').addEventListener('click', () => {
-  document.getElementById('centerHint').style.display = 'none';
-});
 document.getElementById('btnCloseMotionList').addEventListener('click', () => {
   document.getElementById('motionListPanel').classList.add('hidden');
 });
@@ -2698,6 +2684,11 @@ async function toggleFullscreen(){
   }
 }
 document.getElementById('btnFullscreen').addEventListener('click', toggleFullscreen);
+
+// ❔ヘルプボタン:about.htmlを新しいタブで開く(同一ディレクトリに配置されている前提)
+document.getElementById('btnHelp').addEventListener('click', () => {
+  window.open('./about.html', '_blank', 'noopener');
+});
 
 let controlsHideTimer = null;
 function showControlsTemporarily(){
