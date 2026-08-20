@@ -17,8 +17,9 @@
   #canvas-container canvas{ display:block; width:100%; height:100%; touch-action:none; }
   #outCamBg{ position:fixed; width:2px; height:2px; opacity:0; pointer-events:none; }
 
-  /* モデル表示エリアを最大限確保するため、右上の2要素は小さく半透明なオーバーレイにする */
-  #camPreview{ position:fixed; top:calc(env(safe-area-inset-top,0px) + 8px); right:8px;
+  /* モデル表示エリアを最大限確保するため、右上の2要素は小さく半透明なオーバーレイにする。
+     右上端から順に「フルスクリーン」「❔ヘルプ」「インカメラプレビュー」を並べる。 */
+  #camPreview{ position:fixed; top:calc(env(safe-area-inset-top,0px) + 8px); right:100px;
     width:70px; height:52px; border-radius:8px; overflow:hidden; border:1px solid var(--border);
     background:#000; z-index:20; opacity:.55; transition:opacity .3s; }
   #camPreview:active{ opacity:.9; }
@@ -28,19 +29,23 @@
   #camPreview .dot{ position:absolute; width:5px; height:5px; border-radius:50%; background:var(--accent);
     top:50%; left:50%; transform:translate(-50%,-50%); box-shadow:0 0 4px var(--accent); }
 
-  #btnFullscreen{ position:fixed; top:calc(env(safe-area-inset-top,0px) + 8px); right:84px;
+  #btnFullscreen{ position:fixed; top:calc(env(safe-area-inset-top,0px) + 8px); right:8px;
     z-index:21; width:40px; height:40px; padding:0; display:flex; align-items:center; justify-content:center;
     font-size:16px; opacity:.55; transition:opacity .3s; }
   #btnFullscreen:active{ opacity:.9; }
 
-  /* ❔ヘルプボタン(about.htmlを開く)。フルスクリーンボタンのすぐ左に配置 */
-  #btnHelp{ position:fixed; top:calc(env(safe-area-inset-top,0px) + 8px); right:130px;
+  /* ❔ヘルプボタン(about.htmlを開く)。右上端のフルスクリーンボタンのすぐ左に配置 */
+  #btnHelp{ position:fixed; top:calc(env(safe-area-inset-top,0px) + 8px); right:54px;
     z-index:21; width:40px; height:40px; padding:0; display:flex; align-items:center; justify-content:center;
     font-size:16px; opacity:.55; transition:opacity .3s; }
   #btnHelp:active{ opacity:.9; }
 
-  #topbar{ position:fixed; top:calc(env(safe-area-inset-top,0px) + 10px); left:10px; right:178px;
-    display:flex; gap:6px; flex-wrap:wrap; z-index:20; }
+  /* それ以外のボタン群は画面左下を起点に、右・上へ向かって順に敷き詰める
+     (flex-wrap:wrap-reverseにより、最初のボタンが左下に来て、収まりきらない分は上の行に積まれる) */
+  #topbar{ position:fixed; left:10px; right:178px;
+    top:calc(env(safe-area-inset-top,0px) + 10px); bottom:calc(env(safe-area-inset-bottom,0px) + 10px);
+    display:flex; flex-wrap:wrap-reverse; align-content:flex-start; justify-content:flex-start;
+    gap:6px; z-index:20; overflow-y:auto; }
   button, .file-btn{ background:var(--panel); border:1px solid var(--border); color:var(--text);
     padding:8px 12px; border-radius:8px; font-size:12px; backdrop-filter:blur(8px);
     -webkit-backdrop-filter:blur(8px); white-space:nowrap; }
@@ -66,6 +71,7 @@
   /* フルスクリーン中はUIとカメラ表示を隠す。タップで数秒だけ再表示 */
   body.fs-active #topbar,
   body.fs-active #bottomPanel,
+  body.fs-active #characterListPanel,
   body.fs-active #motionListPanel,
   body.fs-active #bgmListPanel,
   body.fs-active #backgroundListPanel,
@@ -74,6 +80,7 @@
   body.fs-active #camPreview{ opacity:0; pointer-events:none; transition:opacity .3s; }
   body.fs-active.show-controls #topbar,
   body.fs-active.show-controls #bottomPanel,
+  body.fs-active.show-controls #characterListPanel,
   body.fs-active.show-controls #motionListPanel,
   body.fs-active.show-controls #bgmListPanel,
   body.fs-active.show-controls #backgroundListPanel,
@@ -104,15 +111,15 @@
     line-height:1.5; color:var(--text); user-select:text; -webkit-user-select:text; }
   #realtimeTranscript div{ white-space:pre-wrap; word-break:break-all; padding:2px 0; user-select:text; -webkit-user-select:text; }
 
-  /* モーション/BGM/背景リストなどのポップアップは、画面幅に関わらずはみ出さないよう常に画面中央に表示する */
-  #motionListPanel, #bgmListPanel, #backgroundListPanel{
+  /* モーション/BGM/背景/キャラクターリストなどのポップアップは、画面幅に関わらずはみ出さないよう常に画面中央に表示する */
+  #motionListPanel, #bgmListPanel, #backgroundListPanel, #characterListPanel{
     position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
     width:280px; max-width:calc(100vw - 24px);
     max-height:calc(100vh - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px) - 24px);
     z-index:20; background:var(--panel); border:1px solid var(--border); border-radius:10px;
     backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px);
     display:flex; flex-direction:column; overflow:hidden; padding-top:34px; }
-  #motionListPanel.hidden, #bgmListPanel.hidden, #backgroundListPanel.hidden{ display:none; }
+  #motionListPanel.hidden, #bgmListPanel.hidden, #backgroundListPanel.hidden, #characterListPanel.hidden{ display:none; }
   .motion-controls{ display:flex; gap:6px; flex-wrap:wrap; padding:8px 8px 6px; border-bottom:1px solid var(--border); }
   .motion-controls button{ flex:1; min-width:0; padding:7px 4px; font-size:11px; }
   .motion-progress-row{ padding:6px 10px 8px; border-bottom:1px solid var(--border); }
@@ -129,7 +136,7 @@
 
   #bgmListItems{ overflow-y:auto; padding:4px 6px; }
 
-  #backgroundListItems{ overflow-y:auto; padding:6px 6px 4px; flex:1; }
+  #backgroundListItems, #characterListItems{ overflow-y:auto; padding:6px 6px 4px; flex:1; }
   .bg-add-row{ padding:6px 8px; border-top:1px solid var(--border); display:flex; justify-content:flex-end; }
 
   #log{ position:relative; background:var(--panel); border:1px solid var(--border); border-radius:10px;
@@ -169,8 +176,8 @@
 <button id="btnFullscreen" title="フルスクリーン">⛶</button>
 
 <div id="topbar">
-  <label class="file-btn" for="vrmFile">📂 VRM選択</label>
-  <input type="file" id="vrmFile" accept=".vrm">
+  <button id="btnCharacterList">🧑 キャラクターリスト</button>
+  <input type="file" id="characterVrmFile" accept=".vrm" multiple style="display:none">
   <button id="btnVroidHub">🌐 VRoid Hub</button>
   <input type="file" id="vrmaFile" accept=".vrma,.fbx" multiple style="display:none">
   <button id="btnMotionList">🎞 モーションリスト</button>
@@ -189,6 +196,16 @@
   <button id="btnOffAxis">🪟 本格off-axis</button>
   <button id="btnSliders">⚙ 調整</button>
   <button id="btnLog">📋 ログ</button>
+</div>
+
+<div id="characterListPanel" class="hidden">
+  <div class="panel-current-file" id="characterCurrentFile">(未選択)</div>
+  <button class="panel-clear-btn" id="btnClearCharacterList" title="キャラクターリストを全削除">🗑全削除</button>
+  <button class="panel-close-btn" id="btnCloseCharacterList" aria-label="閉じる">×</button>
+  <div id="characterListItems"></div>
+  <div class="bg-add-row">
+    <button id="btnAddCharacter">➕ 追加</button>
+  </div>
 </div>
 
 <div id="motionListPanel" class="hidden">
@@ -436,7 +453,8 @@ async function inspectGlbTextureMemory(arrayBuffer){
   return { estimatedMB, maxDim, textureCount: decoded };
 }
 
-function loadVRM(url, label){
+// VRMファイルを取得・パースしてVRMオブジェクトを返すだけの関数(シーンへの追加やcurrentVRM管理は呼び出し側=キャラクターリストで行う)
+function loadVRMObject(url, label){
   return (async () => {
     log(`VRM読込中: ${label}`);
     let arrayBuffer;
@@ -468,19 +486,10 @@ function loadVRM(url, label){
     return new Promise((resolve, reject) => {
       vrmLoader.parse(arrayBuffer, path, (gltf) => {
         const vrm = gltf.userData.vrm;
-        if(currentVRM){ scene.remove(currentVRM.scene); }
-        currentVRM = vrm;
-        scene.add(vrm.scene);
         // VRM0.x モデルは正面が-Z向きなので、+Z向き(VRM1.0基準)に揃える
         if(vrm.meta && vrm.meta.metaVersion === '0'){
           VRMUtils.rotateVRM0(vrm);
         }
-        baseModelRotY = vrm.scene.rotation.y; // ユーザーの回転量スライダーはこの基準角に加算する
-        mixer = new THREE.AnimationMixer(vrm.scene);
-        mixer.addEventListener('finished', (e) => {
-          if(e.action === currentAction) onMotionFinished();
-        });
-        currentAction = null;
         log(`VRM読込完了: ${label}`, 'ok');
         resolve(vrm);
       }, (err) => { log(`VRM読込エラー(${label}): ${err.message || err}`, 'err'); reject(err); });
@@ -608,16 +617,9 @@ function loadMixamoFBX(url, label){
   });
 }
 
-document.getElementById('vrmFile').addEventListener('change', (e) => {
-  const file = e.target.files[0];
-  if(!file) return;
-  const url = URL.createObjectURL(file);
-  loadVRM(url, file.name).catch(()=>{});
-});
-
 document.getElementById('btnVroidHub').addEventListener('click', () => {
   window.open('https://hub.vroid.com', '_blank', 'noopener');
-  log('VRoid Hubを新しいタブで開きました。モデルページで「このモデルを利用する」からVRMファイルをダウンロードし、📂 VRM選択で読み込んでください', 'ok');
+  log('VRoid Hubを新しいタブで開きました。モデルページで「このモデルを利用する」からVRMファイルをダウンロードし、🧑 キャラクターリストの➕追加で読み込んでください', 'ok');
 });
 
 /* ---------------- モーションリスト & 再生制御 ----------------
@@ -1003,56 +1005,231 @@ document.getElementById('btnMotionList').addEventListener('click', () => {
   if(!panel.classList.contains('hidden')) updateMotionListUI();
 });
 
-// vrm.txtに書かれたファイル名リストから、起動時に読み込むVRMをランダムに1つ選ぶ。読めない場合はAliciaSolid.vrmにフォールバック。
-// 実ファイルはvrmフォルダ内から探す。
-const DEFAULT_VRM_LIST_URL = './vrm.txt';
+/* ---------------- キャラクターリスト(VRM) ----------------
+   背景リストと同様に、vrm.txtからは「ファイル名のみ」を即時・軽量に登録し、
+   実際のVRMデータはキャラクターとして選択された時点で初めて読込む(遅延読込)。
+   切替時は直前のキャラクターのVRM(ジオメトリ/マテリアル/テクスチャ)とMixerを解放してメモリを空け、
+   さらにキャッシュ済みモーションクリップ(旧キャラクターの体格でリターゲット済み)を破棄して、
+   新しいキャラクターに対して再取得させる。 */
+const DEFAULT_VRM_LIST_URL = './vrm.txt'; // 1行につき1ファイル名(相対パス)。#始まりはコメント扱い
 const FALLBACK_DEFAULT_VRM_FILE = 'AliciaSolid.vrm';
 
-async function readVRMFileNameList(){
+let characterClips = []; // { name, url, object:null|VRM, loadPromise:null|Promise }
+let activeCharacterIndex = -1;
+
+function makeCharacterEntry(name, url){
+  return { name, url, object: null, loadPromise: null };
+}
+
+function ensureCharacterLoaded(entry){
+  if(entry.object) return Promise.resolve(entry.object);
+  if(entry.loadPromise) return entry.loadPromise;
+  entry.loadPromise = loadVRMObject(entry.url, entry.name)
+    .then((vrm) => {
+      entry.object = vrm;
+      entry.loadPromise = null;
+      updateCharacterListUI();
+      return vrm;
+    })
+    .catch((err) => {
+      entry.loadPromise = null;
+      updateCharacterListUI();
+      throw err;
+    });
+  return entry.loadPromise;
+}
+
+// エントリのVRMをシーンから外してdisposeし、メモリを解放する(ファイル名リストへの登録自体は維持)
+function releaseCharacter(entry){
+  if(!entry || !entry.object) return;
+  scene.remove(entry.object.scene);
+  disposeObject3D(entry.object.scene);
+  entry.object = null;
+}
+
+async function setActiveCharacter(idx){
+  if(idx === activeCharacterIndex) return;
+  const nextEntry = characterClips[idx];
+  if(!nextEntry) return;
+  const prevEntry = (activeCharacterIndex >= 0) ? characterClips[activeCharacterIndex] : null;
+
+  const needsLoadLog = !nextEntry.object;
+  if(needsLoadLog) updateCharacterListUI();
+
+  let vrm;
+  try{
+    vrm = await ensureCharacterLoaded(nextEntry);
+  }catch(err){
+    log(`キャラクター切替エラーのため中止しました: ${nextEntry.name}`, 'err');
+    return;
+  }
+  if(characterClips[idx] !== nextEntry) return; // 読込待ちの間にリストが変わっていたら中断(削除・入替対策)
+
+  if(mixer) mixer.stopAllAction();
+  currentAction = null;
+  // 切替先の読込が完了してから直前のキャラクターを解放する(切替失敗時に無人になるのを防ぐ)
+  if(prevEntry && prevEntry !== nextEntry) releaseCharacter(prevEntry);
+
+  currentVRM = vrm;
+  if(!vrm.scene.parent) scene.add(vrm.scene); // 初回読込時はまだシーンに未追加のため
+  baseModelRotY = vrm.scene.rotation.y; // ユーザーの回転量スライダーはこの基準角に加算する
+  mixer = new THREE.AnimationMixer(vrm.scene);
+  mixer.addEventListener('finished', (e) => {
+    if(e.action === currentAction) onMotionFinished();
+  });
+
+  // 旧キャラクターの体格でリターゲット済みのモーションクリップは新キャラクターに使えないため破棄し、選び直しにする
+  motionClips.forEach(m => { m.clip = null; m.loadPromise = null; });
+  preloadedNextIndex = -1;
+
+  activeCharacterIndex = idx;
+  updateCharacterListUI();
+  log(`キャラクターを切替: ${nextEntry.name}`, 'ok');
+
+  if(motionClips.length) playRandomMotion();
+}
+
+document.getElementById('btnAddCharacter').addEventListener('click', () => {
+  document.getElementById('characterVrmFile').click();
+});
+
+document.getElementById('characterVrmFile').addEventListener('change', (e) => {
+  const files = Array.from(e.target.files || []);
+  e.target.value = '';
+  for(const file of files){
+    const url = URL.createObjectURL(file);
+    const entry = makeCharacterEntry(file.name, url);
+    characterClips.push(entry);
+    log(`キャラクターリストに追加: ${file.name}(ファイル名のみ・選択時に読込みます)`, 'ok');
+    if(activeCharacterIndex === -1) setActiveCharacter(characterClips.length - 1);
+  }
+  updateCharacterListUI();
+});
+
+function removeCharacter(idx){
+  const removed = characterClips[idx];
+  if(!removed) return;
+  if(characterClips.length <= 1){
+    log('キャラクターは最低1件必要なため削除できません', 'warn');
+    return;
+  }
+  const wasActive = (idx === activeCharacterIndex);
+  if(removed.object) releaseCharacter(removed);
+  characterClips.splice(idx, 1);
+  log(`キャラクターを削除しました: ${removed.name}`);
+  if(wasActive){
+    activeCharacterIndex = -1;
+    currentVRM = null;
+    setActiveCharacter(0);
+  }else if(idx < activeCharacterIndex){
+    activeCharacterIndex -= 1;
+  }
+  updateCharacterListUI();
+}
+
+function clearAllCharacters(){
+  if(!characterClips.length) return;
+  characterClips.forEach(entry => releaseCharacter(entry));
+  characterClips = [];
+  activeCharacterIndex = -1;
+  currentVRM = null;
+  if(mixer) mixer.stopAllAction();
+  mixer = null;
+  currentAction = null;
+  motionClips.forEach(m => { m.clip = null; m.loadPromise = null; });
+  log('キャラクターリストを全削除しました', 'ok');
+  updateCharacterListUI();
+}
+
+document.getElementById('btnClearCharacterList').addEventListener('click', clearAllCharacters);
+
+function updateCharacterListUI(){
+  const currentLabel = document.getElementById('characterCurrentFile');
+  if(currentLabel){
+    const name = (activeCharacterIndex >= 0 && characterClips[activeCharacterIndex]) ? characterClips[activeCharacterIndex].name : '(未選択)';
+    currentLabel.textContent = name;
+    currentLabel.title = name;
+  }
+  const container = document.getElementById('characterListItems');
+  if(!container) return;
+  container.innerHTML = '';
+  if(!characterClips.length){
+    const empty = document.createElement('div');
+    empty.className = 'motion-empty';
+    empty.textContent = 'キャラクターがありません。右下の➕追加からVRMファイルを追加してください';
+    container.appendChild(empty);
+    return;
+  }
+  characterClips.forEach((entry, idx) => {
+    const row = document.createElement('div');
+    row.className = 'motion-item' + (idx === activeCharacterIndex ? ' playing' : '');
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'motion-name';
+    nameSpan.textContent = (idx === activeCharacterIndex ? '▶ ' : '') + entry.name;
+    nameSpan.addEventListener('click', () => setActiveCharacter(idx));
+    const delBtn = document.createElement('button');
+    delBtn.textContent = '🗑';
+    delBtn.addEventListener('click', (ev) => { ev.stopPropagation(); removeCharacter(idx); });
+    row.appendChild(nameSpan);
+    row.appendChild(delBtn);
+    container.appendChild(row);
+  });
+}
+
+document.getElementById('btnCharacterList').addEventListener('click', () => {
+  const panel = document.getElementById('characterListPanel');
+  panel.classList.toggle('hidden');
+  if(!panel.classList.contains('hidden')) updateCharacterListUI();
+});
+
+// vrm.txtに書かれたファイル名リストを取得する。読めない場合は既定のAliciaSolid.vrmのみとする。実ファイルはvrmフォルダ内から探す。
+async function loadDefaultCharacterFileNames(){
   try{
     const res = await fetch(DEFAULT_VRM_LIST_URL);
     if(!res.ok) throw new Error(`HTTP ${res.status}`);
     const text = await res.text();
     const files = text.split(/\r?\n/).map(line => line.trim()).filter(line => line && !line.startsWith('#'));
     if(!files.length) throw new Error('vrm.txtが空です');
+    log(`vrm.txtから${files.length}件のキャラクター候補を読み込みました`, 'ok');
     return files;
   }catch(err){
-    log(`vrm.txtの読込に失敗しました: ${err.message || err}`, 'warn');
-    return [];
+    log(`vrm.txtの読込に失敗したため既定のキャラクター(${FALLBACK_DEFAULT_VRM_FILE})のみを使用します: ${err.message || err}`, 'warn');
+    return [FALLBACK_DEFAULT_VRM_FILE];
   }
 }
 
-// vrm.txtの候補からランダムな順で読込を試し、404等で失敗したら次の候補にフォールバックする。
-// 全滅した場合は最後にAliciaSolid.vrmを試す。
-async function loadRandomDefaultVRM(){
-  const files = await readVRMFileNameList();
-  if(files.length){
-    log(`vrm.txtから${files.length}件のVRM候補を読み込みました`, 'ok');
-    // Fisher-Yatesでシャッフルし、先頭から順に成功するまで試す
-    const shuffled = files.slice();
-    for(let i = shuffled.length - 1; i > 0; i--){
-      const j = Math.floor(Math.random() * (i + 1));
-      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-    }
-    for(const name of shuffled){
-      try{
-        await loadVRM(`./vrm/${name}`, name);
-        return; // 成功
-      }catch(err){
-        log(`「${name}」の読込に失敗したため、別の候補を試します`, 'warn');
-      }
-    }
-    log('vrm.txtの候補が全て読み込めなかったため、既定のVRMを試します', 'warn');
-  }
-  await loadVRM(`./vrm/${FALLBACK_DEFAULT_VRM_FILE}`, FALLBACK_DEFAULT_VRM_FILE);
+// ファイル名のリストから、VRM未読込のエントリだけをcharacterClipsに登録する(即時・軽量)
+function loadCharacterList(files){
+  characterClips = files.map(name => makeCharacterEntry(name, `./vrm/${name}`));
+  log(`キャラクターリストを登録しました(${characterClips.length}件・ファイル名のみ、選択時に読込みます)`, characterClips.length ? 'ok' : 'warn');
+  activeCharacterIndex = -1;
+  updateCharacterListUI();
 }
 
-// 起動時にvrm.txtの候補からランダムに選んだVRMを読込み(失敗時は他候補→既定VRMへ自動フォールバック)、
-// vrma.txtに書かれたファイル名リストをモーションリストとして登録(名前のみ・軽量)、
-// 実際のクリップはplayRandomMotion()が最初の1件を再生する際に遅延読込される
+// リストからランダムな順で読込を試し、404等で失敗したら次の候補にフォールバックする
+async function activateRandomDefaultCharacter(){
+  if(!characterClips.length) return;
+  const order = characterClips.map((_, i) => i);
+  for(let i = order.length - 1; i > 0; i--){
+    const j = Math.floor(Math.random() * (i + 1));
+    [order[i], order[j]] = [order[j], order[i]];
+  }
+  for(const idx of order){
+    await setActiveCharacter(idx);
+    if(activeCharacterIndex === idx) return; // 成功
+    log(`「${characterClips[idx] ? characterClips[idx].name : idx}」の読込に失敗したため、別の候補を試します`, 'warn');
+  }
+  log('キャラクター候補が全て読み込めませんでした。🧑 キャラクターリストの➕追加から手動で選択してください', 'err');
+}
+
+// 起動時にvrm.txtの候補をキャラクターリストに登録し、ランダムに1件選んで読込み(失敗時は他候補へ自動フォールバック)、
+// vrma.txtに書かれたファイル名リストをモーションリストとして登録する(名前のみ・軽量)。
+// 実際のモーションクリップはplayRandomMotion()が最初の1件を再生する際に遅延読込される。
 (async () => {
   try{
-    await loadRandomDefaultVRM();
+    const vrmFiles = await loadDefaultCharacterFileNames();
+    loadCharacterList(vrmFiles);
+    await activateRandomDefaultCharacter();
     const files = await loadDefaultMotionFileNames();
     loadMotionList(files);
     if(motionClips.length) playRandomMotion();
@@ -2605,6 +2782,12 @@ document.getElementById('btnLog').addEventListener('click', () => {
 /* ---------------- 枠外タップで閉じる ---------------- */
 const dismissiblePanels = [
   {
+    panel: document.getElementById('characterListPanel'),
+    isVisible: (el) => !el.classList.contains('hidden'),
+    hide: (el) => { el.classList.add('hidden'); },
+    exclude: [document.getElementById('btnCharacterList')]
+  },
+  {
     panel: document.getElementById('motionListPanel'),
     isVisible: (el) => !el.classList.contains('hidden'),
     hide: (el) => { el.classList.add('hidden'); },
@@ -2646,6 +2829,9 @@ document.addEventListener('pointerdown', (e) => {
 });
 
 // 右上×ボタン:各パネルを確実に閉じる
+document.getElementById('btnCloseCharacterList').addEventListener('click', () => {
+  document.getElementById('characterListPanel').classList.add('hidden');
+});
 document.getElementById('btnCloseMotionList').addEventListener('click', () => {
   document.getElementById('motionListPanel').classList.add('hidden');
 });
