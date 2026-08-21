@@ -1,17 +1,19 @@
 5876570490179264320.vrm
-6493143135142452442.vrm
+8329890252317737768.vrm,VRoid Project,https://hub.vroid.com/users/36144806
 7714289881874798246.vrm
 8496491754682859078.vrm
 8590256991748008892.vrm
-AliciaSolid.vrm
-Liqu.vrm
-School-Uniform-Girl_01_A.vrm
-School-Uniform-Girl_02_B.vrm
-School-Uniform-Girl_03_C.vrm
-School-Uniform-Girl_04_D.vrm
+AliciaSolid.vrm,黒星紅白_雨刻,https://3d.nicovideo.jp/alicia/
+Liqu.vrm,KARAKURIPOWER,https://kar.booth.pm/
+School-Uniform-Girl_01_A.vrm,七百屋,https://hub.vroid.com/users/53360284
+School-Uniform-Girl_02_B.vrm,七百屋,https://hub.vroid.com/users/53360284
+School-Uniform-Girl_03_C.vrm,七百屋,https://hub.vroid.com/users/53360284
+School-Uniform-Girl_04_D.vrm,七百屋,https://hub.vroid.com/users/53360284
 Yu1_1.vrm
-マスガキちゃん.vrm
+マスガキちゃん.vrm,ぷるてうす,https://hub.vroid.com/users/378610
 760571251784471653.vrm
 1506531138757394280.vrm
 4043018172957611916.vrm
 5052131706566087697.vrm
+nijie_tan_wing.vrm,へどらあき(くさなぎけいた)_UGUME_Tomngo,https://nijie.info/lp.php?page=3d_nijie_model
+nijie_tan.vrm,へどらあき(くさなぎけいた)_UGUME_Tomngo,https://nijie.info/lp.php?page=3d_nijie_model
