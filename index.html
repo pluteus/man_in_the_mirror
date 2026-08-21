@@ -117,7 +117,7 @@
   #motionListPanel, #bgmListPanel, #backgroundListPanel, #characterListPanel{
     position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
     width:280px; max-width:calc(100vw - 24px);
-    max-height:calc(100vh - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px) - 24px);
+    max-height:min(80vh, calc(100vh - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px) - 24px));
     z-index:20; background:var(--panel); border:1px solid var(--border); border-radius:10px;
     backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px);
     display:flex; flex-direction:column; overflow:hidden; padding-top:34px; }
@@ -149,6 +149,7 @@
     user-select:text; -webkit-user-select:text; }
   #logContent div{ white-space:pre-wrap; word-break:break-all; user-select:text; -webkit-user-select:text; }
   #logContent .ok{ color:var(--ok); } #logContent .warn{ color:var(--warn); } #logContent .err{ color:var(--err); }
+  #logContent .asset-link{ cursor:pointer; text-decoration:underline; color:var(--accent); }
 
 
 
@@ -299,7 +300,9 @@
       <button id="btnRealtimeConnect">🎙️ 接続</button>
       <button id="btnRealtimeMute">🔇 ミュート</button>
       <button id="btnAutoGesture" class="on">🎭 自動ジェスチャー:ON</button>
-      <button id="btnSendVideo">📷 映像を送信:OFF</button>
+      <button id="btnSendVideoIn">🤳 インカメラ映像:OFF</button>
+      <button id="btnSendVideoOut">📷 アウトカメラ映像:OFF</button>
+      <button id="btnSendVideoScreen">🖥️ スクリーン映像:OFF</button>
       <button id="btnRealtimeClearKey">🗑️ キー消去</button>
     </div>
     <div id="realtimeStatus">未接続</div>
@@ -353,6 +356,32 @@ function log(msg, level=''){
   logEl.appendChild(d);
   logEl.scrollTop = logEl.scrollHeight;
   console.log(msg);
+}
+
+// vrm.txt/vrma.txt/bgm.txt/glb.txt の1行を「ファイル名,作者名(省略可),url(省略可)」として分解する
+function parseAssetLine(line){
+  const parts = line.split(',').map(p => p.trim());
+  return { file: parts[0] || '', author: parts[1] || '', sourceUrl: parts[2] || '' };
+}
+
+// アセット読込ログ: ファイル名と作者名を表示し(urlは表示しない)、ファイル名タップでurlを別タブで開く
+function logAssetEntry(file, author, sourceUrl, level=''){
+  const t = new Date().toLocaleTimeString('ja-JP', {hour12:false});
+  const d = document.createElement('div');
+  if(level) d.className = level;
+  d.appendChild(document.createTextNode(`[${t}] `));
+  const nameEl = document.createElement('span');
+  nameEl.textContent = file;
+  if(sourceUrl){
+    nameEl.className = 'asset-link';
+    nameEl.title = sourceUrl;
+    nameEl.addEventListener('click', () => window.open(sourceUrl, '_blank', 'noopener'));
+  }
+  d.appendChild(nameEl);
+  if(author) d.appendChild(document.createTextNode(` , ${author}`));
+  logEl.appendChild(d);
+  logEl.scrollTop = logEl.scrollHeight;
+  console.log(`${file}${author ? ' , ' + author : ''}`);
 }
 
 /* ---------------- ダブルタップズーム禁止 ---------------- */
@@ -629,40 +658,42 @@ document.getElementById('btnVroidHub').addEventListener('click', () => {
    リストに登録し、実際のクリップ読込は再生する直前に行う「遅延読込」方式にしている。
    さらに、今のモーションを再生している間に「次に再生される見込みのモーション」を
    バックグラウンドで先読みしておくことで、切り替え時の待ち時間を減らしている。 */
-const DEFAULT_MOTION_LIST_URL = './vrma.txt'; // 1行につき1ファイル名(相対パス)。#始まりはコメント扱い
-const FALLBACK_DEFAULT_MOTION_FILES = ['VRMA_01.vrma','VRMA_02.vrma','VRMA_03.vrma','VRMA_04.vrma','VRMA_05.vrma','VRMA_06.vrma','VRMA_07.vrma'];
+const DEFAULT_MOTION_LIST_URL = './vrma.txt'; // 1行につき「ファイル名,作者名(省略可),url(省略可)」。#始まりはコメント扱い
+const FALLBACK_DEFAULT_MOTION_FILES = ['VRMA_01.vrma','VRMA_02.vrma','VRMA_03.vrma','VRMA_04.vrma','VRMA_05.vrma','VRMA_06.vrma','VRMA_07.vrma']
+  .map(file => ({ file, author:'', sourceUrl:'' }));
 
-let motionClips = []; // { name, url, isFBX, clip:null|AnimationClip, loadPromise:null|Promise }
+let motionClips = []; // { name, url, author, sourceUrl, isFBX, clip:null|AnimationClip, loadPromise:null|Promise }
 let lastMotionIndex = -1;
 let randomPlayback = true;
 let repeatMode = false;
 let pendingEmotionMotionIndex = null; // 現在のモーション終了後に再生する、会話内容に応じたジェスチャー
 let preloadedNextIndex = -1;          // 現在のモーション再生中に先読みしておく「次に再生予定」のインデックス
 
-function makeMotionEntry(name, url){
-  return { name, url, isFBX: /\.fbx$/i.test(name), clip: null, loadPromise: null };
+function makeMotionEntry(name, url, author='', sourceUrl=''){
+  return { name, url, author, sourceUrl, isFBX: /\.fbx$/i.test(name), clip: null, loadPromise: null };
 }
 
-// vrma.txtからデフォルトモーションのファイル名リストを取得する。読めない場合は従来のVRMA_01〜07にフォールバック。
+// vrma.txtからデフォルトモーションのファイル名/作者名/urlリストを取得する。読めない場合は従来のVRMA_01〜07にフォールバック。
 // 実ファイルはvrmaフォルダ内から探す。
 async function loadDefaultMotionFileNames(){
   try{
     const res = await fetch(DEFAULT_MOTION_LIST_URL);
     if(!res.ok) throw new Error(`HTTP ${res.status}`);
     const text = await res.text();
-    const files = text.split(/\r?\n/).map(line => line.trim()).filter(line => line && !line.startsWith('#'));
-    if(!files.length) throw new Error('vrma.txtが空です');
-    log(`vrma.txtから${files.length}件のモーションファイル名を読み込みました`, 'ok');
-    return files;
+    const entries = text.split(/\r?\n/).map(line => line.trim()).filter(line => line && !line.startsWith('#')).map(parseAssetLine).filter(e => e.file);
+    if(!entries.length) throw new Error('vrma.txtが空です');
+    entries.forEach(e => logAssetEntry(e.file, e.author, e.sourceUrl, 'ok'));
+    log(`vrma.txtから${entries.length}件のモーションファイル名を読み込みました`, 'ok');
+    return entries;
   }catch(err){
     log(`vrma.txtの読込に失敗したため既定のモーションリストを使用します: ${err.message || err}`, 'warn');
     return FALLBACK_DEFAULT_MOTION_FILES;
   }
 }
 
-// ファイル名のリストから、クリップ未読込のエントリだけをmotionClipsに登録する(即時・軽量)
-function loadMotionList(files){
-  motionClips = files.map(name => makeMotionEntry(name, `./vrma/${name}`));
+// エントリ({file,author,sourceUrl})のリストから、クリップ未読込のエントリだけをmotionClipsに登録する(即時・軽量)
+function loadMotionList(entries){
+  motionClips = entries.map(e => makeMotionEntry(e.file, `./vrma/${e.file}`, e.author, e.sourceUrl));
   log(`モーションリストを登録しました(${motionClips.length}件・ファイル名のみ、再生時に順次読込みます)`, motionClips.length ? 'ok' : 'warn');
   updateMotionListUI();
 }
@@ -1013,14 +1044,14 @@ document.getElementById('btnMotionList').addEventListener('click', () => {
    切替時は直前のキャラクターのVRM(ジオメトリ/マテリアル/テクスチャ)とMixerを解放してメモリを空け、
    さらにキャッシュ済みモーションクリップ(旧キャラクターの体格でリターゲット済み)を破棄して、
    新しいキャラクターに対して再取得させる。 */
-const DEFAULT_VRM_LIST_URL = './vrm.txt'; // 1行につき1ファイル名(相対パス)。#始まりはコメント扱い
+const DEFAULT_VRM_LIST_URL = './vrm.txt'; // 1行につき「ファイル名,作者名(省略可),url(省略可)」。#始まりはコメント扱い
 const FALLBACK_DEFAULT_VRM_FILE = 'AliciaSolid.vrm';
 
-let characterClips = []; // { name, url, object:null|VRM, loadPromise:null|Promise }
+let characterClips = []; // { name, url, author, sourceUrl, object:null|VRM, loadPromise:null|Promise }
 let activeCharacterIndex = -1;
 
-function makeCharacterEntry(name, url){
-  return { name, url, object: null, loadPromise: null };
+function makeCharacterEntry(name, url, author='', sourceUrl=''){
+  return { name, url, author, sourceUrl, object: null, loadPromise: null };
 }
 
 function ensureCharacterLoaded(entry){
@@ -1184,25 +1215,26 @@ document.getElementById('btnCharacterList').addEventListener('click', () => {
   if(!panel.classList.contains('hidden')) updateCharacterListUI();
 });
 
-// vrm.txtに書かれたファイル名リストを取得する。読めない場合は既定のAliciaSolid.vrmのみとする。実ファイルはvrmフォルダ内から探す。
+// vrm.txtに書かれたファイル名/作者名/urlリストを取得する。読めない場合は既定のAliciaSolid.vrmのみとする。実ファイルはvrmフォルダ内から探す。
 async function loadDefaultCharacterFileNames(){
   try{
     const res = await fetch(DEFAULT_VRM_LIST_URL);
     if(!res.ok) throw new Error(`HTTP ${res.status}`);
     const text = await res.text();
-    const files = text.split(/\r?\n/).map(line => line.trim()).filter(line => line && !line.startsWith('#'));
-    if(!files.length) throw new Error('vrm.txtが空です');
-    log(`vrm.txtから${files.length}件のキャラクター候補を読み込みました`, 'ok');
-    return files;
+    const entries = text.split(/\r?\n/).map(line => line.trim()).filter(line => line && !line.startsWith('#')).map(parseAssetLine).filter(e => e.file);
+    if(!entries.length) throw new Error('vrm.txtが空です');
+    entries.forEach(e => logAssetEntry(e.file, e.author, e.sourceUrl, 'ok'));
+    log(`vrm.txtから${entries.length}件のキャラクター候補を読み込みました`, 'ok');
+    return entries;
   }catch(err){
     log(`vrm.txtの読込に失敗したため既定のキャラクター(${FALLBACK_DEFAULT_VRM_FILE})のみを使用します: ${err.message || err}`, 'warn');
-    return [FALLBACK_DEFAULT_VRM_FILE];
+    return [{ file: FALLBACK_DEFAULT_VRM_FILE, author:'', sourceUrl:'' }];
   }
 }
 
-// ファイル名のリストから、VRM未読込のエントリだけをcharacterClipsに登録する(即時・軽量)
-function loadCharacterList(files){
-  characterClips = files.map(name => makeCharacterEntry(name, `./vrm/${name}`));
+// エントリ({file,author,sourceUrl})のリストから、VRM未読込のエントリだけをcharacterClipsに登録する(即時・軽量)
+function loadCharacterList(entries){
+  characterClips = entries.map(e => makeCharacterEntry(e.file, `./vrm/${e.file}`, e.author, e.sourceUrl));
   log(`キャラクターリストを登録しました(${characterClips.length}件・ファイル名のみ、選択時に読込みます)`, characterClips.length ? 'ok' : 'warn');
   activeCharacterIndex = -1;
   updateCharacterListUI();
@@ -1242,7 +1274,7 @@ async function activateRandomDefaultCharacter(){
 
 /* ---------------- BGMリスト & 再生制御(モーションリストと同様の構成) ---------------- */
 const bgmPlayer = document.getElementById('bgmPlayer');
-let bgmClips = []; // { name, url }
+let bgmClips = []; // { name, url, author, sourceUrl }
 let lastBgmIndex = -1;
 let bgmRandom = true;
 let bgmRepeat = false;
@@ -1326,7 +1358,7 @@ document.getElementById('bgmFile').addEventListener('change', (e) => {
   e.target.value = '';
   for(const file of files){
     const url = URL.createObjectURL(file);
-    bgmClips.push({ name: file.name, url });
+    bgmClips.push({ name: file.name, url, author:'', sourceUrl:'' });
     log(`BGMリストに追加: ${file.name}`, 'ok');
   }
   updateBgmListUI();
@@ -1369,6 +1401,43 @@ function clearAllBgm(){
 }
 
 document.getElementById('btnClearBgmList').addEventListener('click', clearAllBgm);
+
+// bgm.txtに書かれたファイル名/作者名/urlリストから、起動時に読み込むBGM候補を取得する。読めない場合はBGM無しのままとする。
+// 実ファイルはbgmフォルダ内から探す。
+const DEFAULT_BGM_LIST_URL = './bgm.txt'; // 1行につき「ファイル名,作者名(省略可),url(省略可)」。#始まりはコメント扱い
+
+async function loadDefaultBgmFileNames(){
+  try{
+    const res = await fetch(DEFAULT_BGM_LIST_URL);
+    if(!res.ok) throw new Error(`HTTP ${res.status}`);
+    const text = await res.text();
+    const entries = text.split(/\r?\n/).map(line => line.trim()).filter(line => line && !line.startsWith('#')).map(parseAssetLine).filter(e => e.file);
+    if(!entries.length) throw new Error('bgm.txtが空です');
+    entries.forEach(e => logAssetEntry(e.file, e.author, e.sourceUrl, 'ok'));
+    log(`bgm.txtから${entries.length}件のBGMファイル名を読み込みました`, 'ok');
+    return entries;
+  }catch(err){
+    log(`bgm.txtの読込に失敗したため既定のBGMは読み込みません: ${err.message || err}`, 'warn');
+    return [];
+  }
+}
+
+// エントリ({file,author,sourceUrl})のリストからbgmClipsを登録する(即時・軽量、実データはaudioが再生時に取得)
+function loadBgmList(entries){
+  bgmClips = entries.map(e => ({ name: e.file, url: `./bgm/${e.file}`, author: e.author, sourceUrl: e.sourceUrl }));
+  log(`BGMリストを登録しました(${bgmClips.length}件)`, bgmClips.length ? 'ok' : 'warn');
+  updateBgmListUI();
+  if(bgmClips.length){
+    if(bgmRandom) playRandomBgm(); else playBgm(0);
+  }
+}
+
+async function loadDefaultBgm(){
+  const entries = await loadDefaultBgmFileNames();
+  loadBgmList(entries);
+}
+
+loadDefaultBgm();
 
 function updateBgmListUI(){
   const currentLabel = document.getElementById('bgmCurrentFile');
@@ -1437,8 +1506,8 @@ const bgGlbLoader = new GLTFLoader();
 let backgroundClips = []; // { name, url, object:null|Object3D, loadPromise:null|Promise }
 let activeBackgroundIndex = -1;
 
-function makeBackgroundEntry(name, url){
-  return { name, url, isNone:false, object: null, loadPromise: null };
+function makeBackgroundEntry(name, url, author='', sourceUrl=''){
+  return { name, url, author, sourceUrl, isNone:false, object: null, loadPromise: null };
 }
 
 // 「背景なし」を表す特別なエントリ(リストの先頭に常時固定表示・削除不可・実データを持たない)
@@ -1643,32 +1712,33 @@ document.getElementById('btnBgList').addEventListener('click', () => {
 
 // glb.txtに書かれたファイル名リストから、起動時に読み込む背景の候補を取得する。読めない場合は既定の背景なしとする。
 // 実ファイルはglbフォルダ内から探す。
-const DEFAULT_BACKGROUND_LIST_URL = './glb.txt'; // 1行につき1ファイル名(相対パス)。#始まりはコメント扱い
+const DEFAULT_BACKGROUND_LIST_URL = './glb.txt'; // 1行につき「ファイル名,作者名(省略可),url(省略可)」。#始まりはコメント扱い
 
 async function loadDefaultBackgroundFileNames(){
   try{
     const res = await fetch(DEFAULT_BACKGROUND_LIST_URL);
     if(!res.ok) throw new Error(`HTTP ${res.status}`);
     const text = await res.text();
-    const files = text.split(/\r?\n/).map(line => line.trim()).filter(line => line && !line.startsWith('#'));
-    if(!files.length) throw new Error('glb.txtが空です');
-    log(`glb.txtから${files.length}件の背景ファイル名を読み込みました`, 'ok');
-    return files;
+    const entries = text.split(/\r?\n/).map(line => line.trim()).filter(line => line && !line.startsWith('#')).map(parseAssetLine).filter(e => e.file);
+    if(!entries.length) throw new Error('glb.txtが空です');
+    entries.forEach(e => logAssetEntry(e.file, e.author, e.sourceUrl, 'ok'));
+    log(`glb.txtから${entries.length}件の背景ファイル名を読み込みました`, 'ok');
+    return entries;
   }catch(err){
     log(`glb.txtの読込に失敗したため既定の背景は読み込みません: ${err.message || err}`, 'warn');
     return [];
   }
 }
 
-// ファイル名のリストから、GLB未読込のエントリだけをbackgroundClipsに登録する(即時・軽量)
+// エントリ({file,author,sourceUrl})のリストから、GLB未読込のエントリだけをbackgroundClipsに登録する(即時・軽量)
 // リストの先頭には常に「背景なし」を追加し、既定の背景はファイルリストの中からランダムに1つ選ぶ
-function loadBackgroundList(files){
-  backgroundClips = [makeNoBackgroundEntry(), ...files.map(name => makeBackgroundEntry(name, `./glb/${name}`))];
-  log(`背景リストを登録しました(${files.length}件・ファイル名のみ、選択時に読込みます)`, backgroundClips.length ? 'ok' : 'warn');
+function loadBackgroundList(entries){
+  backgroundClips = [makeNoBackgroundEntry(), ...entries.map(e => makeBackgroundEntry(e.file, `./glb/${e.file}`, e.author, e.sourceUrl))];
+  log(`背景リストを登録しました(${entries.length}件・ファイル名のみ、選択時に読込みます)`, backgroundClips.length ? 'ok' : 'warn');
   activeBackgroundIndex = -1;
   updateBackgroundListUI();
-  if(files.length){
-    const randomIdx = 1 + Math.floor(Math.random() * files.length); // 「背景なし」を除いた範囲からランダム選択
+  if(entries.length){
+    const randomIdx = 1 + Math.floor(Math.random() * entries.length); // 「背景なし」を除いた範囲からランダム選択
     setActiveBackground(randomIdx);
   }else{
     setActiveBackground(0); // 候補が無ければ「背景なし」のまま
@@ -1863,33 +1933,42 @@ function startMicCapture(stream){
 
 const GEMINI_LIVE_MODEL = 'gemini-3.1-flash-live-preview';
 
-/* ---------------- 📷 会話中にカメラ映像を認識させる ----------------
+/* ---------------- 📷 会話中にカメラ/画面映像を認識させる ----------------
    Gemini LiveのrealtimeInputはaudioと同じ形式でvideo(JPEG)も受け付けるため、
-   アウトカメラ(背景用)が起動していればそちらを、無ければインカメラ(顔トラッキング用)の
-   映像を、Google推奨の上限に合わせて1秒に1回JPEGでキャプチャして送信する。
-   映像を外部に送る機能なので、既定はOFF。ユーザーがONにした時だけ送信する。 */
-let sendVideoEnabled = false;
+   インカメラ・アウトカメラ・スクリーン(モデルと背景)の映像を、それぞれ個別にON/OFFできるようにし、
+   有効なものをGoogle推奨の上限に合わせて1秒に1回JPEGでキャプチャして送信する。
+   複数同時にONの場合は「アウトカメラ→インカメラ→スクリーン」の優先順で1枚だけ送信する(送信レート上限のため)。
+   映像を外部に送る機能なので、既定は全てOFF。ユーザーがONにした時だけ送信する。 */
+let sendVideoOutEnabled = false;
+let sendVideoInEnabled = false;
+let sendVideoScreenEnabled = false;
 let videoSendInterval = null;
 const videoSendCanvas = document.createElement('canvas');
 const videoSendCtx = videoSendCanvas.getContext('2d');
 
+function anyVideoSendEnabled(){
+  return sendVideoOutEnabled || sendVideoInEnabled || sendVideoScreenEnabled;
+}
+
 function captureAndSendVideoFrame(){
   if(!geminiWs || geminiWs.readyState !== WebSocket.OPEN) return;
-  let sourceVideo = null;
-  if(outCamStream && outCamVideo.videoWidth > 0){
-    sourceVideo = outCamVideo; // アウトカメラ優先(「これ何?」のようにモノを見せて聞くケースを想定)
-  }else if(camRunning && video.videoWidth > 0){
-    sourceVideo = video; // アウトカメラが無ければインカメラ映像を使う
+  let sourceEl = null, srcW = 0, srcH = 0;
+  if(sendVideoOutEnabled && outCamStream && outCamVideo.videoWidth > 0){
+    sourceEl = outCamVideo; srcW = outCamVideo.videoWidth; srcH = outCamVideo.videoHeight;
+  }else if(sendVideoInEnabled && camRunning && video.videoWidth > 0){
+    sourceEl = video; srcW = video.videoWidth; srcH = video.videoHeight;
+  }else if(sendVideoScreenEnabled && renderer.domElement.width > 0){
+    sourceEl = renderer.domElement; srcW = renderer.domElement.width; srcH = renderer.domElement.height;
   }
-  if(!sourceVideo) return;
+  if(!sourceEl) return;
 
   const maxDim = 640; // 送信サイズを抑えて帯域・コストを節約
-  const scale = Math.min(1, maxDim / Math.max(sourceVideo.videoWidth, sourceVideo.videoHeight));
-  const w = Math.max(1, Math.round(sourceVideo.videoWidth * scale));
-  const h = Math.max(1, Math.round(sourceVideo.videoHeight * scale));
+  const scale = Math.min(1, maxDim / Math.max(srcW, srcH));
+  const w = Math.max(1, Math.round(srcW * scale));
+  const h = Math.max(1, Math.round(srcH * scale));
   videoSendCanvas.width = w;
   videoSendCanvas.height = h;
-  videoSendCtx.drawImage(sourceVideo, 0, 0, w, h);
+  videoSendCtx.drawImage(sourceEl, 0, 0, w, h);
   const dataUrl = videoSendCanvas.toDataURL('image/jpeg', 0.7);
   const base64 = dataUrl.split(',')[1];
   geminiWs.send(JSON.stringify({
@@ -2003,7 +2082,7 @@ async function connectRealtime(){
         btn.classList.add('on');
         log('Gemini Liveに接続しました', 'ok');
         startMicCapture(realtimeMicStream);
-        if(sendVideoEnabled) startVideoSend();
+        if(anyVideoSendEnabled()) startVideoSend();
         return;
       }
 
@@ -2090,18 +2169,24 @@ document.getElementById('btnAutoGesture').addEventListener('click', () => {
   if(!autoGestureEnabled) pendingEmotionMotionIndex = null;
 });
 
-document.getElementById('btnSendVideo').addEventListener('click', () => {
-  sendVideoEnabled = !sendVideoEnabled;
-  const btn = document.getElementById('btnSendVideo');
-  btn.classList.toggle('on', sendVideoEnabled);
-  btn.textContent = `📷 映像を送信:${sendVideoEnabled ? 'ON' : 'OFF'}`;
-  if(sendVideoEnabled){
-    log('カメラ映像をGeminiに送信します(アウトカメラ優先、無ければインカメラ)。会話中は見えているものについて質問できます', 'ok');
-    if(geminiWs && geminiWs.readyState === WebSocket.OPEN) startVideoSend();
-  }else{
-    stopVideoSend();
-  }
-});
+function setupVideoSendToggleButton(btnId, label, isEnabledGetter, isEnabledSetter, hint){
+  document.getElementById(btnId).addEventListener('click', () => {
+    const next = !isEnabledGetter();
+    isEnabledSetter(next);
+    const btn = document.getElementById(btnId);
+    btn.classList.toggle('on', next);
+    btn.textContent = `${label}:${next ? 'ON' : 'OFF'}`;
+    if(next){
+      log(`${hint}をGeminiに送信します。会話中は見えているものについて質問できます`, 'ok');
+      if(geminiWs && geminiWs.readyState === WebSocket.OPEN) startVideoSend();
+    }else if(!anyVideoSendEnabled()){
+      stopVideoSend();
+    }
+  });
+}
+setupVideoSendToggleButton('btnSendVideoOut', '📷 アウトカメラ映像', () => sendVideoOutEnabled, v => sendVideoOutEnabled = v, 'アウトカメラ映像');
+setupVideoSendToggleButton('btnSendVideoIn', '🤳 インカメラ映像', () => sendVideoInEnabled, v => sendVideoInEnabled = v, 'インカメラ映像');
+setupVideoSendToggleButton('btnSendVideoScreen', '🖥️ スクリーン映像', () => sendVideoScreenEnabled, v => sendVideoScreenEnabled = v, 'スクリーン(モデルと背景)映像');
 
 document.getElementById('btnRealtime').addEventListener('click', () => {
   document.getElementById('realtimePanel').classList.toggle('hidden');
