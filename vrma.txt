@@ -6,11 +6,11 @@
 006_drinkwater.vrma
 007_gekirei.vrma
 008_gatan.vrma
-AI猫ダンス.vrma
-Bling-Bang-Bang-Born.vrma
-CC0-run.vrma
-CC0-slowrun.vrma
-CC0-walk.vrma
+AI猫ダンス.vrma,八ツ橋まろん,https://maronvtuber.booth.pm/
+Bling-Bang-Bang-Born.vrma,八ツ橋まろん,https://maronvtuber.booth.pm/
+CC0-run.vrma,JEN JELL,https://jenjell.itch.io/josie-character-model
+CC0-slowrun.vrma,JEN JELL,https://jenjell.itch.io/josie-character-model
+CC0-walk.vrma,JEN JELL,https://jenjell.itch.io/josie-character-model
 CC0_animation02idle.vrma
 CC0animation3airplane01.vrma
 CC0animation3airplane02.vrma
@@ -55,64 +55,69 @@ CC0animationwave02.vrma
 CC0animationwave03.vrma
 CC0animationwave04.vrma
 CC0animationzatu01.vrma
-Countach.vrma
-HACK.vrma
-Kawaii Kaiwai.vrma
-LADY_CRAZY.vrma
-LEMON MELON COOKIE.vrma
-OBF.vrma
-SundayMorning.vrma
-VRMA_01.vrma
-VRMA_02.vrma
-VRMA_03.vrma
-VRMA_04.vrma
-VRMA_05.vrma
-VRMA_06.vrma
-VRMA_07.vrma
-V_HIMEHINA.vrma
+Countach.vrma,八ツ橋まろん,https://maronvtuber.booth.pm/
+HACK.vrma,八ツ橋まろん,https://maronvtuber.booth.pm/
+Kawaii Kaiwai.vrma,八ツ橋まろん,https://maronvtuber.booth.pm/
+LADY_CRAZY.vrma,八ツ橋まろん,https://maronvtuber.booth.pm/
+LEMON MELON COOKIE.vrma,八ツ橋まろん,https://maronvtuber.booth.pm/
+OBF.vrma,八ツ橋まろん,https://maronvtuber.booth.pm/
+SundayMorning.vrma,八ツ橋まろん,https://maronvtuber.booth.pm/
+VRMA_01.vrma,VRoid Project,https://vroid.booth.pm/
+VRMA_02.vrma,VRoid Project,https://vroid.booth.pm/
+VRMA_03.vrma,VRoid Project,https://vroid.booth.pm/
+VRMA_04.vrma,VRoid Project,https://vroid.booth.pm/
+VRMA_05.vrma,VRoid Project,https://vroid.booth.pm/
+VRMA_06.vrma,VRoid Project,https://vroid.booth.pm/
+VRMA_07.vrma,VRoid Project,https://vroid.booth.pm/
+V_HIMEHINA.vrma,八ツ橋まろん,https://maronvtuber.booth.pm/
 cafenotako_mafty_dance.vrma
 vrmaアニメーション１_連続キック.vrma
 vrmaアニメーション２_走る.vrma
-ういこうせん.vrma
-うい麦畑でつかまえて.vrma
+ういこうせん.vrma,八ツ橋まろん,https://maronvtuber.booth.pm/
+うい麦畑でつかまえて.vrma,八ツ橋まろん,https://maronvtuber.booth.pm/
 うでぶんぶん.vrma
-おじさん構文.vrma
-しかのこのこのここしたんたん.vrma
-どきどきキュンで大暴走.vrma
-どーも、天才です.vrma
-なぜ謎ANSWER.vrma
-にじさんじ体操第一.vrma
-ひたむきシンデレラ.vrma
-まいたけダンス.vrma
+おじさん構文.vrma,八ツ橋まろん,https://maronvtuber.booth.pm/
+しかのこのこのここしたんたん.vrma,八ツ橋まろん,https://maronvtuber.booth.pm/
+どきどきキュンで大暴走.vrma,八ツ橋まろん,https://maronvtuber.booth.pm/
+どーも、天才です.vrma,八ツ橋まろん,https://maronvtuber.booth.pm/
+なぜ謎ANSWER.vrma,八ツ橋まろん,https://maronvtuber.booth.pm/
+にじさんじ体操第一.vrma,八ツ橋まろん,https://maronvtuber.booth.pm/
+ひたむきシンデレラ.vrma,八ツ橋まろん,https://maronvtuber.booth.pm/
+まいたけダンス.vrma,八ツ橋まろん,https://maronvtuber.booth.pm/
 みんなの笑顔で彩る世界.vrma
 みんな大好き素敵な世界.vrma
-わんだふるぷりきゅあ！FUN☆FUN☆わんだふるDAYS！.vrma
-ガラクタロード.vrma
-キスキツネ.vrma
-ケバブのダンス.vrma
-シカ色デイズ.vrma
-ソワレ.vrma
+わんだふるぷりきゅあ！FUN☆FUN☆わんだふるDAYS！.vrma,八ツ橋まろん,https://maronvtuber.booth.pm/
+ガラクタロード.vrma,八ツ橋まろん,https://maronvtuber.booth.pm/
+キスキツネ.vrma,八ツ橋まろん,https://maronvtuber.booth.pm/
+ケバブのダンス.vrma,八ツ橋まろん,https://maronvtuber.booth.pm/
+シカ色デイズ.vrma,八ツ橋まろん,https://maronvtuber.booth.pm/
+ソワレ.vrma,八ツ橋まろん,https://maronvtuber.booth.pm/
 ダンス28.vrma
-チェリーポップ.vrma
-テトリス.vrma
-テレパシ.vrma
-デビルじゃないもん.vrma
-ハッピーシンセサイザ.vrma
-ハッピーミルフィーユ.vrma
-パイパイ仮面でどうかしらん？.vrma
-マジ！Magic！PEACH！.vrma
-マチアプリンセス.vrma
-人ってただの筒じゃないですか.vrma
-刀ピークリスマスのテーマソング2023.vrma
-天天天国地獄国.vrma
-心予報.vrma
-愛♡スクリ〜ム！.vrma
-愛包ダンスホール.vrma
-気まぐれメルシィ.vrma
+チェリーポップ.vrma,八ツ橋まろん,https://maronvtuber.booth.pm/
+テトリス.vrma,八ツ橋まろん,https://maronvtuber.booth.pm/
+テレパシ.vrma,八ツ橋まろん,https://maronvtuber.booth.pm/
+デビルじゃないもん.vrma,八ツ橋まろん,https://maronvtuber.booth.pm/
+ハッピーシンセサイザ.vrma,八ツ橋まろん,https://maronvtuber.booth.pm/
+ハッピーミルフィーユ.vrma,八ツ橋まろん,https://maronvtuber.booth.pm/
+パイパイ仮面でどうかしらん？.vrma,八ツ橋まろん,https://maronvtuber.booth.pm/
+マジ！Magic！PEACH！.vrma,八ツ橋まろん,https://maronvtuber.booth.pm/
+マチアプリンセス.vrma,八ツ橋まろん,https://maronvtuber.booth.pm/
+人ってただの筒じゃないですか.vrma,八ツ橋まろん,https://maronvtuber.booth.pm/
+刀ピークリスマスのテーマソング2023.vrma,八ツ橋まろん,https://maronvtuber.booth.pm/
+天天天国地獄国.vrma,八ツ橋まろん,https://maronvtuber.booth.pm/
+心予報.vrma,八ツ橋まろん,https://maronvtuber.booth.pm/
+愛♡スクリ〜ム！.vrma,八ツ橋まろん,https://maronvtuber.booth.pm/
+愛包ダンスホール.vrma,八ツ橋まろん,https://maronvtuber.booth.pm/
+気まぐれメルシィ.vrma,八ツ橋まろん,https://maronvtuber.booth.pm/
 気高く可愛く煌めく世界.vrma
-爆裂愛してる.vrma
-目撃！テト31世_A.vrma
-目撃！テト31世_B.vrma
+爆裂愛してる.vrma,八ツ橋まろん,https://maronvtuber.booth.pm/
+目撃！テト31世_A.vrma,八ツ橋まろん,https://maronvtuber.booth.pm/
+目撃！テト31世_B.vrma,八ツ橋まろん,https://maronvtuber.booth.pm/
 結んで紡いで繋がる世界.vrma
 首を振る.vrma
-魔眼ウィンク.vrma
+魔眼ウィンク.vrma,八ツ橋まろん,https://maronvtuber.booth.pm/
+駆ける.vrma,織部呉服,https://wakatuya.booth.pm/
+構え.vrma,織部呉服,https://wakatuya.booth.pm/
+腰あて立ち.vrma,織部呉服,https://wakatuya.booth.pm/
+少足開き立ち.vrma,織部呉服,https://wakatuya.booth.pm/
+立ち.vrma,織部呉服,https://wakatuya.booth.pm/
