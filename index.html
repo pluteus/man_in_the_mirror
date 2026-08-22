@@ -828,6 +828,23 @@ function classifyEmotion(text){
   return null;
 }
 
+// 会話内容の感情カテゴリ(GESTURE_KEYWORDSのキー)を、VRMの表情プリセット名(angry/fun/joy/sorrow/surprised/neutral)に対応付ける
+const EMOTION_TO_VRM_PRESET = {
+  joy: 'joy', love: 'joy',
+  greeting: 'fun', agree: 'fun',
+  sad: 'sorrow',
+  angry: 'angry',
+  surprised: 'surprised',
+  thinking: 'neutral', deny: 'neutral'
+};
+
+let conversationDetectedExpression = 'neutral'; // 会話内容から推定した現在の表情(会話機能ON時はこちらを優先)
+
+function updateConversationExpression(text){
+  const category = classifyEmotion(text);
+  conversationDetectedExpression = (category && EMOTION_TO_VRM_PRESET[category]) || 'neutral';
+}
+
 function pickGestureMotionIndex(category){
   if(!motionClips.length) return -1;
   let candidates = [];
@@ -1107,6 +1124,7 @@ async function setActiveCharacter(idx){
 
   currentVRM = vrm;
   if(!vrm.scene.parent) scene.add(vrm.scene); // 初回読込時はまだシーンに未追加のため
+  if(vrm.lookAt) vrm.lookAt.target = camera; // 視線を常にカメラ(視聴者側)に向ける
   baseModelRotY = vrm.scene.rotation.y; // ユーザーの回転量スライダーはこの基準角に加算する
   mixer = new THREE.AnimationMixer(vrm.scene);
   mixer.addEventListener('finished', (e) => {
@@ -2105,6 +2123,7 @@ async function connectRealtime(){
           currentTurnOutputText += sc.outputTranscription.text; // ターン内の発話をまとめて後で感情分類する
         }
         if(sc.turnComplete){
+          updateConversationExpression(currentTurnOutputText);
           triggerAutoGesture(currentTurnOutputText);
           currentTurnOutputText = '';
         }
@@ -2148,6 +2167,7 @@ function disconnectRealtime(){
   if(currentVRM && currentVRM.expressionManager){
     try{ currentVRM.expressionManager.setValue('aa', 0); }catch(e){}
   }
+  conversationDetectedExpression = 'neutral'; // 切断後は会話由来の表情推定をリセット(以降はカメラ由来の推定に戻る)
 }
 
 document.getElementById('btnRealtimeConnect').addEventListener('click', () => {
@@ -2288,7 +2308,8 @@ async function initFaceLandmarker(){
         delegate: "GPU"
       },
       runningMode: "VIDEO",
-      numFaces: 1
+      numFaces: 1,
+      outputFaceBlendshapes: true
     });
     log('顔認識モデル準備完了', 'ok');
   }catch(err){
@@ -2300,7 +2321,8 @@ async function initFaceLandmarker(){
         delegate: "CPU"
       },
       runningMode: "VIDEO",
-      numFaces: 1
+      numFaces: 1,
+      outputFaceBlendshapes: true
     });
     log('顔認識モデル準備完了(CPUモード)', 'ok');
   }
@@ -2759,6 +2781,34 @@ function updateGyroSmoothing(){
 }
 
 let detectFaceErrorLogged = false; // 毎フレーム同じエラーでログが埋まらないよう、初回のみ表示する
+let cameraDetectedExpression = 'neutral'; // カメラ映像から推定した現在の表情(angry/fun/joy/sorrow/surprised/neutral)
+
+// MediaPipeのARKit系ブレンドシェイプ(52種)から、VRMの表情プリセットに近いカテゴリを簡易推定する
+function classifyFaceBlendshapes(categories){
+  const score = (name) => categories.find(c => c.categoryName === name)?.score || 0;
+  const smile = (score('mouthSmileLeft') + score('mouthSmileRight')) / 2;
+  const frown = (score('mouthFrownLeft') + score('mouthFrownRight')) / 2;
+  const browDown = (score('browDownLeft') + score('browDownRight')) / 2;
+  const browInnerUp = score('browInnerUp');
+  const browOuterUp = (score('browOuterUpLeft') + score('browOuterUpRight')) / 2;
+  const eyeWide = (score('eyeWideLeft') + score('eyeWideRight')) / 2;
+  const jawOpen = score('jawOpen');
+  const cheekSquint = (score('cheekSquintLeft') + score('cheekSquintRight')) / 2;
+  const noseSneer = (score('noseSneerLeft') + score('noseSneerRight')) / 2;
+
+  const scores = {
+    joy: smile * 0.7 + cheekSquint * 0.3,
+    fun: smile * 0.5 + jawOpen * 0.5,           // 口を開けて笑う=陽気な「fun」寄り
+    angry: browDown * 0.6 + noseSneer * 0.4,
+    sorrow: frown * 0.6 + browInnerUp * 0.4,
+    surprised: eyeWide * 0.5 + jawOpen * 0.3 + browOuterUp * 0.2
+  };
+  let best = 'neutral', bestScore = 0.25; // しきい値未満は真顔(neutral)扱い
+  for(const [name, s] of Object.entries(scores)){
+    if(s > bestScore){ best = name; bestScore = s; }
+  }
+  return best;
+}
 
 function detectFace(){
   if(!camRunning || !faceLandmarker) return;
@@ -2777,6 +2827,9 @@ function detectFace(){
       raw.y = nose.y; // 0=上, 1=下
       raw.width = Math.abs(rightEdge.x - leftEdge.x); // 顔幅(奥行きの目安)
     }
+    if(result.faceBlendshapes && result.faceBlendshapes.length > 0){
+      cameraDetectedExpression = classifyFaceBlendshapes(result.faceBlendshapes[0].categories);
+    }
   }catch(err){
     // ここで例外を握りつぶさないと、animate()内でこの後に続くrenderer.render()が
     // 呼ばれずモデルの描画・カメラ映像更新が完全に止まってしまう(画面が動かないだけで
@@ -2785,6 +2838,28 @@ function detectFace(){
       detectFaceErrorLogged = true;
       log(`顔認識処理でエラーが発生しました(トラッキングを一時停止): ${err.message || err}`, 'err');
     }
+  }
+}
+
+const VRM_EMOTION_PRESETS = ['angry', 'fun', 'joy', 'sorrow', 'surprised'];
+let expressionWeights = { angry:0, fun:0, joy:0, sorrow:0, surprised:0 };
+
+// 会話機能ONの場合は会話内容から推定した表情を優先、それ以外はインカメラで推定した表情を使う。
+// どちらもOFF/未検出なら真顔(全プリセット0)に戻す。
+function updateFacialEmotionExpression(delta){
+  if(!currentVRM || !currentVRM.expressionManager) return;
+  const conversationActive = !!(geminiWs && geminiWs.readyState === WebSocket.OPEN);
+  let target = 'neutral';
+  if(conversationActive){
+    target = conversationDetectedExpression;
+  }else if(camRunning){
+    target = cameraDetectedExpression;
+  }
+  const t = Math.min(1, delta * 8); // 表情切替の滑らかさ
+  for(const preset of VRM_EMOTION_PRESETS){
+    const goal = (preset === target) ? 1 : 0;
+    expressionWeights[preset] += (goal - expressionWeights[preset]) * t;
+    try{ currentVRM.expressionManager.setValue(preset, expressionWeights[preset]); }catch(e){ /* プリセット非対応のVRMは無視 */ }
   }
 }
 
@@ -3175,6 +3250,7 @@ function animate(){
   updateBgmProgress();
   updateLipSync();
   detectFace();
+  updateFacialEmotionExpression(delta);
   updateSmoothing();
   updateGyroSmoothing();
   updateCameraFromFace();
