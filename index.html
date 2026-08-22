@@ -727,10 +727,10 @@ function loadMotionList(entries){
 }
 
 // エントリのクリップを読込む(未読込なら開始、読込中なら同じPromiseを返す、読込済みならそのまま返す)
+// ここでは先読み(次に再生されそうなモーション)でも呼ばれるため、ログ表示は行わない(実際の再生開始時にplayMotion側で表示する)
 function ensureClipLoaded(entry){
   if(entry.clip) return Promise.resolve(entry.clip);
   if(entry.loadPromise) return entry.loadPromise;
-  logAssetEntry(entry.name, entry.author, entry.sourceUrl, 'ok');
   entry.loadPromise = (entry.isFBX ? loadMixamoFBX(entry.url, entry.name) : loadVRMA(entry.url, entry.name))
     .then((res) => {
       entry.clip = res.clip;
@@ -812,7 +812,7 @@ async function playMotion(index, opts = {}){
   lastMotionIndex = index;
   updatePlayPauseButton();
   updateMotionListUI();
-  log(`再生: ${entry.name}`, 'ok');
+  logAssetEntry(entry.name, entry.author, entry.sourceUrl, 'ok');
 
   schedulePreloadNext(index); // 再生開始と同時に、次に再生されそうなモーションの先読みを始める
 }
@@ -3358,6 +3358,18 @@ gestureEl.addEventListener('pointermove', (e) => {
     }
   }
 });
+
+// マウスホイール: ホイールダウン(下方向)=ピンチアウトと同じ(近づく/拡大)、ホイールアップ=ピンチインと同じ(離れる/縮小)
+gestureEl.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const zoomSensitivity = 0.0015;
+  const ratio = Math.exp(e.deltaY * zoomSensitivity); // deltaY>0(ホイールダウン)→ratio>1→ピンチアウト相当
+  if(params.offAxis){
+    syncSliderUI('eyeDistCm', clamp(params.eyeDistCm / ratio, 15, 80));
+  }else{
+    syncSliderUI('baseDist', clamp(params.baseDist / ratio, 0.5, 5));
+  }
+}, { passive: false });
 
 function endGesturePointer(e){
   const wasSingle = activePointers.size === 1;
