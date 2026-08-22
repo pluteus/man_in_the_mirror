@@ -3,6 +3,15 @@ washitsu02.glb,福猫,https://hukunekodou.booth.pm/
 CyberStage_AB.glb,射当ユウキ,https://tar.booth.pm/items/3964661
 CyberStage_C_Screen.glbb,射当ユウキ,https://tar.booth.pm/items/3964661
 CyberStage_D.glbb,射当ユウキ,https://tar.booth.pm/items/3964661
+rooftop.glb,餅丸よう,https://booth.pm/ja/items/7158877
+出力用あじさい簡易.glb,餅丸よう,https://booth.pm/ja/items/7053500
+ゴシックティーポットvr.glb,餅丸よう,https://booth.pm/ja/items/3373049
+ティーポット1.1vr.glb,餅丸よう,https://booth.pm/ja/items/3284266
+宮殿vrmuke2アーチ.glb,餅丸よう,https://booth.pm/ja/items/3278442
+vrmliveviewreもみじ.glb,餅丸よう,https://booth.pm/ja/items/5823678
+本棚オプションセット.glb,餅丸よう,https://booth.pm/ja/items/3862317
+神社と鳥居と名月2版.glb,餅丸よう,https://booth.pm/ja/items/3617918
+天球義ステージ.glb,餅丸よう,https://booth.pm/ja/items/3743344
 神社と鳥居と紅葉配布用1.3.glb,餅丸よう,https://booth.pm/ja/items/4458583
 冬神社1.1.glb,餅丸よう,https://booth.pm/ja/items/3540341
 神社と鳥居緑.glb,餅丸よう,https://booth.pm/ja/items/3909474
@@ -12,7 +21,6 @@ Dance Studio_black_haihuyou.glb,toumorocorn,https://booth.pm/ja/items/3835256,to
 Dance Studio_haihuyou.glb,toumorocorn,https://booth.pm/ja/items/3835256
 Dance Studio_haihuyou_plus mirror.glb,toumorocorn,https://booth.pm/ja/items/3835256
 cube-fuchi.glb,toumorocorn,https://booth.pm/ja/items/3835256
-grass_case.glb,toumorocorn,https://booth.pm/ja/items/3835256
 light_box.glb,toumorocorn,https://booth.pm/ja/items/3835256
 light_box_blue.glb,toumorocorn,https://booth.pm/ja/items/3835256
 light_box_nomal.glb,toumorocorn,https://booth.pm/ja/items/3835256
