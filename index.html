@@ -2044,7 +2044,7 @@ async function connectRealtime(){
 
   ws.addEventListener('open', () => {
     let instructions = document.getElementById('realtimeInstructions').value.trim();
-    if(locationEnabled && currentLocationText){
+    if(locationEnabled && currentLocationLabel){
       instructions = [instructions, buildLocationContextText()].filter(Boolean).join('\n');
     }
     const setupMsg = {
@@ -2193,12 +2193,27 @@ setupVideoSendToggleButton('btnSendVideoScreen', '🖥️ スクリーン映像'
 
 /* ---------------- 📍 位置情報のON/OFF ----------------
    ONにするとブラウザの位置情報(緯度経度)を取得し、Geminiとの会話にコンテキストとして渡す。
-   既定はOFF。位置情報は本人の端末内で取得され、Gemini(Google)との会話コンテキスト以外には送信しない。 */
+   生の緯度経度だけではGemini側がどこなのか分からず活用できないため、
+   逆ジオコーディング(OpenStreetMap Nominatim)で地名に変換してから渡す。
+   既定はOFF。位置情報は本人の端末内で取得され、Gemini(Google)/Nominatimとの通信以外には送信しない。 */
 let locationEnabled = false;
-let currentLocationText = '';
+let currentLocationLabel = ''; // 逆ジオコーディングで得た地名(失敗時は緯度経度の文字列)
 
 function buildLocationContextText(){
-  return currentLocationText ? `(参考情報)ユーザーの現在地はおおよそ 緯度${currentLocationText.split(',')[0]}, 経度${currentLocationText.split(',')[1]} です。` : '';
+  if(!currentLocationLabel) return '';
+  return `(システム指示)ユーザーの現在地は「${currentLocationLabel}」です。近くの場所やお店、地域の話題について聞かれたら、この位置情報を踏まえて答えてください。`;
+}
+
+async function reverseGeocode(lat, lon){
+  try{
+    const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&accept-language=ja&zoom=14`);
+    if(!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    return data.display_name || null;
+  }catch(err){
+    log(`地名への変換に失敗したため座標のまま使用します: ${err.message || err}`, 'warn');
+    return null;
+  }
 }
 
 document.getElementById('btnLocation').addEventListener('click', () => {
@@ -2209,23 +2224,24 @@ document.getElementById('btnLocation').addEventListener('click', () => {
       return;
     }
     log('位置情報を取得しています...');
-    navigator.geolocation.getCurrentPosition((pos) => {
-      currentLocationText = `${pos.coords.latitude.toFixed(4)},${pos.coords.longitude.toFixed(4)}`;
+    navigator.geolocation.getCurrentPosition(async (pos) => {
+      const { latitude, longitude } = pos.coords;
+      log(`位置情報を取得しました(緯度${latitude.toFixed(4)}, 経度${longitude.toFixed(4)})。地名に変換しています...`, 'ok');
+      const placeName = await reverseGeocode(latitude, longitude);
+      currentLocationLabel = placeName || `緯度${latitude.toFixed(4)}, 経度${longitude.toFixed(4)}`;
       locationEnabled = true;
       btn.classList.add('on');
       btn.textContent = '📍 位置情報:ON';
-      log(`位置情報を取得しました(緯度${pos.coords.latitude.toFixed(4)}, 経度${pos.coords.longitude.toFixed(4)})。会話にコンテキストとして渡します`, 'ok');
+      log(`位置情報を「${currentLocationLabel}」として会話に渡します`, 'ok');
       if(geminiWs && geminiWs.readyState === WebSocket.OPEN){
-        geminiWs.send(JSON.stringify({
-          clientContent: { turns: [{ role:'user', parts:[{ text: buildLocationContextText() }] }], turnComplete: true }
-        }));
+        log('接続済みのため、次回の再接続から反映されます(会話中の位置情報の反映はGemini側の仕様上保証されません)', 'warn');
       }
     }, (err) => {
       log(`位置情報の取得に失敗しました: ${err.message || err}`, 'err');
     });
   }else{
     locationEnabled = false;
-    currentLocationText = '';
+    currentLocationLabel = '';
     btn.classList.remove('on');
     btn.textContent = '📍 位置情報:OFF';
     log('位置情報の送信をOFFにしました');
