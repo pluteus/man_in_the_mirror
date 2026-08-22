@@ -103,6 +103,9 @@
     backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); font-size:11px; color:var(--text-dim); }
   #sliders.hidden{ display:none; }
   .slider-row{ display:flex; align-items:center; gap:8px; margin:4px 0; }
+  #btnRealtimeAttach{ flex:none; width:36px; height:36px; padding:0; border-radius:50%;
+    font-size:18px; line-height:1; display:flex; align-items:center; justify-content:center; }
+  #realtimeAttachName{ cursor:pointer; }
   .slider-row label{ width:76px; flex-shrink:0; }
   .slider-row input[type=range]{ flex:1; accent-color:var(--accent); }
   .slider-row span{ width:34px; text-align:right; color:var(--text); }
@@ -321,9 +324,12 @@
     <div id="realtimeStatus">未接続</div>
     <div id="realtimeTranscript"></div>
     <div class="slider-row" style="margin-top:6px;">
+      <button id="btnRealtimeAttach" title="ファイルを添付してGemini Liveに送る">＋</button>
+      <input type="file" id="realtimeAttachFile" accept="image/*,.pdf,.txt,.md,.csv,.json" style="display:none">
       <input type="text" id="realtimeTextInput" class="text-input" placeholder="文字でGemini Liveに指示・メッセージを送る" autocomplete="off">
       <button id="btnRealtimeSendText">📨 送信</button>
     </div>
+    <div id="realtimeAttachName" style="font-size:11px; color:var(--text-dim); padding:2px 2px 0; display:none;"></div>
   </div>
 </div>
 
@@ -379,6 +385,12 @@ function log(msg, level=''){
 function parseAssetLine(line){
   const parts = line.split(',').map(p => p.trim());
   return { file: parts[0] || '', author: parts[1] || '', sourceUrl: parts[2] || '' };
+}
+
+// フォルダ名とファイル名から実際に読み込むURLを組み立てる。
+// Unicode正規化(NFC)とURLエンコードを行い、括弧や日本語ファイル名での取得失敗(NotSupportedError等)を防ぐ
+function assetPath(folder, filename){
+  return `./${folder}/${encodeURIComponent(filename.normalize('NFC'))}`;
 }
 
 // アセット読込ログ: ファイル名と作者名を表示し(urlは表示しない)、ファイル名タップでurlを別タブで開く
@@ -697,7 +709,7 @@ async function loadDefaultMotionFileNames(){
     const res = await fetch(DEFAULT_MOTION_LIST_URL);
     if(!res.ok) throw new Error(`HTTP ${res.status}`);
     const text = await res.text();
-    const entries = text.split(/\r?\n/).map(line => line.trim()).filter(line => line && !line.startsWith('#')).map(parseAssetLine).filter(e => e.file);
+    const entries = text.replace(/^\uFEFF/, '').split(/\r?\n/).map(line => line.trim()).filter(line => line && !line.startsWith('#')).map(parseAssetLine).filter(e => e.file);
     if(!entries.length) throw new Error('vrma.txtが空です');
     log(`vrma.txtから${entries.length}件のモーションファイル名を読み込みました`, 'ok');
     return entries;
@@ -709,7 +721,7 @@ async function loadDefaultMotionFileNames(){
 
 // エントリ({file,author,sourceUrl})のリストから、クリップ未読込のエントリだけをmotionClipsに登録する(即時・軽量)
 function loadMotionList(entries){
-  motionClips = entries.map(e => makeMotionEntry(e.file, `./vrma/${e.file}`, e.author, e.sourceUrl));
+  motionClips = entries.map(e => makeMotionEntry(e.file, assetPath('vrma', e.file), e.author, e.sourceUrl));
   log(`モーションリストを登録しました(${motionClips.length}件・ファイル名のみ、再生時に順次読込みます)`, motionClips.length ? 'ok' : 'warn');
   updateMotionListUI();
 }
@@ -1265,7 +1277,7 @@ async function loadDefaultCharacterFileNames(){
     const res = await fetch(DEFAULT_VRM_LIST_URL);
     if(!res.ok) throw new Error(`HTTP ${res.status}`);
     const text = await res.text();
-    const entries = text.split(/\r?\n/).map(line => line.trim()).filter(line => line && !line.startsWith('#')).map(parseAssetLine).filter(e => e.file);
+    const entries = text.replace(/^\uFEFF/, '').split(/\r?\n/).map(line => line.trim()).filter(line => line && !line.startsWith('#')).map(parseAssetLine).filter(e => e.file);
     if(!entries.length) throw new Error('vrm.txtが空です');
     log(`vrm.txtから${entries.length}件のキャラクター候補を読み込みました`, 'ok');
     return entries;
@@ -1277,7 +1289,7 @@ async function loadDefaultCharacterFileNames(){
 
 // エントリ({file,author,sourceUrl})のリストから、VRM未読込のエントリだけをcharacterClipsに登録する(即時・軽量)
 function loadCharacterList(entries){
-  characterClips = entries.map(e => makeCharacterEntry(e.file, `./vrm/${e.file}`, e.author, e.sourceUrl));
+  characterClips = entries.map(e => makeCharacterEntry(e.file, assetPath('vrm', e.file), e.author, e.sourceUrl));
   log(`キャラクターリストを登録しました(${characterClips.length}件・ファイル名のみ、選択時に読込みます)`, characterClips.length ? 'ok' : 'warn');
   activeCharacterIndex = -1;
   updateCharacterListUI();
@@ -1326,10 +1338,11 @@ let seekingBgm = false;
 function playBgm(index){
   if(!bgmClips.length) return;
   const entry = bgmClips[index];
+  ensureBgmAnalyser();
   bgmPlayer.src = entry.url;
   bgmPlayer.loop = bgmRepeat;
   bgmPlayer.currentTime = 0;
-  bgmPlayer.play().catch(err => log(`BGM再生エラー(${entry.name}): ${err.message || err}`, 'err'));
+  bgmPlayer.play().catch(err => log(`BGM再生エラー(${entry.name}): ${err.message || err} [url: ${entry.url}]`, 'err'));
   lastBgmIndex = index;
   updateBgmPlayPauseButton();
   updateBgmListUI();
@@ -1371,7 +1384,7 @@ document.getElementById('btnBgm').addEventListener('click', () => {
   if(!bgmClips.length) return;
   if(!bgmPlayer.src){ playBgm(lastBgmIndex >= 0 ? lastBgmIndex : 0); return; }
   if(!bgmPlayer.paused){ bgmPlayer.pause(); }
-  else{ bgmPlayer.play().catch(()=>{}); }
+  else{ ensureBgmAnalyser(); bgmPlayer.play().catch(()=>{}); }
   updateBgmPlayPauseButton();
 });
 
@@ -1454,7 +1467,7 @@ async function loadDefaultBgmFileNames(){
     const res = await fetch(DEFAULT_BGM_LIST_URL);
     if(!res.ok) throw new Error(`HTTP ${res.status}`);
     const text = await res.text();
-    const entries = text.split(/\r?\n/).map(line => line.trim()).filter(line => line && !line.startsWith('#')).map(parseAssetLine).filter(e => e.file);
+    const entries = text.replace(/^\uFEFF/, '').split(/\r?\n/).map(line => line.trim()).filter(line => line && !line.startsWith('#')).map(parseAssetLine).filter(e => e.file);
     if(!entries.length) throw new Error('bgm.txtが空です');
     log(`bgm.txtから${entries.length}件のBGMファイル名を読み込みました`, 'ok');
     return entries;
@@ -1466,7 +1479,7 @@ async function loadDefaultBgmFileNames(){
 
 // エントリ({file,author,sourceUrl})のリストからbgmClipsを登録する(即時・軽量、実データはaudioが再生時に取得)
 function loadBgmList(entries){
-  bgmClips = entries.map(e => ({ name: e.file, url: `./bgm/${e.file}`, author: e.author, sourceUrl: e.sourceUrl }));
+  bgmClips = entries.map(e => ({ name: e.file, url: assetPath('bgm', e.file), author: e.author, sourceUrl: e.sourceUrl }));
   log(`BGMリストを登録しました(${bgmClips.length}件、自動再生はしません)`, bgmClips.length ? 'ok' : 'warn');
   updateBgmListUI();
 }
@@ -1767,7 +1780,7 @@ async function loadDefaultBackgroundFileNames(){
     const res = await fetch(DEFAULT_BACKGROUND_LIST_URL);
     if(!res.ok) throw new Error(`HTTP ${res.status}`);
     const text = await res.text();
-    const entries = text.split(/\r?\n/).map(line => line.trim()).filter(line => line && !line.startsWith('#')).map(parseAssetLine).filter(e => e.file);
+    const entries = text.replace(/^\uFEFF/, '').split(/\r?\n/).map(line => line.trim()).filter(line => line && !line.startsWith('#')).map(parseAssetLine).filter(e => e.file);
     if(!entries.length) throw new Error('glb.txtが空です');
     log(`glb.txtから${entries.length}件の背景ファイル名を読み込みました`, 'ok');
     return entries;
@@ -1780,7 +1793,7 @@ async function loadDefaultBackgroundFileNames(){
 // エントリ({file,author,sourceUrl})のリストから、GLB未読込のエントリだけをbackgroundClipsに登録する(即時・軽量)
 // リストの先頭には常に「背景なし」を追加し、既定の背景はファイルリストの中からランダムに1つ選ぶ
 function loadBackgroundList(entries){
-  backgroundClips = [makeNoBackgroundEntry(), ...entries.map(e => makeBackgroundEntry(e.file, `./glb/${e.file}`, e.author, e.sourceUrl))];
+  backgroundClips = [makeNoBackgroundEntry(), ...entries.map(e => makeBackgroundEntry(e.file, assetPath('glb', e.file), e.author, e.sourceUrl))];
   log(`背景リストを登録しました(${entries.length}件・ファイル名のみ、選択時に読込みます)`, backgroundClips.length ? 'ok' : 'warn');
   activeBackgroundIndex = -1;
   updateBackgroundListUI();
@@ -1883,19 +1896,47 @@ function addRealtimeTranscript(text){
   el.scrollTop = el.scrollHeight;
 }
 
-// 音量(RMS)ベースの簡易口パク。表情プリセット'aa'(母音「あ」の口)の重みを音量に応じて動かすだけで、
-// 音素(ビゼーム)ごとの厳密な口形状ではないが、「喋っている感」を出す最初のステップとして実装。
-function updateLipSync(){
-  if(!realtimeAnalyser || !currentVRM || !currentVRM.expressionManager) return;
-  const data = new Uint8Array(realtimeAnalyser.frequencyBinCount);
-  realtimeAnalyser.getByteTimeDomainData(data);
+// 音量(RMS)を計算する共通ヘルパー(会話音声・BGMどちらのAnalyserにも使う)
+function computeRms(analyser){
+  const data = new Uint8Array(analyser.frequencyBinCount);
+  analyser.getByteTimeDomainData(data);
   let sumSquares = 0;
   for(let i = 0; i < data.length; i++){
     const v = (data[i] - 128) / 128;
     sumSquares += v * v;
   }
-  const rms = Math.sqrt(sumSquares / data.length);
-  const mouth = Math.min(1, rms * 6); // 感度は経験則、必要に応じて係数を調整
+  return Math.sqrt(sumSquares / data.length);
+}
+
+// BGM単独再生時(会話機能OFF、または未接続時)に「歌っているように」口パクさせるための音量解析
+let bgmAudioCtx = null;
+let bgmAnalyser = null;
+function ensureBgmAnalyser(){
+  if(bgmAnalyser) return;
+  try{
+    bgmAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const source = bgmAudioCtx.createMediaElementSource(bgmPlayer);
+    bgmAnalyser = bgmAudioCtx.createAnalyser();
+    bgmAnalyser.fftSize = 256;
+    source.connect(bgmAnalyser);
+    bgmAnalyser.connect(bgmAudioCtx.destination); // 解析用に経由させるだけで、音自体はそのまま聞こえるようにする
+  }catch(e){ log(`BGMの口パク用音声解析の準備に失敗しました: ${e.message || e}`, 'warn'); }
+  if(bgmAudioCtx && bgmAudioCtx.state === 'suspended') bgmAudioCtx.resume().catch(()=>{});
+}
+
+// 音量(RMS)ベースの簡易口パク。表情プリセット'aa'(母音「あ」の口)の重みを音量に応じて動かすだけで、
+// 音素(ビゼーム)ごとの厳密な口形状ではないが、「喋っている感」を出す最初のステップとして実装。
+// 会話中(Gemini接続中)は受信音声を優先し、そうでなければBGM再生中ならBGMの音量で「歌っている」演出をする。
+function updateLipSync(){
+  if(!currentVRM || !currentVRM.expressionManager) return;
+  const conversationActive = !!(geminiWs && geminiWs.readyState === WebSocket.OPEN);
+  let mouth = 0;
+  if(conversationActive && realtimeAnalyser){
+    mouth = computeRms(realtimeAnalyser) * 6; // 感度は経験則、必要に応じて係数を調整
+  }else if(!bgmPlayer.paused && bgmAnalyser){
+    mouth = computeRms(bgmAnalyser) * 6;
+  }
+  mouth = Math.min(1, mouth);
   try{ currentVRM.expressionManager.setValue('aa', mouth); }catch(e){ /* 表情プリセット非対応のVRMは無視 */ }
 }
 
@@ -2232,20 +2273,75 @@ document.getElementById('btnAutoGesture').addEventListener('click', () => {
 function sendRealtimeTextMessage(){
   const input = document.getElementById('realtimeTextInput');
   const text = input.value.trim();
-  if(!text) return;
+  if(!text && !pendingAttachment) return;
   if(!geminiWs || geminiWs.readyState !== WebSocket.OPEN){
     log('Gemini Liveに未接続のため、メッセージを送信できません。先に接続してください', 'warn');
     return;
   }
+  const parts = [];
+  if(pendingAttachment){
+    if(pendingAttachment.text){
+      parts.push({ text: `(添付ファイル: ${pendingAttachment.name})\n${pendingAttachment.text}` });
+    }else{
+      parts.push({ inlineData: { mimeType: pendingAttachment.mimeType, data: pendingAttachment.base64 } });
+    }
+  }
+  if(text) parts.push({ text });
   geminiWs.send(JSON.stringify({
-    clientContent: { turns: [{ role:'user', parts:[{ text }] }], turnComplete: true }
+    clientContent: { turns: [{ role:'user', parts }], turnComplete: true }
   }));
-  addRealtimeTranscript(`🧑(文字) ${text}`);
+  addRealtimeTranscript(pendingAttachment ? `🧑(文字+📎${pendingAttachment.name}) ${text}` : `🧑(文字) ${text}`);
   input.value = '';
+  pendingAttachment = null;
+  const label = document.getElementById('realtimeAttachName');
+  label.style.display = 'none';
+  label.textContent = '';
 }
 document.getElementById('btnRealtimeSendText').addEventListener('click', sendRealtimeTextMessage);
 document.getElementById('realtimeTextInput').addEventListener('keydown', (e) => {
   if(e.key === 'Enter'){ e.preventDefault(); sendRealtimeTextMessage(); }
+});
+
+// ＋ボタン: ファイルを添付し、テキストと一緒に(または単独で)Gemini Liveへ送る。
+// 画像等のバイナリはinlineData(base64)として、テキスト系ファイルは中身をそのままテキストとして添える。
+let pendingAttachment = null; // { name, mimeType, base64 } または { name, mimeType, text }
+
+document.getElementById('btnRealtimeAttach').addEventListener('click', () => {
+  document.getElementById('realtimeAttachFile').click();
+});
+
+document.getElementById('realtimeAttachFile').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  e.target.value = ''; // 同じファイルを連続選択できるようにリセット
+  if(!file) return;
+  const isTextLike = /^text\//.test(file.type) || /\.(txt|md|csv|json)$/i.test(file.name);
+  try{
+    if(isTextLike){
+      const text = await file.text();
+      pendingAttachment = { name: file.name, mimeType: file.type || 'text/plain', text };
+    }else{
+      const base64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result.split(',')[1]);
+        reader.onerror = () => reject(new Error('読込に失敗しました'));
+        reader.readAsDataURL(file);
+      });
+      pendingAttachment = { name: file.name, mimeType: file.type || 'application/octet-stream', base64 };
+    }
+    const label = document.getElementById('realtimeAttachName');
+    label.textContent = `📎 ${file.name}(送信時に添付されます。タップで取消)`;
+    label.style.display = 'block';
+    log(`ファイルを添付しました: ${file.name}`, 'ok');
+  }catch(err){
+    log(`ファイルの読込に失敗しました: ${err.message || err}`, 'err');
+  }
+});
+
+document.getElementById('realtimeAttachName').addEventListener('click', () => {
+  pendingAttachment = null;
+  const label = document.getElementById('realtimeAttachName');
+  label.style.display = 'none';
+  label.textContent = '';
 });
 
 function setupVideoSendToggleButton(btnId, label, isEnabledGetter, isEnabledSetter, hint){
