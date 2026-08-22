@@ -1447,11 +1447,8 @@ async function loadDefaultBgmFileNames(){
 // エントリ({file,author,sourceUrl})のリストからbgmClipsを登録する(即時・軽量、実データはaudioが再生時に取得)
 function loadBgmList(entries){
   bgmClips = entries.map(e => ({ name: e.file, url: `./bgm/${e.file}`, author: e.author, sourceUrl: e.sourceUrl }));
-  log(`BGMリストを登録しました(${bgmClips.length}件)`, bgmClips.length ? 'ok' : 'warn');
+  log(`BGMリストを登録しました(${bgmClips.length}件、自動再生はしません)`, bgmClips.length ? 'ok' : 'warn');
   updateBgmListUI();
-  if(bgmClips.length){
-    if(bgmRandom) playRandomBgm(); else playBgm(0);
-  }
 }
 
 async function loadDefaultBgm(){
@@ -1887,6 +1884,7 @@ function ensurePlaybackGraph(){
 
 // Gemini Liveから届いたbase64 PCM(24kHz/16bit/モノラル)を順番が途切れないよう予約再生する
 function playAudioChunk(base64Data){
+  if(realtimeMuted) return; // ミュート中は音声を再生しない(電車内などでの使用を想定。トランスクリプト表示のみ)
   ensurePlaybackGraph();
   try{
     const binary = atob(base64Data);
@@ -2189,6 +2187,10 @@ document.getElementById('btnRealtimeMute').addEventListener('click', () => {
   const btn = document.getElementById('btnRealtimeMute');
   btn.classList.toggle('on', realtimeMuted);
   btn.textContent = realtimeMuted ? '🔇 ミュート中' : '🔇 ミュート';
+  if(realtimeMuted){
+    stopPlayback(); // 再生中の音声も即座に停止し、以後はトランスクリプト表示のみにする(電車内などでの使用を想定)
+    log('ミュート中は音声を再生せず、トランスクリプト表示のみになります');
+  }
 });
 
 document.getElementById('btnAutoGesture').addEventListener('click', () => {
