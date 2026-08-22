@@ -1,3 +1,8 @@
+washitsu01.glb,福猫,https://hukunekodou.booth.pm/
+washitsu02.glb,福猫,https://hukunekodou.booth.pm/
+CyberStage_AB.glb,射当ユウキ,https://tar.booth.pm/items/3964661
+CyberStage_C_Screen.glbb,射当ユウキ,https://tar.booth.pm/items/3964661
+CyberStage_D.glbb,射当ユウキ,https://tar.booth.pm/items/3964661
 神社と鳥居と紅葉配布用1.3.glb,餅丸よう,https://booth.pm/ja/items/4458583
 冬神社1.1.glb,餅丸よう,https://booth.pm/ja/items/3540341
 神社と鳥居緑.glb,餅丸よう,https://booth.pm/ja/items/3909474
