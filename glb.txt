@@ -1,3 +1,8 @@
+神社と鳥居と紅葉配布用1.3.glb,餅丸よう,https://booth.pm/ja/items/4458583
+冬神社1.1.glb,餅丸よう,https://booth.pm/ja/items/3540341
+神社と鳥居緑.glb,餅丸よう,https://booth.pm/ja/items/3909474
+神社と鳥居と紅葉改造２.1.glb,餅丸よう,https://booth.pm/ja/items/3263370
+syuusei sakura jinnja.glb,餅丸よう,https://booth.pm/ja/items/3634581
 Dance Studio_black_haihuyou.glb,toumorocorn,https://booth.pm/ja/items/3835256,toumorocorn,https://booth.pm/ja/items/3835256
 Dance Studio_haihuyou.glb,toumorocorn,https://booth.pm/ja/items/3835256
 Dance Studio_haihuyou_plus mirror.glb,toumorocorn,https://booth.pm/ja/items/3835256
