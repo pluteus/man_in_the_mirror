@@ -18,5 +18,5 @@ Yu1_1.vrm
 1506531138757394280.vrm
 4043018172957611916.vrm
 5052131706566087697.vrm
-nijie_tan_wing.vrm,へどらあき(くさなぎけいた)_UGUME_Tomngo,https://nijie.info/lp.php?page=3d_nijie_model
-nijie_tan.vrm,へどらあき(くさなぎけいた)_UGUME_Tomngo,https://nijie.info/lp.php?page=3d_nijie_model
+#nijie_tan_wing.vrm,へどらあき(くさなぎけいた)_UGUME_Tomngo,https://nijie.info/lp.php?page=3d_nijie_model
+#nijie_tan.vrm,へどらあき(くさなぎけいた)_UGUME_Tomngo,https://nijie.info/lp.php?page=3d_nijie_model
