@@ -65,9 +65,15 @@
   .panel-clear-btn{ position:absolute; top:6px; right:38px; height:26px; padding:0 9px;
     display:flex; align-items:center; justify-content:center; border-radius:13px;
     font-size:11px; line-height:1; white-space:nowrap; z-index:6; }
+  /* 全削除ボタンの左にランダムボタンを並べるためのコンテナ(キャラクター/背景パネル用) */
+  .panel-actions{ position:absolute; top:6px; right:38px; display:flex; gap:6px; z-index:6; }
+  .panel-actions button{ position:static; height:26px; padding:0 9px; border-radius:13px;
+    font-size:11px; line-height:1; white-space:nowrap; }
   /* パネル左上に表示する、現在選択中のファイル名 */
   .panel-current-file{ position:absolute; top:0; left:10px; right:130px; height:34px; line-height:34px;
     font-size:11px; color:var(--text-dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; z-index:5; }
+  /* ランダムボタンが加わる分、キャラクター/背景パネルは現在ファイル名の幅を狭める */
+  #characterListPanel .panel-current-file, #backgroundListPanel .panel-current-file{ right:196px; }
   .toggle-btn{ flex:1; }
 
   /* フルスクリーン中はUIとカメラ表示を隠す。タップで数秒だけ再表示 */
@@ -203,7 +209,10 @@
 
 <div id="characterListPanel" class="hidden">
   <div class="panel-current-file" id="characterCurrentFile">(未選択)</div>
-  <button class="panel-clear-btn" id="btnClearCharacterList" title="キャラクターリストを全削除">🗑全削除</button>
+  <div class="panel-actions">
+    <button id="btnRandomCharacter" title="キャラクターをランダム切替">🔀 ランダム</button>
+    <button class="panel-clear-btn" id="btnClearCharacterList" title="キャラクターリストを全削除">🗑全削除</button>
+  </div>
   <button class="panel-close-btn" id="btnCloseCharacterList" aria-label="閉じる">×</button>
   <div id="characterListItems"></div>
   <div class="bg-add-row">
@@ -246,7 +255,10 @@
 
 <div id="backgroundListPanel" class="hidden">
   <div class="panel-current-file" id="backgroundCurrentFile">(未選択)</div>
-  <button class="panel-clear-btn" id="btnClearBgList" title="背景リストを全削除">🗑全削除</button>
+  <div class="panel-actions">
+    <button id="btnRandomBackground" title="背景をランダム切替">🔀 ランダム</button>
+    <button class="panel-clear-btn" id="btnClearBgList" title="背景リストを全削除">🗑全削除</button>
+  </div>
   <button class="panel-close-btn" id="btnCloseBgList" aria-label="閉じる">×</button>
   <div id="backgroundListItems"></div>
   <div class="bg-add-row">
@@ -1200,6 +1212,14 @@ function clearAllCharacters(){
 
 document.getElementById('btnClearCharacterList').addEventListener('click', clearAllCharacters);
 
+document.getElementById('btnRandomCharacter').addEventListener('click', () => {
+  if(!characterClips.length) return;
+  if(characterClips.length === 1){ setActiveCharacter(0); return; }
+  let idx;
+  do{ idx = Math.floor(Math.random() * characterClips.length); }while(idx === activeCharacterIndex);
+  setActiveCharacter(idx);
+});
+
 function updateCharacterListUI(){
   const currentLabel = document.getElementById('characterCurrentFile');
   if(currentLabel){
@@ -1695,6 +1715,14 @@ function clearAllBackgrounds(){
 }
 
 document.getElementById('btnClearBgList').addEventListener('click', clearAllBackgrounds);
+
+document.getElementById('btnRandomBackground').addEventListener('click', () => {
+  if(backgroundClips.length <= 1) return; // 「背景なし」しか無ければ何もしない
+  if(backgroundClips.length === 2){ setActiveBackground(1); return; }
+  let idx;
+  do{ idx = 1 + Math.floor(Math.random() * (backgroundClips.length - 1)); }while(idx === activeBackgroundIndex);
+  setActiveBackground(idx);
+});
 
 function updateBackgroundListUI(){
   const currentLabel = document.getElementById('backgroundCurrentFile');
