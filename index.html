@@ -308,6 +308,10 @@
     </div>
     <div id="realtimeStatus">未接続</div>
     <div id="realtimeTranscript"></div>
+    <div class="slider-row" style="margin-top:6px;">
+      <input type="text" id="realtimeTextInput" class="text-input" placeholder="文字でGemini Liveに指示・メッセージを送る" autocomplete="off">
+      <button id="btnRealtimeSendText">📨 送信</button>
+    </div>
   </div>
 </div>
 
@@ -2065,6 +2069,9 @@ async function connectRealtime(){
     if(locationEnabled && currentLocationLabel){
       instructions = [instructions, buildLocationContextText()].filter(Boolean).join('\n');
     }
+    if(sendVideoScreenEnabled){
+      instructions = [instructions, 'スクリーン映像として送られてくる3Dキャラクター(VRMモデル)は、あなた自身(Gemini)の現在の姿です。ユーザーと話す際は、そのキャラクターとして自分自身を認識し、一人称視点で振る舞ってください。'].filter(Boolean).join('\n');
+    }
     const setupMsg = {
       setup: {
         model: `models/${geminiTokenModel}`,
@@ -2192,6 +2199,25 @@ document.getElementById('btnAutoGesture').addEventListener('click', () => {
   if(!autoGestureEnabled) pendingEmotionMotionIndex = null;
 });
 
+function sendRealtimeTextMessage(){
+  const input = document.getElementById('realtimeTextInput');
+  const text = input.value.trim();
+  if(!text) return;
+  if(!geminiWs || geminiWs.readyState !== WebSocket.OPEN){
+    log('Gemini Liveに未接続のため、メッセージを送信できません。先に接続してください', 'warn');
+    return;
+  }
+  geminiWs.send(JSON.stringify({
+    clientContent: { turns: [{ role:'user', parts:[{ text }] }], turnComplete: true }
+  }));
+  addRealtimeTranscript(`🧑(文字) ${text}`);
+  input.value = '';
+}
+document.getElementById('btnRealtimeSendText').addEventListener('click', sendRealtimeTextMessage);
+document.getElementById('realtimeTextInput').addEventListener('keydown', (e) => {
+  if(e.key === 'Enter'){ e.preventDefault(); sendRealtimeTextMessage(); }
+});
+
 function setupVideoSendToggleButton(btnId, label, isEnabledGetter, isEnabledSetter, hint){
   document.getElementById(btnId).addEventListener('click', () => {
     const next = !isEnabledGetter();
@@ -2201,7 +2227,10 @@ function setupVideoSendToggleButton(btnId, label, isEnabledGetter, isEnabledSett
     btn.textContent = `${label}:${next ? 'ON' : 'OFF'}`;
     if(next){
       log(`${hint}をGeminiに送信します。会話中は見えているものについて質問できます`, 'ok');
-      if(geminiWs && geminiWs.readyState === WebSocket.OPEN) startVideoSend();
+      if(geminiWs && geminiWs.readyState === WebSocket.OPEN){
+        startVideoSend();
+        if(btnId === 'btnSendVideoScreen') log('「自分自身の姿」として認識させる指示は次回の再接続から反映されます', 'warn');
+      }
     }else if(!anyVideoSendEnabled()){
       stopVideoSend();
     }
