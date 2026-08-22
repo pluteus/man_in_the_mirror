@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-<title>顔トラッキングVRMビューア</title>
+<title>VRMちゃんと！</title>
 <style>
   :root{
     --bg:#0a0e14; --panel:#131922cc; --border:#263040; --accent:#4f9dff;
@@ -303,6 +303,7 @@
       <button id="btnSendVideoIn">🤳 インカメラ映像:OFF</button>
       <button id="btnSendVideoOut">📷 アウトカメラ映像:OFF</button>
       <button id="btnSendVideoScreen">🖥️ スクリーン映像:OFF</button>
+      <button id="btnLocation">📍 位置情報:OFF</button>
       <button id="btnRealtimeClearKey">🗑️ キー消去</button>
     </div>
     <div id="realtimeStatus">未接続</div>
@@ -682,7 +683,6 @@ async function loadDefaultMotionFileNames(){
     const text = await res.text();
     const entries = text.split(/\r?\n/).map(line => line.trim()).filter(line => line && !line.startsWith('#')).map(parseAssetLine).filter(e => e.file);
     if(!entries.length) throw new Error('vrma.txtが空です');
-    entries.forEach(e => logAssetEntry(e.file, e.author, e.sourceUrl, 'ok'));
     log(`vrma.txtから${entries.length}件のモーションファイル名を読み込みました`, 'ok');
     return entries;
   }catch(err){
@@ -702,6 +702,7 @@ function loadMotionList(entries){
 function ensureClipLoaded(entry){
   if(entry.clip) return Promise.resolve(entry.clip);
   if(entry.loadPromise) return entry.loadPromise;
+  logAssetEntry(entry.name, entry.author, entry.sourceUrl, 'ok');
   entry.loadPromise = (entry.isFBX ? loadMixamoFBX(entry.url, entry.name) : loadVRMA(entry.url, entry.name))
     .then((res) => {
       entry.clip = res.clip;
@@ -1057,6 +1058,7 @@ function makeCharacterEntry(name, url, author='', sourceUrl=''){
 function ensureCharacterLoaded(entry){
   if(entry.object) return Promise.resolve(entry.object);
   if(entry.loadPromise) return entry.loadPromise;
+  logAssetEntry(entry.name, entry.author, entry.sourceUrl, 'ok');
   entry.loadPromise = loadVRMObject(entry.url, entry.name)
     .then((vrm) => {
       entry.object = vrm;
@@ -1223,7 +1225,6 @@ async function loadDefaultCharacterFileNames(){
     const text = await res.text();
     const entries = text.split(/\r?\n/).map(line => line.trim()).filter(line => line && !line.startsWith('#')).map(parseAssetLine).filter(e => e.file);
     if(!entries.length) throw new Error('vrm.txtが空です');
-    entries.forEach(e => logAssetEntry(e.file, e.author, e.sourceUrl, 'ok'));
     log(`vrm.txtから${entries.length}件のキャラクター候補を読み込みました`, 'ok');
     return entries;
   }catch(err){
@@ -1290,7 +1291,7 @@ function playBgm(index){
   lastBgmIndex = index;
   updateBgmPlayPauseButton();
   updateBgmListUI();
-  log(`BGM再生: ${entry.name}`, 'ok');
+  logAssetEntry(entry.name, entry.author, entry.sourceUrl, 'ok');
 }
 
 function playRandomBgm(){
@@ -1413,7 +1414,6 @@ async function loadDefaultBgmFileNames(){
     const text = await res.text();
     const entries = text.split(/\r?\n/).map(line => line.trim()).filter(line => line && !line.startsWith('#')).map(parseAssetLine).filter(e => e.file);
     if(!entries.length) throw new Error('bgm.txtが空です');
-    entries.forEach(e => logAssetEntry(e.file, e.author, e.sourceUrl, 'ok'));
     log(`bgm.txtから${entries.length}件のBGMファイル名を読み込みました`, 'ok');
     return entries;
   }catch(err){
@@ -1574,6 +1574,7 @@ function ensureBackgroundLoaded(entry){
   if(entry.isNone) return Promise.resolve(null);
   if(entry.object) return Promise.resolve(entry.object);
   if(entry.loadPromise) return entry.loadPromise;
+  logAssetEntry(entry.name, entry.author, entry.sourceUrl, 'ok');
   entry.loadPromise = loadBackgroundGlb(entry.url, entry.name)
     .then((object) => {
       entry.object = object;
@@ -1721,7 +1722,6 @@ async function loadDefaultBackgroundFileNames(){
     const text = await res.text();
     const entries = text.split(/\r?\n/).map(line => line.trim()).filter(line => line && !line.startsWith('#')).map(parseAssetLine).filter(e => e.file);
     if(!entries.length) throw new Error('glb.txtが空です');
-    entries.forEach(e => logAssetEntry(e.file, e.author, e.sourceUrl, 'ok'));
     log(`glb.txtから${entries.length}件の背景ファイル名を読み込みました`, 'ok');
     return entries;
   }catch(err){
@@ -2043,7 +2043,10 @@ async function connectRealtime(){
   geminiWs = ws;
 
   ws.addEventListener('open', () => {
-    const instructions = document.getElementById('realtimeInstructions').value.trim();
+    let instructions = document.getElementById('realtimeInstructions').value.trim();
+    if(locationEnabled && currentLocationText){
+      instructions = [instructions, buildLocationContextText()].filter(Boolean).join('\n');
+    }
     const setupMsg = {
       setup: {
         model: `models/${geminiTokenModel}`,
@@ -2187,6 +2190,47 @@ function setupVideoSendToggleButton(btnId, label, isEnabledGetter, isEnabledSett
 setupVideoSendToggleButton('btnSendVideoOut', '📷 アウトカメラ映像', () => sendVideoOutEnabled, v => sendVideoOutEnabled = v, 'アウトカメラ映像');
 setupVideoSendToggleButton('btnSendVideoIn', '🤳 インカメラ映像', () => sendVideoInEnabled, v => sendVideoInEnabled = v, 'インカメラ映像');
 setupVideoSendToggleButton('btnSendVideoScreen', '🖥️ スクリーン映像', () => sendVideoScreenEnabled, v => sendVideoScreenEnabled = v, 'スクリーン(モデルと背景)映像');
+
+/* ---------------- 📍 位置情報のON/OFF ----------------
+   ONにするとブラウザの位置情報(緯度経度)を取得し、Geminiとの会話にコンテキストとして渡す。
+   既定はOFF。位置情報は本人の端末内で取得され、Gemini(Google)との会話コンテキスト以外には送信しない。 */
+let locationEnabled = false;
+let currentLocationText = '';
+
+function buildLocationContextText(){
+  return currentLocationText ? `(参考情報)ユーザーの現在地はおおよそ 緯度${currentLocationText.split(',')[0]}, 経度${currentLocationText.split(',')[1]} です。` : '';
+}
+
+document.getElementById('btnLocation').addEventListener('click', () => {
+  const btn = document.getElementById('btnLocation');
+  if(!locationEnabled){
+    if(!navigator.geolocation){
+      log('この端末/ブラウザは位置情報取得に対応していません', 'err');
+      return;
+    }
+    log('位置情報を取得しています...');
+    navigator.geolocation.getCurrentPosition((pos) => {
+      currentLocationText = `${pos.coords.latitude.toFixed(4)},${pos.coords.longitude.toFixed(4)}`;
+      locationEnabled = true;
+      btn.classList.add('on');
+      btn.textContent = '📍 位置情報:ON';
+      log(`位置情報を取得しました(緯度${pos.coords.latitude.toFixed(4)}, 経度${pos.coords.longitude.toFixed(4)})。会話にコンテキストとして渡します`, 'ok');
+      if(geminiWs && geminiWs.readyState === WebSocket.OPEN){
+        geminiWs.send(JSON.stringify({
+          clientContent: { turns: [{ role:'user', parts:[{ text: buildLocationContextText() }] }], turnComplete: true }
+        }));
+      }
+    }, (err) => {
+      log(`位置情報の取得に失敗しました: ${err.message || err}`, 'err');
+    });
+  }else{
+    locationEnabled = false;
+    currentLocationText = '';
+    btn.classList.remove('on');
+    btn.textContent = '📍 位置情報:OFF';
+    log('位置情報の送信をOFFにしました');
+  }
+});
 
 document.getElementById('btnRealtime').addEventListener('click', () => {
   document.getElementById('realtimePanel').classList.toggle('hidden');
