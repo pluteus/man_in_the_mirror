@@ -123,7 +123,7 @@ vrmaアニメーション２_走る.vrma,vroid館,https://shirokuro2020.booth.pm
 少足開き立ち.vrma,織部呉服,https://wakatuya.booth.pm/
 立ち.vrma,織部呉服,https://wakatuya.booth.pm/
 人マニア踊ってみたモーション_Picatrix.vrma,Picatrix,https://picatrix.booth.pm/
-Reading (Loop).vrma,Rosse Lyn,https://ethereal-shop.booth.pm/
+#Reading (Loop).vrma,Rosse Lyn,https://ethereal-shop.booth.pm/
 A.vrma,織部呉服,https://wakatuya.booth.pm/
 B.vrma,織部呉服,https://wakatuya.booth.pm/
 C.vrma,織部呉服,https://wakatuya.booth.pm/
