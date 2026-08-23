@@ -436,12 +436,34 @@ renderer.domElement.style.background = 'transparent'; // 一部端末でキャ�
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputEncoding = THREE.sRGBEncoding;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 container.appendChild(renderer.domElement);
 
 scene.add(new THREE.HemisphereLight(0xffffff, 0x444455, 1.1));
 const dirLight = new THREE.DirectionalLight(0xffffff, 0.9);
 dirLight.position.set(1, 2, 1.5);
+dirLight.castShadow = true;
+dirLight.shadow.mapSize.set(1024, 1024);
+dirLight.shadow.camera.near = 0.1;
+dirLight.shadow.camera.far = 10;
+dirLight.shadow.camera.left = -2;
+dirLight.shadow.camera.right = 2;
+dirLight.shadow.camera.top = 2;
+dirLight.shadow.camera.bottom = -2;
+dirLight.shadow.bias = -0.0025;
 scene.add(dirLight);
+
+// キャラクターの足元に落ちる影だけを描画する地面(ShadowMaterialは影のかかる部分以外は完全に透明なので、
+// 背景の有無やどんな3D背景を選んでも自然に馴染む)
+const shadowGround = new THREE.Mesh(
+  new THREE.PlaneGeometry(20, 20),
+  new THREE.ShadowMaterial({ opacity: 0.35 })
+);
+shadowGround.rotation.x = -Math.PI / 2;
+shadowGround.position.y = 0;
+shadowGround.receiveShadow = true;
+scene.add(shadowGround);
 
 const grid = new THREE.GridHelper(4, 16, 0x263040, 0x1a2230);
 grid.position.y = 0;
@@ -814,6 +836,10 @@ async function playMotion(index, opts = {}){
   updateMotionListUI();
   logAssetEntry(entry.name, entry.author, entry.sourceUrl, 'ok');
 
+  // モーション切替のたびに表情をランダムに変える(会話機能OFF時。会話中は会話内容由来の表情が優先される)
+  const EXPRESSION_CHOICES = ['fun', 'joy', 'sorrow', 'angry', 'surprised', 'neutral'];
+  motionSwitchExpression = EXPRESSION_CHOICES[Math.floor(Math.random() * EXPRESSION_CHOICES.length)];
+
   schedulePreloadNext(index); // 再生開始と同時に、次に再生されそうなモーションの先読みを始める
 }
 
@@ -1152,6 +1178,7 @@ async function setActiveCharacter(idx){
 
   currentVRM = vrm;
   if(!vrm.scene.parent) scene.add(vrm.scene); // 初回読込時はまだシーンに未追加のため
+  vrm.scene.traverse((obj) => { if(obj.isMesh) obj.castShadow = true; }); // 地面に影を落とす
   if(vrm.lookAt) vrm.lookAt.target = camera; // 視線を常にカメラ(視聴者側)に向ける
   baseModelRotY = vrm.scene.rotation.y; // ユーザーの回転量スライダーはこの基準角に加算する
   mixer = new THREE.AnimationMixer(vrm.scene);
@@ -1909,8 +1936,11 @@ function computeRms(analyser){
 }
 
 // BGM単独再生時(会話機能OFF、または未接続時)に「歌っているように」口パクさせるための音量解析
+// あわせて、スクリーン映像ON時にBGM再生音もGeminiへ送れるよう、MediaStreamとして取り出しておく
 let bgmAudioCtx = null;
 let bgmAnalyser = null;
+let bgmCaptureStream = null; // BGM再生音をGemini入力コンテキストへ橋渡しするためのMediaStream
+let bgmSendGain = null;      // スクリーン映像ON時だけ値を1にして、BGM音声をマイクと一緒にGeminiへ送る
 function ensureBgmAnalyser(){
   if(bgmAnalyser) return;
   try{
@@ -1920,8 +1950,26 @@ function ensureBgmAnalyser(){
     bgmAnalyser.fftSize = 256;
     source.connect(bgmAnalyser);
     bgmAnalyser.connect(bgmAudioCtx.destination); // 解析用に経由させるだけで、音自体はそのまま聞こえるようにする
+    const bgmCaptureDest = bgmAudioCtx.createMediaStreamDestination();
+    bgmAnalyser.connect(bgmCaptureDest);
+    bgmCaptureStream = bgmCaptureDest.stream;
+    wireBgmIntoGeminiInput(); // 既にGemini接続中であれば、ここで配線する
   }catch(e){ log(`BGMの口パク用音声解析の準備に失敗しました: ${e.message || e}`, 'warn'); }
   if(bgmAudioCtx && bgmAudioCtx.state === 'suspended') bgmAudioCtx.resume().catch(()=>{});
+}
+
+// BGMの再生音(bgmCaptureStream)を、Gemini送信用のAudioContext(geminiCaptureCtx)側のScriptProcessorに接続する。
+// MediaStreamはAudioContextをまたいで使えるため、bgmAudioCtx側で作った音声をgeminiCaptureCtx側で読み直す形でミックスする。
+// ゲインはスクリーン映像ON/OFFで0か1に切り替え、ミュート中はonaudioprocess側で送信自体を止める。
+function wireBgmIntoGeminiInput(){
+  if(!geminiCaptureCtx || !geminiCaptureProcessor || !bgmCaptureStream || bgmSendGain) return;
+  try{
+    const bgmSource = geminiCaptureCtx.createMediaStreamSource(bgmCaptureStream);
+    bgmSendGain = geminiCaptureCtx.createGain();
+    bgmSendGain.gain.value = sendVideoScreenEnabled ? 1 : 0;
+    bgmSource.connect(bgmSendGain);
+    bgmSendGain.connect(geminiCaptureProcessor);
+  }catch(e){ log(`BGM音声のGemini送信への接続に失敗しました: ${e.message || e}`, 'warn'); }
 }
 
 // 音量(RMS)ベースの簡易口パク。表情プリセット'aa'(母音「あ」の口)の重みを音量に応じて動かすだけで、
@@ -2018,6 +2066,7 @@ function startMicCapture(stream){
     }));
   };
   geminiCaptureProcessor = processor;
+  wireBgmIntoGeminiInput(); // BGMが既に再生中(bgmCaptureStreamが存在)なら、ここで配線する
 }
 
 const GEMINI_LIVE_MODEL = 'gemini-3.1-flash-live-preview';
@@ -2230,6 +2279,7 @@ function disconnectRealtime(){
   if(geminiWs){ try{ geminiWs.close(); }catch(e){} geminiWs = null; }
   if(geminiCaptureProcessor){ try{ geminiCaptureProcessor.disconnect(); }catch(e){} geminiCaptureProcessor.onaudioprocess = null; geminiCaptureProcessor = null; }
   if(geminiCaptureCtx){ try{ geminiCaptureCtx.close(); }catch(e){} geminiCaptureCtx = null; }
+  bgmSendGain = null; // geminiCaptureCtxごと破棄されるため、次回接続時にwireBgmIntoGeminiInput()で作り直す
   stopVideoSend();
   stopPlayback();
   if(realtimeAudioCtx){ try{ realtimeAudioCtx.close(); }catch(e){} realtimeAudioCtx = null; }
@@ -2241,7 +2291,7 @@ function disconnectRealtime(){
   if(currentVRM && currentVRM.expressionManager){
     try{ currentVRM.expressionManager.setValue('aa', 0); }catch(e){}
   }
-  conversationDetectedExpression = 'neutral'; // 切断後は会話由来の表情推定をリセット(以降はカメラ由来の推定に戻る)
+  conversationDetectedExpression = 'neutral'; // 切断後は会話由来の表情推定をリセット(以降はモーション切替時のランダム表情に戻る)
 }
 
 document.getElementById('btnRealtimeConnect').addEventListener('click', () => {
@@ -2351,8 +2401,12 @@ function setupVideoSendToggleButton(btnId, label, isEnabledGetter, isEnabledSett
     const btn = document.getElementById(btnId);
     btn.classList.toggle('on', next);
     btn.textContent = `${label}:${next ? 'ON' : 'OFF'}`;
+    if(btnId === 'btnSendVideoScreen' && bgmSendGain){
+      bgmSendGain.gain.value = next ? 1 : 0; // スクリーン映像ON/OFFに合わせてBGM音声のGemini送信も即座に切替
+    }
     if(next){
       log(`${hint}をGeminiに送信します。会話中は見えているものについて質問できます`, 'ok');
+      if(btnId === 'btnSendVideoScreen') log('BGM再生中の音も一緒に送信します(ミュート中は送信されません)', 'ok');
       if(geminiWs && geminiWs.readyState === WebSocket.OPEN){
         startVideoSend();
         if(btnId === 'btnSendVideoScreen') log('「自分自身の姿」として認識させる指示は次回の再接続から反映されます', 'warn');
@@ -2463,8 +2517,7 @@ async function initFaceLandmarker(){
         delegate: "GPU"
       },
       runningMode: "VIDEO",
-      numFaces: 1,
-      outputFaceBlendshapes: true
+      numFaces: 1
     });
     log('顔認識モデル準備完了', 'ok');
   }catch(err){
@@ -2476,8 +2529,7 @@ async function initFaceLandmarker(){
         delegate: "CPU"
       },
       runningMode: "VIDEO",
-      numFaces: 1,
-      outputFaceBlendshapes: true
+      numFaces: 1
     });
     log('顔認識モデル準備完了(CPUモード)', 'ok');
   }
@@ -2936,34 +2988,6 @@ function updateGyroSmoothing(){
 }
 
 let detectFaceErrorLogged = false; // 毎フレーム同じエラーでログが埋まらないよう、初回のみ表示する
-let cameraDetectedExpression = 'neutral'; // カメラ映像から推定した現在の表情(angry/fun/joy/sorrow/surprised/neutral)
-
-// MediaPipeのARKit系ブレンドシェイプ(52種)から、VRMの表情プリセットに近いカテゴリを簡易推定する
-function classifyFaceBlendshapes(categories){
-  const score = (name) => categories.find(c => c.categoryName === name)?.score || 0;
-  const smile = (score('mouthSmileLeft') + score('mouthSmileRight')) / 2;
-  const frown = (score('mouthFrownLeft') + score('mouthFrownRight')) / 2;
-  const browDown = (score('browDownLeft') + score('browDownRight')) / 2;
-  const browInnerUp = score('browInnerUp');
-  const browOuterUp = (score('browOuterUpLeft') + score('browOuterUpRight')) / 2;
-  const eyeWide = (score('eyeWideLeft') + score('eyeWideRight')) / 2;
-  const jawOpen = score('jawOpen');
-  const cheekSquint = (score('cheekSquintLeft') + score('cheekSquintRight')) / 2;
-  const noseSneer = (score('noseSneerLeft') + score('noseSneerRight')) / 2;
-
-  const scores = {
-    joy: smile * 0.7 + cheekSquint * 0.3,
-    fun: smile * 0.5 + jawOpen * 0.5,           // 口を開けて笑う=陽気な「fun」寄り
-    angry: browDown * 0.6 + noseSneer * 0.4,
-    sorrow: frown * 0.6 + browInnerUp * 0.4,
-    surprised: eyeWide * 0.5 + jawOpen * 0.3 + browOuterUp * 0.2
-  };
-  let best = 'neutral', bestScore = 0.25; // しきい値未満は真顔(neutral)扱い
-  for(const [name, s] of Object.entries(scores)){
-    if(s > bestScore){ best = name; bestScore = s; }
-  }
-  return best;
-}
 
 function detectFace(){
   if(!camRunning || !faceLandmarker) return;
@@ -2982,9 +3006,6 @@ function detectFace(){
       raw.y = nose.y; // 0=上, 1=下
       raw.width = Math.abs(rightEdge.x - leftEdge.x); // 顔幅(奥行きの目安)
     }
-    if(result.faceBlendshapes && result.faceBlendshapes.length > 0){
-      cameraDetectedExpression = classifyFaceBlendshapes(result.faceBlendshapes[0].categories);
-    }
   }catch(err){
     // ここで例外を握りつぶさないと、animate()内でこの後に続くrenderer.render()が
     // 呼ばれずモデルの描画・カメラ映像更新が完全に止まってしまう(画面が動かないだけで
@@ -2998,23 +3019,46 @@ function detectFace(){
 
 const VRM_EMOTION_PRESETS = ['angry', 'fun', 'joy', 'sorrow', 'surprised'];
 let expressionWeights = { angry:0, fun:0, joy:0, sorrow:0, surprised:0 };
+let motionSwitchExpression = 'neutral'; // モーション切替のたびにランダムに選ばれる表情(会話機能OFF時に使用)
 
-// 会話機能ONの場合は会話内容から推定した表情を優先、それ以外はインカメラで推定した表情を使う。
-// どちらもOFF/未検出なら真顔(全プリセット0)に戻す。
+// 会話機能ONの場合は会話内容から推定した表情を優先、それ以外はモーション切替時にランダムで選んだ表情を使う。
 function updateFacialEmotionExpression(delta){
   if(!currentVRM || !currentVRM.expressionManager) return;
   const conversationActive = !!(geminiWs && geminiWs.readyState === WebSocket.OPEN);
-  let target = 'neutral';
-  if(conversationActive){
-    target = conversationDetectedExpression;
-  }else if(camRunning){
-    target = cameraDetectedExpression;
-  }
+  const target = conversationActive ? conversationDetectedExpression : motionSwitchExpression;
   const t = Math.min(1, delta * 8); // 表情切替の滑らかさ
   for(const preset of VRM_EMOTION_PRESETS){
     const goal = (preset === target) ? 1 : 0;
     expressionWeights[preset] += (goal - expressionWeights[preset]) * t;
     try{ currentVRM.expressionManager.setValue(preset, expressionWeights[preset]); }catch(e){ /* プリセット非対応のVRMは無視 */ }
+  }
+}
+
+/* ---------------- 自動まばたき ---------------- */
+// 人間らしい不規則な間隔(2.5〜6秒)でまばたきさせる。表情プリセット'blink'の重みを素早く閉じて開く。
+let blinkTimer = 0;
+let blinkPhase = 0; // 0:待機 1:閉じる 2:開く
+let blinkElapsed = 0;
+let nextBlinkAt = 2.5 + Math.random() * 3.5;
+const BLINK_CLOSE_SEC = 0.08;
+const BLINK_OPEN_SEC = 0.12;
+
+function updateBlink(delta){
+  if(!currentVRM || !currentVRM.expressionManager) return;
+  blinkTimer += delta;
+  if(blinkPhase === 0){
+    if(blinkTimer >= nextBlinkAt){ blinkPhase = 1; blinkElapsed = 0; }
+    return;
+  }
+  blinkElapsed += delta;
+  if(blinkPhase === 1){
+    const t = Math.min(1, blinkElapsed / BLINK_CLOSE_SEC);
+    try{ currentVRM.expressionManager.setValue('blink', t); }catch(e){}
+    if(t >= 1){ blinkPhase = 2; blinkElapsed = 0; }
+  }else if(blinkPhase === 2){
+    const t = Math.min(1, blinkElapsed / BLINK_OPEN_SEC);
+    try{ currentVRM.expressionManager.setValue('blink', 1 - t); }catch(e){}
+    if(t >= 1){ blinkPhase = 0; blinkTimer = 0; nextBlinkAt = 2.5 + Math.random() * 3.5; }
   }
 }
 
@@ -3418,6 +3462,7 @@ function animate(){
   updateLipSync();
   detectFace();
   updateFacialEmotionExpression(delta);
+  updateBlink(delta);
   updateSmoothing();
   updateGyroSmoothing();
   updateCameraFromFace();
