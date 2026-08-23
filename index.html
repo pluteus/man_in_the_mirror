@@ -122,15 +122,18 @@
     line-height:1.5; color:var(--text); user-select:text; -webkit-user-select:text; }
   #realtimeTranscript div{ white-space:pre-wrap; word-break:break-all; padding:2px 0; user-select:text; -webkit-user-select:text; }
 
-  /* モーション/BGM/背景/キャラクターリストなどのポップアップは、画面幅に関わらずはみ出さないよう常に画面中央に表示する */
-  #motionListPanel, #bgmListPanel, #backgroundListPanel, #characterListPanel{
+  /* モーション/BGM/背景/キャラクター/カメラのポップアップは、画面幅に関わらずはみ出さないよう常に画面中央に表示する */
+  #motionListPanel, #bgmListPanel, #backgroundListPanel, #characterListPanel, #cameraPanel{
     position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
     width:280px; max-width:calc(100vw - 24px);
     max-height:min(80vh, calc(100vh - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px) - 24px));
     z-index:20; background:var(--panel); border:1px solid var(--border); border-radius:10px;
     backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px);
     display:flex; flex-direction:column; overflow:hidden; padding-top:34px; }
-  #motionListPanel.hidden, #bgmListPanel.hidden, #backgroundListPanel.hidden, #characterListPanel.hidden{ display:none; }
+  #motionListPanel.hidden, #bgmListPanel.hidden, #backgroundListPanel.hidden, #characterListPanel.hidden, #cameraPanel.hidden{ display:none; }
+  #cameraPanel{ padding:34px 12px 12px; }
+  #cameraPanel .camera-grid{ display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  #cameraPanel .camera-grid button{ padding:12px 4px; font-size:12px; }
   .motion-controls{ display:flex; gap:6px; flex-wrap:wrap; padding:8px 8px 6px; border-bottom:1px solid var(--border); }
   .motion-controls button{ flex:1; min-width:0; padding:7px 4px; font-size:11px; }
   .motion-progress-row{ padding:6px 10px 8px; border-bottom:1px solid var(--border); }
@@ -191,17 +194,14 @@
   <button id="btnCharacterList">🧑 キャラクター</button>
   <input type="file" id="characterVrmFile" accept=".vrm" multiple style="display:none">
   <button id="btnVroidHub">🌐 VRoid Hub</button>
-  <input type="file" id="vrmaFile" accept=".vrma,.fbx" multiple style="display:none">
+  <input type="file" id="vrmaFile" accept=".vrma" multiple style="display:none">
   <button id="btnMotionList">🎞 モーション</button>
   <input type="file" id="bgmFile" accept="audio/*" multiple style="display:none">
   <button id="btnBgmList">🎵 BGM</button>
   <input type="file" id="bgGlbFile" accept=".glb,.gltf" multiple style="display:none">
   <button id="btnBgList">🏞 背景</button>
   <button id="btnRealtime">🎙️ 会話</button>
-  <button id="btnCam">▶ インカメラ</button>
-  <button id="btnOutCam">📷 アウトカメラ</button>
-  <button id="btnScreenshot">📸 撮影</button>
-  <button id="btnRecord">⏺ 録画</button>
+  <button id="btnCameraPanel">📷 カメラ</button>
   <button id="btnCalib">🎯 中央校正</button>
   <button id="btnGyro">🧭 ジャイロ有効化</button>
   <button id="btnCalibScreen">📏 画面校正</button>
@@ -231,7 +231,7 @@
     <button id="btnMotion">▶</button>
     <button id="btnRandom" class="on">🔀 ランダム:ON</button>
     <button id="btnRepeat">🔁 リピート:OFF</button>
-    <button id="btnAddMotion" title="VRMA または Mixamo FBXモーションを追加">➕ 追加</button>
+    <button id="btnAddMotion" title="VRMAモーションを追加">➕ 追加</button>
   </div>
   <div class="motion-progress-row">
     <input type="range" id="motionProgress" min="0" max="1000" step="1" value="0">
@@ -269,6 +269,16 @@
   </div>
 </div>
 
+<div id="cameraPanel" class="hidden">
+  <button class="panel-close-btn" id="btnCloseCameraPanel" aria-label="閉じる">×</button>
+  <div class="camera-grid">
+    <button id="btnCam">▶ インカメラ</button>
+    <button id="btnOutCam">📷 アウトカメラ</button>
+    <button id="btnScreenshot">📸 撮影</button>
+    <button id="btnRecord">⏺ 録画</button>
+  </div>
+</div>
+
 <div id="bottomPanel">
   <div id="sliders" class="hidden">
     <button class="panel-close-btn" id="btnCloseSliders" aria-label="閉じる">×</button>
@@ -288,6 +298,7 @@
     <div class="slider-row"><label>目との距離(cm)</label><input type="range" id="eyeDistCm" min="15" max="80" step="1" value="40"><span id="eyeDistCmV">40</span></div>
     <div class="slider-row"><label>左右cm換算</label><input type="range" id="cmRange" min="10" max="120" step="1" value="60"><span id="cmRangeV">60</span></div>
     <div class="slider-row"><label>テクスチャ上限</label><input type="range" id="texBudget" min="50" max="500" step="10" value="200"><span id="texBudgetV">200</span>MB</div>
+    <div class="slider-row"><label>口の開き最大値</label><input type="range" id="lipSyncMaxMouth" min="0.1" max="1.5" step="0.05" value="1"><span id="lipSyncMaxMouthV">1.00</span></div>
     <div style="border-top:1px solid var(--border); margin:6px 0 4px; padding-top:4px; color:var(--accent); font-size:10.5px;">— 🎙️ 会話(Gemini Live)の既定値 —</div>
     <div class="slider-row"><label>会話 指示(既定)</label><input type="text" id="defaultRealtimeInstructions" class="text-input" placeholder="例: 明るく元気な口調で話してください"></div>
   </div>
@@ -364,7 +375,6 @@
 <script type="module">
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
 import { VRMAnimationLoaderPlugin, createVRMAnimationClip } from '@pixiv/three-vrm-animation';
 import { FaceLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
@@ -595,110 +605,6 @@ function loadVRMA(url, label){
   });
 }
 
-/* ---------------- MixamoのFBXモーションをVRM Humanoidへリターゲット ----------------
-   three-vrm公式サンプル(examples/humanoidAnimation/loadMixamoAnimation.js)のロジックを踏襲。
-   Mixamoの各ボーンのレスト回転とVRM側の対応ボーンのレスト回転の差分を打ち消すことで、
-   T/Aポーズの違いがあっても正しい姿勢に変換する。 */
-const fbxLoader = new FBXLoader();
-
-// Mixamo標準ボーン名(接尾辞)→VRM Humanoidボーン名
-const mixamoSuffixToVRM = {
-  Hips:'hips', Spine:'spine', Spine1:'chest', Spine2:'upperChest', Neck:'neck', Head:'head',
-  LeftShoulder:'leftShoulder', LeftArm:'leftUpperArm', LeftForeArm:'leftLowerArm', LeftHand:'leftHand',
-  LeftHandThumb1:'leftThumbMetacarpal', LeftHandThumb2:'leftThumbProximal', LeftHandThumb3:'leftThumbDistal',
-  LeftHandIndex1:'leftIndexProximal', LeftHandIndex2:'leftIndexIntermediate', LeftHandIndex3:'leftIndexDistal',
-  LeftHandMiddle1:'leftMiddleProximal', LeftHandMiddle2:'leftMiddleIntermediate', LeftHandMiddle3:'leftMiddleDistal',
-  LeftHandRing1:'leftRingProximal', LeftHandRing2:'leftRingIntermediate', LeftHandRing3:'leftRingDistal',
-  LeftHandPinky1:'leftLittleProximal', LeftHandPinky2:'leftLittleIntermediate', LeftHandPinky3:'leftLittleDistal',
-  RightShoulder:'rightShoulder', RightArm:'rightUpperArm', RightForeArm:'rightLowerArm', RightHand:'rightHand',
-  RightHandThumb1:'rightThumbMetacarpal', RightHandThumb2:'rightThumbProximal', RightHandThumb3:'rightThumbDistal',
-  RightHandIndex1:'rightIndexProximal', RightHandIndex2:'rightIndexIntermediate', RightHandIndex3:'rightIndexDistal',
-  RightHandMiddle1:'rightMiddleProximal', RightHandMiddle2:'rightMiddleIntermediate', RightHandMiddle3:'rightMiddleDistal',
-  RightHandRing1:'rightRingProximal', RightHandRing2:'rightRingIntermediate', RightHandRing3:'rightRingDistal',
-  RightHandPinky1:'rightLittleProximal', RightHandPinky2:'rightLittleIntermediate', RightHandPinky3:'rightLittleDistal',
-  LeftUpLeg:'leftUpperLeg', LeftLeg:'leftLowerLeg', LeftFoot:'leftFoot', LeftToeBase:'leftToes',
-  RightUpLeg:'rightUpperLeg', RightLeg:'rightLowerLeg', RightFoot:'rightFoot', RightToeBase:'rightToes',
-};
-
-function mixamoBoneToVRMBone(rawName){
-  // "mixamorigLeftForeArm" や "mixamorig1:LeftForeArm" 等の揺れを吸収して接尾辞だけ取り出す
-  const suffix = rawName.replace(/^mixamorig\d*:?/i, '');
-  return mixamoSuffixToVRM[suffix] || null;
-}
-
-function retargetMixamoClip(asset, vrm){
-  const srcClip = THREE.AnimationClip.findByName(asset.animations, 'mixamo.com') || asset.animations[0];
-  if(!srcClip) throw new Error('アニメーションクリップが見つかりません');
-
-  const tracks = [];
-  const restRotationInverse = new THREE.Quaternion();
-  const parentRestWorldRotation = new THREE.Quaternion();
-  const _quatA = new THREE.Quaternion();
-  const _vec3 = new THREE.Vector3();
-
-  // Hipsの高さを基準に、Mixamo(cm単位が多い)とVRM(m単位)のスケール差を補正
-  const hipsNode = asset.getObjectByName('mixamorigHips') || asset.getObjectByName('Hips');
-  const motionHipsHeight = hipsNode ? hipsNode.position.y : 0;
-  const vrmHipsY = vrm.humanoid?.getNormalizedBoneNode('hips')?.getWorldPosition(_vec3).y ?? 0;
-  const vrmRootY = vrm.scene.getWorldPosition(_vec3).y;
-  const vrmHipsHeight = Math.abs(vrmHipsY - vrmRootY);
-  const hipsPositionScale = motionHipsHeight ? (vrmHipsHeight / motionHipsHeight) : 1;
-
-  srcClip.tracks.forEach((track) => {
-    const trackSplitted = track.name.split('.');
-    const mixamoRigName = trackSplitted[0];
-    const propertyName = trackSplitted[1];
-    const vrmBoneName = mixamoBoneToVRMBone(mixamoRigName);
-    if(!vrmBoneName) return; // 対応表に無いボーン(指などが省略されたFBX等)はスキップ
-
-    const vrmNodeName = vrm.humanoid?.getNormalizedBoneNode(vrmBoneName)?.name;
-    const mixamoRigNode = asset.getObjectByName(mixamoRigName);
-    if(!vrmNodeName || !mixamoRigNode) return;
-
-    // レスト姿勢(Tポーズ/Aポーズ)の回転差分を求める
-    mixamoRigNode.getWorldQuaternion(restRotationInverse).invert();
-    if(mixamoRigNode.parent) mixamoRigNode.parent.getWorldQuaternion(parentRestWorldRotation);
-    else parentRestWorldRotation.identity();
-
-    if(track instanceof THREE.QuaternionKeyframeTrack){
-      for(let i = 0; i < track.values.length; i += 4){
-        const flatQuaternion = track.values.slice(i, i + 4);
-        _quatA.fromArray(flatQuaternion);
-        _quatA.premultiply(parentRestWorldRotation).multiply(restRotationInverse);
-        _quatA.toArray(flatQuaternion);
-        flatQuaternion.forEach((v, index) => { track.values[index + i] = v; });
-      }
-      tracks.push(new THREE.QuaternionKeyframeTrack(
-        `${vrmNodeName}.${propertyName}`,
-        track.times,
-        // VRM0系は+Z前面/VRM1系は-Z前面と向きが逆なため、0系モデルの場合はX/Z成分を反転
-        track.values.map((v, i) => (vrm.meta?.metaVersion === '0' && i % 2 === 0 ? -v : v))
-      ));
-    }else if(track instanceof THREE.VectorKeyframeTrack){
-      const value = track.values.map((v, i) => (vrm.meta?.metaVersion === '0' && i % 3 !== 1 ? -v : v) * hipsPositionScale);
-      tracks.push(new THREE.VectorKeyframeTrack(`${vrmNodeName}.${propertyName}`, track.times, value));
-    }
-  });
-
-  if(!tracks.length) throw new Error('対応するボーンが見つかりませんでした(Mixamoのモーションか確認してください)');
-  return new THREE.AnimationClip(srcClip.name || 'mixamo_retarget', srcClip.duration, tracks);
-}
-
-function loadMixamoFBX(url, label){
-  return new Promise((resolve, reject) => {
-    if(!currentVRM){ log('先にVRMを読み込んでください', 'warn'); reject(new Error('no vrm')); return; }
-    fbxLoader.load(url, (asset) => {
-      try{
-        const clip = retargetMixamoClip(asset, currentVRM);
-        resolve({ name: label, clip });
-      }catch(err){
-        log(`FBXモーション変換エラー(${label}): ${err.message || err}`, 'err');
-        reject(err);
-      }
-    }, undefined, (err) => { log(`FBX読込エラー(${label}): ${err.message || err}`, 'err'); reject(err); });
-  });
-}
-
 document.getElementById('btnVroidHub').addEventListener('click', () => {
   window.open('https://hub.vroid.com', '_blank', 'noopener');
   log('VRoid Hubを新しいタブで開きました。モデルページで「このモデルを利用する」からVRMファイルをダウンロードし、🧑 キャラクターリストの➕追加で読み込んでください', 'ok');
@@ -713,7 +619,7 @@ const DEFAULT_MOTION_LIST_URL = './vrma.txt'; // 1行につき「ファイル名
 const FALLBACK_DEFAULT_MOTION_FILES = ['VRMA_01.vrma','VRMA_02.vrma','VRMA_03.vrma','VRMA_04.vrma','VRMA_05.vrma','VRMA_06.vrma','VRMA_07.vrma']
   .map(file => ({ file, author:'', sourceUrl:'' }));
 
-let motionClips = []; // { name, url, author, sourceUrl, isFBX, clip:null|AnimationClip, loadPromise:null|Promise }
+let motionClips = []; // { name, url, author, sourceUrl, clip:null|AnimationClip, loadPromise:null|Promise }
 let lastMotionIndex = -1;
 let randomPlayback = true;
 let repeatMode = false;
@@ -721,7 +627,7 @@ let pendingEmotionMotionIndex = null; // 現在のモーション終了後に再
 let preloadedNextIndex = -1;          // 現在のモーション再生中に先読みしておく「次に再生予定」のインデックス
 
 function makeMotionEntry(name, url, author='', sourceUrl=''){
-  return { name, url, author, sourceUrl, isFBX: /\.fbx$/i.test(name), clip: null, loadPromise: null };
+  return { name, url, author, sourceUrl, clip: null, loadPromise: null };
 }
 
 // vrma.txtからデフォルトモーションのファイル名/作者名/urlリストを取得する。読めない場合は従来のVRMA_01〜07にフォールバック。
@@ -753,7 +659,7 @@ function loadMotionList(entries){
 function ensureClipLoaded(entry){
   if(entry.clip) return Promise.resolve(entry.clip);
   if(entry.loadPromise) return entry.loadPromise;
-  entry.loadPromise = (entry.isFBX ? loadMixamoFBX(entry.url, entry.name) : loadVRMA(entry.url, entry.name))
+  entry.loadPromise = loadVRMA(entry.url, entry.name)
     .then((res) => {
       entry.clip = res.clip;
       entry.loadPromise = null;
@@ -1798,6 +1704,13 @@ document.getElementById('btnBgList').addEventListener('click', () => {
   if(!panel.classList.contains('hidden')) updateBackgroundListUI();
 });
 
+document.getElementById('btnCameraPanel').addEventListener('click', () => {
+  document.getElementById('cameraPanel').classList.toggle('hidden');
+});
+document.getElementById('btnCloseCameraPanel').addEventListener('click', () => {
+  document.getElementById('cameraPanel').classList.add('hidden');
+});
+
 // glb.txtに書かれたファイル名リストから、起動時に読み込む背景の候補を取得する。読めない場合は既定の背景なしとする。
 // 実ファイルはglbフォルダ内から探す。
 const DEFAULT_BACKGROUND_LIST_URL = './glb.txt'; // 1行につき「ファイル名,作者名(省略可),url(省略可)」。#始まりはコメント扱い
@@ -1984,7 +1897,7 @@ function updateLipSync(){
   }else if(!bgmPlayer.paused && bgmAnalyser){
     mouth = computeRms(bgmAnalyser) * 6;
   }
-  mouth = Math.min(1, mouth);
+  mouth = Math.min(1, mouth) * params.lipSyncMaxMouth;
   try{ currentVRM.expressionManager.setValue('aa', mouth); }catch(e){ /* 表情プリセット非対応のVRMは無視 */ }
 }
 
@@ -2780,7 +2693,7 @@ const params = {
   sxy: 1.0, sz: 1.0, baseDist: 2.2, lookY: 1.0, smooth: 0.25, flip: 0,
   gsens: 1.0, gflip: 0,
   offAxis: false, screenZ: 0.4, eyeDistCm: 40, cmRange: 60,
-  texBudgetMB: 200, modelRotY: 0
+  texBudgetMB: 200, modelRotY: 0, lipSyncMaxMouth: 1.0
 };
 
 /* ---------------- 調整値の保存/復元(localStorage) ---------------- */
@@ -2814,7 +2727,8 @@ const SLIDER_BINDINGS = [
   { id:'smooth', key:'smooth' },
   { id:'gsens', key:'gsens' }, { id:'modelRotY', key:'modelRotY' },
   { id:'screenZ', key:'screenZ' }, { id:'eyeDistCm', key:'eyeDistCm' },
-  { id:'cmRange', key:'cmRange' }, { id:'texBudget', key:'texBudgetMB' }
+  { id:'cmRange', key:'cmRange' }, { id:'texBudget', key:'texBudgetMB' },
+  { id:'lipSyncMaxMouth', key:'lipSyncMaxMouth' }
 ];
 
 function applyParamsToUI(){
@@ -3186,6 +3100,7 @@ bindSlider('screenZ','screenZ', v=>v.toFixed(2));
 bindSlider('eyeDistCm','eyeDistCm', v=>v.toFixed(0));
 bindSlider('cmRange','cmRange', v=>v.toFixed(0));
 bindSlider('texBudget','texBudgetMB', v=>v.toFixed(0));
+bindSlider('lipSyncMaxMouth','lipSyncMaxMouth', v=>v.toFixed(2));
 
 // 保存済みの調整値があれば復元してUIに反映
 if(loadParamsFromStorage()){
@@ -3237,6 +3152,12 @@ const dismissiblePanels = [
     isVisible: (el) => !el.classList.contains('hidden'),
     hide: (el) => { el.classList.add('hidden'); },
     exclude: [document.getElementById('btnRealtime')]
+  },
+  {
+    panel: document.getElementById('cameraPanel'),
+    isVisible: (el) => !el.classList.contains('hidden'),
+    hide: (el) => { el.classList.add('hidden'); },
+    exclude: [document.getElementById('btnCameraPanel')]
   }
 ];
 
