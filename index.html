@@ -1895,22 +1895,59 @@ let bgmAudioCtx = null;
 let bgmAnalyser = null;
 let bgmCaptureStream = null; // BGM再生音をGemini入力コンテキストへ橋渡しするためのMediaStream
 let bgmSendGain = null;      // スクリーン映像ON時だけ値を1にして、BGM音声をマイクと一緒にGeminiへ送る
+
 function ensureBgmAnalyser(){
-  if(bgmAnalyser) return;
-  try{
-    bgmAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    const source = bgmAudioCtx.createMediaElementSource(bgmPlayer);
-    bgmAnalyser = bgmAudioCtx.createAnalyser();
-    bgmAnalyser.fftSize = 256;
-    source.connect(bgmAnalyser);
-    bgmAnalyser.connect(bgmAudioCtx.destination); // 解析用に経由させるだけで、音自体はそのまま聞こえるようにする
-    const bgmCaptureDest = bgmAudioCtx.createMediaStreamDestination();
-    bgmAnalyser.connect(bgmCaptureDest);
-    bgmCaptureStream = bgmCaptureDest.stream;
-    wireBgmIntoGeminiInput(); // 既にGemini接続中であれば、ここで配線する
-  }catch(e){ log(`BGMの口パク用音声解析の準備に失敗しました: ${e.message || e}`, 'warn'); }
-  if(bgmAudioCtx && bgmAudioCtx.state === 'suspended') bgmAudioCtx.resume().catch(()=>{});
+  if(!bgmAnalyser){
+    try{
+      bgmAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const source = bgmAudioCtx.createMediaElementSource(bgmPlayer);
+      bgmAnalyser = bgmAudioCtx.createAnalyser();
+      bgmAnalyser.fftSize = 256;
+      source.connect(bgmAnalyser);
+      bgmAnalyser.connect(bgmAudioCtx.destination); // 解析用に経由させるだけで、音自体はそのまま聞こえるようにする
+      const bgmCaptureDest = bgmAudioCtx.createMediaStreamDestination();
+      bgmAnalyser.connect(bgmCaptureDest);
+      bgmCaptureStream = bgmCaptureDest.stream;
+      wireBgmIntoGeminiInput(); // 既にGemini接続中であれば、ここで配線する
+    }catch(e){ log(`BGMの口パク用音声解析の準備に失敗しました: ${e.message || e}`, 'warn'); }
+  }
+  // 既存のAudioContextがあっても、端末スリープ等でsuspendedになっていれば必ず再開を試みる。
+  // (以前はbgmAnalyserが既にある場合ここに到達せず、スリープ復帰後に無音のままになるバグがあった)
+  if(bgmAudioCtx && bgmAudioCtx.state === 'suspended'){
+    bgmAudioCtx.resume().catch(()=>{});
+  }
 }
+
+// 一時停止中はAudioContext自体をsuspendして音声処理を完全に止める。
+// (稼働させ続けるとiOS系ブラウザで断続的なノイズが鳴り続けることがあるための対策)
+bgmPlayer.addEventListener('pause', () => {
+  if(bgmAudioCtx && bgmAudioCtx.state === 'running'){
+    bgmAudioCtx.suspend().catch(()=>{});
+  }
+});
+bgmPlayer.addEventListener('play', () => {
+  if(bgmAudioCtx && bgmAudioCtx.state === 'suspended'){
+    bgmAudioCtx.resume().catch(()=>{});
+  }
+});
+
+// 画面ロック/スリープからの復帰時、<audio>要素自体は再生中のまま(playイベントが発火しない)でも
+// AudioContextだけがブラウザ側の省電力処理でsuspendedになっていることがあるため、
+// 明示的に復帰を検知して再開を試みる(タブ切り替え復帰・バックグラウンド復帰の両方をカバー)。
+function resumeBgmAudioIfNeeded(){
+  if(bgmAudioCtx && bgmAudioCtx.state === 'suspended' && bgmPlayer && !bgmPlayer.paused){
+    bgmAudioCtx.resume().catch(()=>{});
+  }
+}
+document.addEventListener('visibilitychange', () => {
+  if(document.visibilityState === 'visible') resumeBgmAudioIfNeeded();
+});
+window.addEventListener('pageshow', resumeBgmAudioIfNeeded);
+window.addEventListener('focus', resumeBgmAudioIfNeeded);
+// 上記イベントを取りこぼした場合の保険として、軽量な定期チェックも仕込んでおく
+setInterval(resumeBgmAudioIfNeeded, 2000);
+
+
 
 // BGMの再生音(bgmCaptureStream)を、Gemini送信用のAudioContext(geminiCaptureCtx)側のScriptProcessorに接続する。
 // MediaStreamはAudioContextをまたいで使えるため、bgmAudioCtx側で作った音声をgeminiCaptureCtx側で読み直す形でミックスする。
