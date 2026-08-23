@@ -3058,6 +3058,52 @@ let recChunks = [];
 let recStream = null;       // MediaRecorderに渡す合成後のストリーム(映像+音声)
 let recVideoStream = null;  // 自前で生成したキャンバスキャプチャ(録画終了時にこれだけ停止する)
 let recIsRecording = false;
+let recOwnMicStream = null;  // Gemini Live未接続時、録画のためだけに独自取得したマイク(録画終了時に解放)
+let recMixAudioCtx = null;   // AI発話・マイク・BGMを1本のトラックにミックスするための録画専用AudioContext
+let recMixDest = null;
+
+// AI発話・マイク(ボイスチェンジャー適用可)・BGMの各音声を、録画専用の単一AudioContextで
+// 1本のMediaStreamAudioDestinationNodeにまとめてミックスする。
+// Safari/WebKit系はMediaRecorderに複数の音声トラックをまとめて渡しても正しく合成されないことがあるため、
+// 事前に1トラックへ統合しておくのが最も確実。
+function buildRecordingAudioStream(micStreamForRecording, useVoiceChanger){
+  teardownRecordingAudioMix();
+  recMixAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  const dest = recMixAudioCtx.createMediaStreamDestination();
+  const parts = [];
+
+  if(realtimeRecDest && realtimeRecDest.stream.getAudioTracks().length){
+    recMixAudioCtx.createMediaStreamSource(realtimeRecDest.stream).connect(dest);
+    parts.push('AIの発話音声');
+  }
+
+  if(micStreamForRecording && micStreamForRecording.getAudioTracks().length){
+    if(useVoiceChanger){
+      const vcStream = buildVoiceChangerStream(micStreamForRecording); // 別のAudioContextで処理済みのストリーム
+      recMixAudioCtx.createMediaStreamSource(vcStream).connect(dest);
+      parts.push('マイク入力(ボイスチェンジャー適用)');
+    }else{
+      recMixAudioCtx.createMediaStreamSource(micStreamForRecording).connect(dest);
+      parts.push('マイク入力');
+    }
+  }
+
+  if(bgmCaptureStream && bgmCaptureStream.getAudioTracks().length){
+    recMixAudioCtx.createMediaStreamSource(bgmCaptureStream).connect(dest);
+    parts.push('BGM');
+  }
+
+  recMixDest = dest;
+  return { stream: dest.stream, parts };
+}
+
+function teardownRecordingAudioMix(){
+  if(recMixAudioCtx){
+    try{ recMixAudioCtx.close(); }catch(e){ /* 既に閉じている場合は無視 */ }
+  }
+  recMixAudioCtx = null;
+  recMixDest = null;
+}
 
 function recPickMimeType(){
   const candidates = [
@@ -3076,7 +3122,11 @@ function recPickMimeType(){
 
 const btnRecord = document.getElementById('btnRecord');
 
-function recStart(){
+let recStarting = false; // getUserMedia待ちの間に連打されて二重開始しないようにするガード
+
+async function recStart(){
+  if(recStarting || recIsRecording) return;
+  recStarting = true;
   try{
     if(!window.MediaRecorder){
       log('この端末は録画機能(MediaRecorder)に対応していません', 'err');
@@ -3092,24 +3142,25 @@ function recStart(){
     if(geminiWs && geminiWs.readyState === WebSocket.OPEN) ensurePlaybackGraph();
 
     recVideoStream = renderer.domElement.captureStream(30); // モデル+背景のみを描画しているキャンバスを30fpsでキャプチャ
-    const audioTracks = [];
-    const audioParts = [];
-    if(realtimeRecDest && realtimeRecDest.stream.getAudioTracks().length){
-      audioTracks.push(...realtimeRecDest.stream.getAudioTracks());
-      audioParts.push('AIの発話音声');
-    }
-    if(realtimeMicStream && realtimeMicStream.getAudioTracks().length){
-      const vcPreset = document.getElementById('vcPreset').value;
-      if(vcPreset !== 'off'){
-        const vcStream = buildVoiceChangerStream(realtimeMicStream);
-        audioTracks.push(...vcStream.getAudioTracks());
-        audioParts.push('マイク入力(ボイスチェンジャー適用)');
-      }else{
-        audioTracks.push(...realtimeMicStream.getAudioTracks());
-        audioParts.push('マイク入力');
+
+    // Gemini Live未接続でマイクストリームが無い場合、録画のためだけに独自にマイクを取得する
+    // (会話機能とは別物として扱い、録画終了時にここで取得した分だけ解放する)
+    let micStreamForRecording = realtimeMicStream;
+    recOwnMicStream = null;
+    if(!micStreamForRecording){
+      try{
+        recOwnMicStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        micStreamForRecording = recOwnMicStream;
+        log('録画用にマイクを取得しました(Gemini Live会話とは別に、録画にのみ使われます)', 'ok');
+      }catch(err){
+        log(`録画用マイクの取得に失敗しました(マイク無しで録画します): ${err.message || err}`, 'warn');
       }
     }
-    recStream = new MediaStream([...recVideoStream.getVideoTracks(), ...audioTracks]);
+
+    const vcPreset = document.getElementById('vcPreset').value;
+    const { stream: mixedAudioStream, parts: audioParts } = buildRecordingAudioStream(micStreamForRecording, vcPreset !== 'off');
+
+    recStream = new MediaStream([...recVideoStream.getVideoTracks(), ...mixedAudioStream.getAudioTracks()]);
 
     recChunks = [];
     recMediaRecorder = new MediaRecorder(recStream, { mimeType, videoBitsPerSecond: 8_000_000 });
@@ -3131,10 +3182,12 @@ function recStart(){
       setTimeout(() => URL.revokeObjectURL(url), 5000);
       const formatNote = ext === 'mp4' ? '' : '(この端末はmp4非対応のためwebm形式で保存)';
       log(`録画を保存しました${formatNote}: ${filename}`, 'ok');
-      // キャンバスキャプチャは自前で生成したものだけを停止する。
-      // マイク/AI音声トラックはGemini Live会話が使い続けるため停止しない。
+      // キャンバスキャプチャ・録画専用ミックス・録画専用マイクは自前で生成したものなのでここで停止する。
+      // Gemini Live会話が使っているrealtimeMicStream/realtimeRecDest自体は停止しない。
       if(recVideoStream){ recVideoStream.getTracks().forEach(t => t.stop()); recVideoStream = null; }
-      teardownVoiceChangerGraph(); // 録画専用に作った処理後マイクストリームはここで破棄(生マイク・Gemini送信には影響しない)
+      teardownVoiceChangerGraph();
+      teardownRecordingAudioMix();
+      if(recOwnMicStream){ recOwnMicStream.getTracks().forEach(t => t.stop()); recOwnMicStream = null; }
       recStream = null;
     };
     recMediaRecorder.start();
@@ -3147,6 +3200,7 @@ function recStart(){
     recIsRecording = false;
     log(`録画開始エラー: ${err.message || err}`, 'err');
   }
+  recStarting = false;
 }
 
 function recStop(){
@@ -3159,7 +3213,7 @@ function recStop(){
 }
 
 btnRecord.addEventListener('click', () => {
-  if(recIsRecording){ recStop(); } else { recStart(); }
+  if(recIsRecording){ recStop(); } else { recStart(); } // recStartはasyncだがボタン連打防止はrecIsRecordingで制御済み
 });
 
 /* ---------------- 頭部位置 推定 ---------------- */
