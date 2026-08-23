@@ -277,6 +277,26 @@
     <button id="btnScreenshot">📸 撮影</button>
     <button id="btnRecord">⏺ 録画</button>
   </div>
+  <div style="border-top:1px solid var(--border); margin:8px 0 4px; padding-top:6px; color:var(--accent); font-size:10.5px;">— 🎙️ 録画音声のボイスチェンジャー —</div>
+  <div class="slider-row">
+    <label>プリセット</label>
+    <select id="vcPreset" class="text-input">
+      <option value="off">オフ(そのまま)</option>
+      <option value="low">男声化(低め)</option>
+      <option value="high">女声化(高め)</option>
+      <option value="robot">ロボット風</option>
+      <option value="echo">エコー</option>
+      <option value="kero">ケロケロ声</option>
+      <option value="custom">カスタム(下のスライダーで自由調整)</option>
+    </select>
+  </div>
+  <div class="slider-row"><label>ピッチ(半音)</label><input type="range" id="vcPitch" min="-12" max="12" step="1" value="0"><span id="vcPitchV">0</span></div>
+  <div class="slider-row"><label>ロボット感</label><input type="range" id="vcRobot" min="0" max="1" step="0.05" value="0"><span id="vcRobotV">0.00</span></div>
+  <div class="slider-row"><label>エコー量</label><input type="range" id="vcEcho" min="0" max="1" step="0.05" value="0"><span id="vcEchoV">0.00</span></div>
+  <div class="slider-row"><label>ケロケロ速度</label><input type="range" id="vcWobble" min="0" max="1" step="0.05" value="0"><span id="vcWobbleV">0.00</span></div>
+  <div id="vcStatus" style="font-size:9.5px; color:var(--text-dim); padding:2px 2px 0;">
+    ⏺録画で保存する動画にのみ反映されます。Gemini Liveへ送るマイク音声や、リアルタイムに聞こえる自分の声には影響しません。
+  </div>
 </div>
 
 <div id="bottomPanel">
@@ -341,6 +361,27 @@
       <button id="btnRealtimeSendText">📨 送信</button>
     </div>
     <div id="realtimeAttachName" style="font-size:11px; color:var(--text-dim); padding:2px 2px 0; display:none;"></div>
+
+    <div style="border-top:1px solid var(--border); margin:8px 0 4px; padding-top:6px; color:var(--accent); font-size:10.5px;">— 📺 YouTubeライブチャット連携 —</div>
+    <div class="slider-row">
+      <label>YouTube APIキー</label>
+      <input type="password" id="ytApiKey" class="text-input" placeholder="AIzaSy... (YouTube Data API v3)" autocomplete="off">
+    </div>
+    <div style="font-size:9.5px; color:var(--text-dim); padding:0 2px 4px;">
+      ※ Google Cloud Consoleで「YouTube Data API v3」を有効にして発行したキーを使用してください。
+      このキーもこの端末のブラウザ内(localStorage)にのみ保存されます。OBSでの配信映像そのものは扱わず、
+      YouTube側のAPIから直接コメントを取得します。
+    </div>
+    <div class="slider-row">
+      <label>動画ID / URL</label>
+      <input type="text" id="ytVideoId" class="text-input" placeholder="配信中の動画ID、またはYouTube URLをそのまま貼り付け" autocomplete="off">
+    </div>
+    <div class="motion-controls" style="border-bottom:none; padding-left:0; padding-right:0;">
+      <button id="btnYtChatConnect">📺 チャット取得開始</button>
+      <button id="btnYtChatAutoSend" class="on">📨 Geminiへ自動転送:ON</button>
+    </div>
+    <div id="ytChatStatus" style="padding:6px 2px 2px; font-size:11px; color:var(--text-dim);">未接続</div>
+    <div id="ytChatLog" style="max-height:100px; overflow-y:auto; padding:4px 2px 2px; font-size:11px; border-top:1px dashed var(--border);"></div>
   </div>
 </div>
 
@@ -2265,6 +2306,169 @@ document.getElementById('realtimeTextInput').addEventListener('keydown', (e) => 
   if(e.key === 'Enter'){ e.preventDefault(); sendRealtimeTextMessage(); }
 });
 
+/* ---------------- YouTubeライブチャット連携 ----------------
+   OBSは映像/音声の配信のみでコメントは扱わないため、YouTube Data API v3
+   (liveChatMessages.list)をブラウザから直接ポーリングしてコメントを取得し、
+   Gemini Liveへテキストとして転送する。
+   quota消費を抑えるため、YouTubeが返すpollingIntervalMillisを尊重し、
+   最短でも3秒未満にはしない。また視聴者コメントを1件ずつ送ると割り込みが
+   増えすぎるため、数秒分をバッファしてまとめて1ターンとして送信する。
+------------------------------------------------------------------ */
+const YT_API_KEY_STORAGE_KEY = 'vrmFaceTrackingViewer.ytApiKey';
+const ytApiKeyEl = document.getElementById('ytApiKey');
+try{
+  const savedYtKey = localStorage.getItem(YT_API_KEY_STORAGE_KEY);
+  if(savedYtKey) ytApiKeyEl.value = savedYtKey;
+}catch(e){ /* 読めない環境は無視 */ }
+ytApiKeyEl.addEventListener('change', () => {
+  try{ localStorage.setItem(YT_API_KEY_STORAGE_KEY, ytApiKeyEl.value.trim()); }catch(e){}
+});
+
+let ytChatTimer = null;
+let ytLiveChatId = null;
+let ytNextPageToken = null;
+let ytAutoSend = true;
+let ytPendingComments = []; // Geminiへまとめて送るためのバッファ
+let ytSendTimer = null;
+
+document.getElementById('btnYtChatAutoSend').addEventListener('click', () => {
+  ytAutoSend = !ytAutoSend;
+  const btn = document.getElementById('btnYtChatAutoSend');
+  btn.classList.toggle('on', ytAutoSend);
+  btn.textContent = `📨 Geminiへ自動転送:${ytAutoSend ? 'ON' : 'OFF'}`;
+});
+
+function setYtChatStatus(text){
+  const el = document.getElementById('ytChatStatus');
+  if(el) el.textContent = text;
+}
+function addYtChatLog(text){
+  const el = document.getElementById('ytChatLog');
+  if(!el) return;
+  const div = document.createElement('div');
+  div.textContent = text;
+  el.appendChild(div);
+  el.scrollTop = el.scrollHeight;
+  while(el.childNodes.length > 100) el.removeChild(el.firstChild);
+}
+
+// 入力欄に動画IDだけでなくYouTube URL(通常/短縮/Shorts/live)が貼られた場合にも対応する簡易抽出
+function extractYoutubeVideoId(input){
+  const s = input.trim();
+  const m = s.match(/(?:v=|youtu\.be\/|shorts\/|live\/)([a-zA-Z0-9_-]{11})/);
+  if(m) return m[1];
+  if(/^[a-zA-Z0-9_-]{11}$/.test(s)) return s;
+  return s; // 不明な形式でもそのままAPIに投げてエラーメッセージで気づけるようにする
+}
+
+async function startYoutubeChatPolling(){
+  const apiKey = ytApiKeyEl.value.trim();
+  const rawVideoId = document.getElementById('ytVideoId').value.trim();
+  if(!apiKey || !rawVideoId){
+    log('YouTube APIキーと動画ID(またはURL)の両方を入力してください', 'warn');
+    return;
+  }
+  const videoId = extractYoutubeVideoId(rawVideoId);
+  setYtChatStatus('配信情報を取得中...');
+  try{
+    const videoRes = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=liveStreamingDetails&id=${encodeURIComponent(videoId)}&key=${encodeURIComponent(apiKey)}`);
+    const videoData = await videoRes.json();
+    if(videoData.error) throw new Error(videoData.error.message || 'YouTube APIエラー');
+    const item = videoData.items && videoData.items[0];
+    const liveChatId = item && item.liveStreamingDetails && item.liveStreamingDetails.activeLiveChatId;
+    if(!liveChatId){
+      setYtChatStatus('ライブチャットが見つかりません(配信中か確認してください)');
+      log('この動画IDは現在ライブ配信中でないか、チャットが無効になっている可能性があります', 'warn');
+      return;
+    }
+    ytLiveChatId = liveChatId;
+    ytNextPageToken = null;
+    setYtChatStatus('接続中(コメント取得開始)');
+    log('YouTubeライブチャットへの接続に成功しました', 'ok');
+    document.getElementById('btnYtChatConnect').textContent = '⏹️ チャット取得停止';
+    pollYoutubeChat(apiKey);
+  }catch(e){
+    setYtChatStatus('取得失敗');
+    log(`YouTubeライブチャット取得エラー: ${e.message || e}`, 'error');
+  }
+}
+
+async function pollYoutubeChat(apiKey){
+  if(!ytLiveChatId) return;
+  try{
+    let url = `https://www.googleapis.com/youtube/v3/liveChat/messages?liveChatId=${encodeURIComponent(ytLiveChatId)}&part=snippet,authorDetails&key=${encodeURIComponent(apiKey)}`;
+    if(ytNextPageToken) url += `&pageToken=${encodeURIComponent(ytNextPageToken)}`;
+    const res = await fetch(url);
+    const data = await res.json();
+    if(data.error){
+      setYtChatStatus(`エラー: ${data.error.message || 'unknown'}`);
+      log(`YouTubeチャット取得エラー: ${data.error.message || data.error}`, 'error');
+      ytLiveChatId = null;
+      document.getElementById('btnYtChatConnect').textContent = '📺 チャット取得開始';
+      return;
+    }
+    ytNextPageToken = data.nextPageToken;
+    (data.items || []).forEach(item => {
+      const author = (item.authorDetails && item.authorDetails.displayName) || '視聴者';
+      const text = item.snippet && item.snippet.displayMessage;
+      if(!text) return;
+      addYtChatLog(`${author}: ${text}`);
+      if(ytAutoSend) queueCommentForGemini(author, text);
+    });
+    const intervalRaw = data.pollingIntervalMillis || 5000;
+    const interval = Math.max(intervalRaw, 3000); // quota保護のため最短3秒
+    setYtChatStatus(`受信中(${(data.items || []).length}件取得, 次回約${Math.round(interval/1000)}秒後)`);
+    ytChatTimer = setTimeout(() => pollYoutubeChat(apiKey), interval);
+  }catch(e){
+    setYtChatStatus('通信エラー(5秒後に再試行)');
+    log(`YouTubeチャットのポーリングに失敗しました: ${e.message || e}`, 'warn');
+    ytChatTimer = setTimeout(() => pollYoutubeChat(apiKey), 5000);
+  }
+}
+
+function stopYoutubeChatPolling(){
+  if(ytChatTimer) clearTimeout(ytChatTimer);
+  ytChatTimer = null;
+  ytLiveChatId = null;
+  setYtChatStatus('停止しました');
+}
+
+// コメントを1件ずつGeminiへ送るとバージイン(割り込み)が増えすぎるため、
+// 数秒分をバッファしてまとめて1つの発話ターンとして送信する。
+function queueCommentForGemini(author, text){
+  ytPendingComments.push(`${author}: ${text}`);
+  if(ytSendTimer) return;
+  ytSendTimer = setTimeout(flushCommentsToGemini, 4000); // 4秒分まとめて送る
+}
+
+function flushCommentsToGemini(){
+  ytSendTimer = null;
+  if(ytPendingComments.length === 0) return;
+  if(!geminiWs || geminiWs.readyState !== WebSocket.OPEN){
+    ytPendingComments = []; // 未接続時は溜め込みすぎないよう破棄
+    return;
+  }
+  const combined = ytPendingComments.slice(0, 20).join('\n'); // 念のため上限
+  const count = ytPendingComments.length;
+  ytPendingComments = [];
+  geminiWs.send(JSON.stringify({
+    clientContent: {
+      turns: [{ role:'user', parts:[{ text:`(YouTubeライブチャットの視聴者コメント)\n${combined}` }] }],
+      turnComplete: true
+    }
+  }));
+  addRealtimeTranscript(`📺(視聴者コメント${count}件) ${combined}`);
+}
+
+document.getElementById('btnYtChatConnect').addEventListener('click', () => {
+  if(ytLiveChatId){
+    stopYoutubeChatPolling();
+    document.getElementById('btnYtChatConnect').textContent = '📺 チャット取得開始';
+  }else{
+    startYoutubeChatPolling();
+  }
+});
+
 // ＋ボタン: ファイルを添付し、テキストと一緒に(または単独で)Gemini Liveへ送る。
 // 画像等のバイナリはinlineData(base64)として、テキスト系ファイルは中身をそのままテキストとして添える。
 let pendingAttachment = null; // { name, mimeType, base64 } または { name, mimeType, text }
@@ -2573,6 +2777,275 @@ document.getElementById('btnScreenshot').addEventListener('click', () => {
   }
 });
 
+/* ---------------- 🎙️ 録画音声用ボイスチェンジャー ----------------
+   ⏺録画ボタンで保存する動画の「マイク音声」にのみ適用する。
+   Gemini Liveへ送るマイク音声(geminiCaptureCtx側)や、通常聞こえる自分の生声には
+   一切手を加えないため、既存の会話機能や音声認識の精度には影響しない。
+
+   ピッチシフトは「2つのグレイン(音の粒)をHann窓で半周期ずらしながら
+   オーバーラップ合成し、読み出し速度だけをピッチ比で変える」という
+   軽量なグラニュラー方式の簡易実装。高品質な専用ライブラリではないため
+   多少ザラつきが出ることがあるが、匿名化目的の簡易ボイスチェンジャーとしては十分実用的。
+   ロボット風はリングモジュレーション(信号にオシレーターでgainを揺らして掛け合わせる)、
+   エコーはディレイ+フィードバック、ケロケロ声は高速トレモロ(音量LFO)で実現している。
+------------------------------------------------------------------ */
+const VC_PRESETS = {
+  off:    { pitch: 0,  robot: 0,    echo: 0,    wobble: 0 },
+  low:    { pitch: -5, robot: 0,    echo: 0,    wobble: 0 },
+  high:   { pitch: 6,  robot: 0,    echo: 0,    wobble: 0 },
+  robot:  { pitch: -2, robot: 0.65, echo: 0.1,  wobble: 0 },
+  echo:   { pitch: 0,  robot: 0,    echo: 0.5,  wobble: 0 },
+  kero:   { pitch: 3,  robot: 0,    echo: 0.1,  wobble: 0.6 }
+  // custom は現在のスライダー値をそのまま使うため定義を持たない
+};
+
+let vcAudioCtx = null;
+let vcOutputDest = null;
+let vcPitchShifterHandle = null;
+let vcRobotDryGain = null, vcRobotWetGain = null;
+let vcEchoWetGain = null, vcEchoFeedbackGain = null;
+let vcWobbleDepthGain = null, vcWobbleLfo = null;
+
+function getVcSliderValue(id){
+  return parseFloat(document.getElementById(id).value);
+}
+
+// 2グレイン式の簡易ピッチシフター。ScriptProcessorNodeで実装(既存のマイク送信処理と同じ方式に合わせている)。
+function createGranularPitchShifter(audioCtx, grainSize = 2048){
+  const blockSize = 4096;
+  const ringSize = grainSize * 4;
+  const ring = new Float32Array(ringSize);
+  let writeIdx = 0;
+  let writtenCount = 0;
+  let initialized = false;
+  let pitchRatio = 1.0;
+
+  const grains = [
+    { phase: 0 },
+    { phase: grainSize / 2 }
+  ];
+  // readPosはgrainごとに個別に持つ(ここではオブジェクトに後付け)
+  grains[0].readPos = 0;
+  grains[1].readPos = 0;
+
+  const node = audioCtx.createScriptProcessor(blockSize, 1, 1);
+
+  function hann(phase, size){
+    return 0.5 - 0.5 * Math.cos((2 * Math.PI * phase) / size);
+  }
+
+  node.onaudioprocess = (e) => {
+    const input = e.inputBuffer.getChannelData(0);
+    const output = e.outputBuffer.getChannelData(0);
+
+    for(let i = 0; i < input.length; i++){
+      ring[writeIdx] = input[i];
+      writeIdx = (writeIdx + 1) % ringSize;
+      writtenCount++;
+    }
+
+    if(!initialized && writtenCount >= grainSize * 2){
+      const startPos = (writeIdx - grainSize * 2 + ringSize) % ringSize;
+      grains[0].readPos = startPos;
+      grains[1].readPos = (startPos + grainSize / 2) % ringSize;
+      initialized = true;
+    }
+
+    if(!initialized){
+      output.fill(0);
+      return;
+    }
+
+    const safeLag = grainSize * 2; // 書き込み位置に読み出しが追いつきすぎないための安全マージン
+    for(let i = 0; i < output.length; i++){
+      let sample = 0;
+      for(const g of grains){
+        const base = Math.floor(g.readPos);
+        const idx1 = base % ringSize;
+        const idx2 = (base + 1) % ringSize;
+        const frac = g.readPos - base;
+        const s = ring[idx1] * (1 - frac) + ring[idx2] * frac;
+        sample += s * hann(g.phase, grainSize);
+
+        g.readPos = (g.readPos + pitchRatio + ringSize) % ringSize;
+        g.phase += 1;
+        if(g.phase >= grainSize){
+          g.phase = 0;
+          g.readPos = (writeIdx - safeLag + ringSize) % ringSize; // ドリフト防止の再同期
+        }
+      }
+      output[i] = sample;
+    }
+  };
+
+  return {
+    node,
+    setSemitones(semitones){ pitchRatio = Math.pow(2, semitones / 12); }
+  };
+}
+
+function teardownVoiceChangerGraph(){
+  if(vcAudioCtx){
+    try{ vcAudioCtx.close(); }catch(e){ /* 既に閉じている場合は無視 */ }
+  }
+  vcAudioCtx = null;
+  vcOutputDest = null;
+  vcPitchShifterHandle = null;
+  vcRobotDryGain = null; vcRobotWetGain = null;
+  vcEchoWetGain = null; vcEchoFeedbackGain = null;
+  vcWobbleDepthGain = null; vcWobbleLfo = null;
+}
+
+// マイクのMediaStreamを受け取り、ボイスチェンジャー適用後のMediaStreamを返す。
+// 録画開始時にのみ呼び出す(常時は処理しない、無駄なCPU/バッテリー消費を避けるため)。
+function buildVoiceChangerStream(micStream){
+  teardownVoiceChangerGraph();
+  vcAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  const source = vcAudioCtx.createMediaStreamSource(micStream);
+
+  // 1) ピッチシフト(常時経由。半音0ならほぼ素通しと同等)
+  vcPitchShifterHandle = createGranularPitchShifter(vcAudioCtx, 2048);
+  source.connect(vcPitchShifterHandle.node);
+  let chainEnd = vcPitchShifterHandle.node;
+
+  // 2) ロボット風(リングモジュレーション): dry/wetをミックス
+  vcRobotDryGain = vcAudioCtx.createGain();
+  vcRobotWetGain = vcAudioCtx.createGain();
+  const robotRingMod = vcAudioCtx.createGain(); // このgain値をcarrierで揺らして掛け合わせる(リングモジュレーション)
+  robotRingMod.gain.value = 0;
+  const robotCarrier = vcAudioCtx.createOscillator();
+  robotCarrier.type = 'sine';
+  robotCarrier.frequency.value = 35;
+  robotCarrier.connect(robotRingMod.gain);
+  robotCarrier.start();
+  const robotMix = vcAudioCtx.createGain();
+  chainEnd.connect(vcRobotDryGain);
+  chainEnd.connect(vcRobotWetGain);
+  vcRobotWetGain.connect(robotRingMod);
+  vcRobotDryGain.connect(robotMix);
+  robotRingMod.connect(robotMix);
+  chainEnd = robotMix;
+
+  // 3) エコー(ディレイ+フィードバック)
+  const echoDry = vcAudioCtx.createGain();
+  vcEchoWetGain = vcAudioCtx.createGain();
+  const echoDelay = vcAudioCtx.createDelay(1.0);
+  echoDelay.delayTime.value = 0.18;
+  vcEchoFeedbackGain = vcAudioCtx.createGain();
+  vcEchoFeedbackGain.gain.value = 0.3;
+  const echoMix = vcAudioCtx.createGain();
+  chainEnd.connect(echoDry);
+  chainEnd.connect(echoDelay);
+  echoDelay.connect(vcEchoFeedbackGain);
+  vcEchoFeedbackGain.connect(echoDelay);
+  echoDelay.connect(vcEchoWetGain);
+  echoDry.connect(echoMix);
+  vcEchoWetGain.connect(echoMix);
+  chainEnd = echoMix;
+
+  // 4) ケロケロ声(高速トレモロ: 音量を周期的に揺らす)
+  const wobbleGain = vcAudioCtx.createGain();
+  wobbleGain.gain.value = 1;
+  vcWobbleDepthGain = vcAudioCtx.createGain();
+  vcWobbleDepthGain.gain.value = 0;
+  vcWobbleLfo = vcAudioCtx.createOscillator();
+  vcWobbleLfo.type = 'sine';
+  vcWobbleLfo.frequency.value = 10;
+  vcWobbleLfo.connect(vcWobbleDepthGain);
+  vcWobbleDepthGain.connect(wobbleGain.gain);
+  vcWobbleLfo.start();
+  chainEnd.connect(wobbleGain);
+  chainEnd = wobbleGain;
+
+  vcOutputDest = vcAudioCtx.createMediaStreamDestination();
+  chainEnd.connect(vcOutputDest);
+
+  applyVoiceChangerValuesToGraph(); // 現在のスライダー値を即座に反映
+  return vcOutputDest.stream;
+}
+
+// スライダー/プリセットの現在値を、稼働中のAudioグラフへ反映する(録画中のリアルタイム調整にも対応)。
+function applyVoiceChangerValuesToGraph(){
+  const pitch = getVcSliderValue('vcPitch');
+  const robot = getVcSliderValue('vcRobot');
+  const echo = getVcSliderValue('vcEcho');
+  const wobble = getVcSliderValue('vcWobble');
+
+  if(vcPitchShifterHandle) vcPitchShifterHandle.setSemitones(pitch);
+  if(vcRobotDryGain && vcRobotWetGain){
+    vcRobotDryGain.gain.value = 1 - robot;
+    vcRobotWetGain.gain.value = robot;
+  }
+  if(vcEchoWetGain && vcEchoFeedbackGain){
+    vcEchoWetGain.gain.value = echo;
+    vcEchoFeedbackGain.gain.value = 0.2 + echo * 0.35;
+  }
+  if(vcWobbleDepthGain && vcWobbleLfo){
+    vcWobbleDepthGain.gain.value = wobble * 0.9;
+    vcWobbleLfo.frequency.value = 6 + wobble * 10;
+  }
+}
+
+function setVcSliderDisplay(id, decimals){
+  const input = document.getElementById(id);
+  const out = document.getElementById(id + 'V');
+  out.textContent = decimals === 0 ? String(Math.round(parseFloat(input.value))) : parseFloat(input.value).toFixed(decimals);
+}
+
+['vcPitch','vcRobot','vcEcho','vcWobble'].forEach((id) => {
+  const decimals = id === 'vcPitch' ? 0 : 2;
+  document.getElementById(id).addEventListener('input', () => {
+    setVcSliderDisplay(id, decimals);
+    document.getElementById('vcPreset').value = 'custom'; // 手動調整したらプリセット表示もカスタムに合わせる
+    saveVoiceChangerSettings();
+    applyVoiceChangerValuesToGraph(); // 録画中であれば即座に反映
+  });
+});
+
+document.getElementById('vcPreset').addEventListener('change', (e) => {
+  const preset = VC_PRESETS[e.target.value];
+  if(!preset) return; // customは現在値のまま
+  document.getElementById('vcPitch').value = preset.pitch;
+  document.getElementById('vcRobot').value = preset.robot;
+  document.getElementById('vcEcho').value = preset.echo;
+  document.getElementById('vcWobble').value = preset.wobble;
+  setVcSliderDisplay('vcPitch', 0);
+  setVcSliderDisplay('vcRobot', 2);
+  setVcSliderDisplay('vcEcho', 2);
+  setVcSliderDisplay('vcWobble', 2);
+  saveVoiceChangerSettings();
+  applyVoiceChangerValuesToGraph();
+});
+
+const VC_SETTINGS_STORAGE_KEY = 'vrmFaceTrackingViewer.voiceChanger';
+function saveVoiceChangerSettings(){
+  try{
+    localStorage.setItem(VC_SETTINGS_STORAGE_KEY, JSON.stringify({
+      preset: document.getElementById('vcPreset').value,
+      pitch: getVcSliderValue('vcPitch'),
+      robot: getVcSliderValue('vcRobot'),
+      echo: getVcSliderValue('vcEcho'),
+      wobble: getVcSliderValue('vcWobble')
+    }));
+  }catch(e){ /* 保存できない環境は無視 */ }
+}
+(function restoreVoiceChangerSettings(){
+  try{
+    const raw = localStorage.getItem(VC_SETTINGS_STORAGE_KEY);
+    if(!raw) return;
+    const s = JSON.parse(raw);
+    document.getElementById('vcPreset').value = s.preset || 'off';
+    document.getElementById('vcPitch').value = s.pitch ?? 0;
+    document.getElementById('vcRobot').value = s.robot ?? 0;
+    document.getElementById('vcEcho').value = s.echo ?? 0;
+    document.getElementById('vcWobble').value = s.wobble ?? 0;
+    setVcSliderDisplay('vcPitch', 0);
+    setVcSliderDisplay('vcRobot', 2);
+    setVcSliderDisplay('vcEcho', 2);
+    setVcSliderDisplay('vcWobble', 2);
+  }catch(e){ /* 読めない/壊れている場合は既定値のまま */ }
+})();
+
 /* ---------------- ⏺ 録画(モデル+背景 + Gemini Liveの会話音声をMP4で録画保存) ----------------
    撮影と同様、WebGLキャンバス自体をcaptureStream()でキャプチャするため、
    ボタンやパネルなど別レイヤーのUIは映り込まない。
@@ -2626,8 +3099,15 @@ function recStart(){
       audioParts.push('AIの発話音声');
     }
     if(realtimeMicStream && realtimeMicStream.getAudioTracks().length){
-      audioTracks.push(...realtimeMicStream.getAudioTracks());
-      audioParts.push('マイク入力');
+      const vcPreset = document.getElementById('vcPreset').value;
+      if(vcPreset !== 'off'){
+        const vcStream = buildVoiceChangerStream(realtimeMicStream);
+        audioTracks.push(...vcStream.getAudioTracks());
+        audioParts.push('マイク入力(ボイスチェンジャー適用)');
+      }else{
+        audioTracks.push(...realtimeMicStream.getAudioTracks());
+        audioParts.push('マイク入力');
+      }
     }
     recStream = new MediaStream([...recVideoStream.getVideoTracks(), ...audioTracks]);
 
@@ -2654,6 +3134,7 @@ function recStart(){
       // キャンバスキャプチャは自前で生成したものだけを停止する。
       // マイク/AI音声トラックはGemini Live会話が使い続けるため停止しない。
       if(recVideoStream){ recVideoStream.getTracks().forEach(t => t.stop()); recVideoStream = null; }
+      teardownVoiceChangerGraph(); // 録画専用に作った処理後マイクストリームはここで破棄(生マイク・Gemini送信には影響しない)
       recStream = null;
     };
     recMediaRecorder.start();
