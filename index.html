@@ -134,6 +134,11 @@
   #cameraPanel{ padding:34px 12px 12px; }
   #cameraPanel .camera-grid{ display:grid; grid-template-columns:1fr 1fr; gap:8px; }
   #cameraPanel .camera-grid button{ padding:12px 4px; font-size:12px; }
+  .cam-tabs{ display:flex; gap:4px; margin:0 0 10px; }
+  .cam-tabs button{ flex:1; padding:7px 2px; font-size:10px; border-radius:8px; opacity:.55; white-space:nowrap; }
+  .cam-tabs button.active{ opacity:1; border-color:var(--accent); color:var(--accent); background:#1c2531; }
+  .cam-tab-panel{ display:none; }
+  .cam-tab-panel.active{ display:block; }
   .motion-controls{ display:flex; gap:6px; flex-wrap:wrap; padding:8px 8px 6px; border-bottom:1px solid var(--border); }
   .motion-controls button{ flex:1; min-width:0; padding:7px 4px; font-size:11px; }
   .motion-progress-row{ padding:6px 10px 8px; border-bottom:1px solid var(--border); }
@@ -271,31 +276,64 @@
 
 <div id="cameraPanel" class="hidden">
   <button class="panel-close-btn" id="btnCloseCameraPanel" aria-label="閉じる">×</button>
-  <div class="camera-grid">
-    <button id="btnCam">▶ インカメラ</button>
-    <button id="btnOutCam">📷 アウトカメラ</button>
-    <button id="btnScreenshot">📸 撮影</button>
-    <button id="btnRecord">⏺ 録画</button>
+
+  <div class="cam-tabs">
+    <button class="cam-tab-btn active" data-tab="camTabCamera">📷 カメラ</button>
+    <button class="cam-tab-btn" data-tab="camTabVoice">🎙️ ボイス</button>
+    <button class="cam-tab-btn" data-tab="camTabPlayback">🔊 再生</button>
+    <button class="cam-tab-btn" data-tab="camTabRecord">⏺ 録画</button>
   </div>
-  <div style="border-top:1px solid var(--border); margin:8px 0 4px; padding-top:6px; color:var(--accent); font-size:10.5px;">— 🎙️ 録画音声のボイスチェンジャー —</div>
-  <div class="slider-row">
-    <label>プリセット</label>
-    <select id="vcPreset" class="text-input">
-      <option value="off">オフ(そのまま)</option>
-      <option value="low">男声化(低め)</option>
-      <option value="high">女声化(高め)</option>
-      <option value="robot">ロボット風</option>
-      <option value="echo">エコー</option>
-      <option value="kero">ケロケロ声</option>
-      <option value="custom">カスタム(下のスライダーで自由調整)</option>
-    </select>
+
+  <div id="camTabCamera" class="cam-tab-panel active">
+    <div class="camera-grid">
+      <button id="btnCam">▶ インカメラ</button>
+      <button id="btnOutCam">📷 アウトカメラ</button>
+      <button id="btnScreenshot">📸 撮影</button>
+      <button id="btnRecord">⏺ 録画</button>
+    </div>
   </div>
-  <div class="slider-row"><label>ピッチ(半音)</label><input type="range" id="vcPitch" min="-12" max="12" step="1" value="0"><span id="vcPitchV">0</span></div>
-  <div class="slider-row"><label>ロボット感</label><input type="range" id="vcRobot" min="0" max="1" step="0.05" value="0"><span id="vcRobotV">0.00</span></div>
-  <div class="slider-row"><label>エコー量</label><input type="range" id="vcEcho" min="0" max="1" step="0.05" value="0"><span id="vcEchoV">0.00</span></div>
-  <div class="slider-row"><label>ケロケロ速度</label><input type="range" id="vcWobble" min="0" max="1" step="0.05" value="0"><span id="vcWobbleV">0.00</span></div>
-  <div id="vcStatus" style="font-size:9.5px; color:var(--text-dim); padding:2px 2px 0;">
-    ⏺録画で保存する動画にのみ反映されます。Gemini Liveへ送るマイク音声や、リアルタイムに聞こえる自分の声には影響しません。
+
+  <div id="camTabVoice" class="cam-tab-panel">
+    <div style="color:var(--accent); font-size:10.5px; padding-bottom:4px;">🎙️ 録画音声のボイスチェンジャー</div>
+    <div class="slider-row">
+      <label>プリセット</label>
+      <select id="vcPreset" class="text-input">
+        <option value="off">オフ(そのまま)</option>
+        <option value="low">男声化(低め)</option>
+        <option value="high">女声化(高め)</option>
+        <option value="robot">ロボット風</option>
+        <option value="echo">エコー</option>
+        <option value="kero">ケロケロ声</option>
+        <option value="custom">カスタム(下のスライダーで自由調整)</option>
+      </select>
+    </div>
+    <div class="slider-row"><label>ピッチ(半音)</label><input type="range" id="vcPitch" min="-12" max="12" step="1" value="0"><span id="vcPitchV">0</span></div>
+    <div class="slider-row"><label>ロボット感</label><input type="range" id="vcRobot" min="0" max="1" step="0.05" value="0"><span id="vcRobotV">0.00</span></div>
+    <div class="slider-row"><label>エコー量</label><input type="range" id="vcEcho" min="0" max="1" step="0.05" value="0"><span id="vcEchoV">0.00</span></div>
+    <div class="slider-row"><label>ケロケロ速度</label><input type="range" id="vcWobble" min="0" max="1" step="0.05" value="0"><span id="vcWobbleV">0.00</span></div>
+    <div id="vcStatus" style="font-size:9.5px; color:var(--text-dim); padding:2px 2px 0;">
+      ⏺録画で保存する動画にのみ反映されます。Gemini Liveへ送るマイク音声や、リアルタイムに聞こえる自分の声には影響しません。
+    </div>
+  </div>
+
+  <div id="camTabPlayback" class="cam-tab-panel">
+    <div style="color:var(--accent); font-size:10.5px; padding-bottom:4px;">🔊 再生レベル(実際にスピーカーから聞こえる音量)</div>
+    <div class="slider-row"><label>BGM</label><input type="range" id="lvlPlaybackBgm" min="0" max="2" step="0.05" value="1"><span id="lvlPlaybackBgmV">1.00</span></div>
+    <div class="slider-row"><label>マイク入力</label><input type="range" id="lvlPlaybackMic" min="0" max="2" step="0.05" value="0"><span id="lvlPlaybackMicV">0.00</span></div>
+    <div class="slider-row"><label>Gemini Live音声</label><input type="range" id="lvlPlaybackAi" min="0" max="2" step="0.05" value="1"><span id="lvlPlaybackAiV">1.00</span></div>
+    <div style="font-size:9.5px; color:var(--text-dim); padding:4px 2px 0;">
+      ※マイク入力を上げると自分の声がスピーカーから聞こえるようになります(ハウリング注意。既定値は0)。
+    </div>
+  </div>
+
+  <div id="camTabRecord" class="cam-tab-panel">
+    <div style="color:var(--accent); font-size:10.5px; padding-bottom:4px;">⏺ 録画レベル(保存する動画に含まれる音量)</div>
+    <div class="slider-row"><label>BGM</label><input type="range" id="lvlRecordBgm" min="0" max="2" step="0.05" value="1"><span id="lvlRecordBgmV">1.00</span></div>
+    <div class="slider-row"><label>マイク入力</label><input type="range" id="lvlRecordMic" min="0" max="2" step="0.05" value="1"><span id="lvlRecordMicV">1.00</span></div>
+    <div class="slider-row"><label>Gemini Live音声</label><input type="range" id="lvlRecordAi" min="0" max="2" step="0.05" value="1"><span id="lvlRecordAiV">1.00</span></div>
+    <div style="font-size:9.5px; color:var(--text-dim); padding:4px 2px 0;">
+      ※実際に聞こえる音量(🔊再生レベル)には影響しません。録画中でもリアルタイムに調整できます。
+    </div>
   </div>
 </div>
 
@@ -1752,6 +1790,16 @@ document.getElementById('btnCloseCameraPanel').addEventListener('click', () => {
   document.getElementById('cameraPanel').classList.add('hidden');
 });
 
+// カメラパネル内のタブ切り替え(📷カメラ / 🎙️ボイス / 🔊再生 / ⏺録画)
+document.querySelectorAll('.cam-tab-btn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.cam-tab-btn').forEach((b) => b.classList.remove('active'));
+    document.querySelectorAll('.cam-tab-panel').forEach((p) => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById(btn.dataset.tab).classList.add('active');
+  });
+});
+
 // glb.txtに書かれたファイル名リストから、起動時に読み込む背景の候補を取得する。読めない場合は既定の背景なしとする。
 // 実ファイルはglbフォルダ内から探す。
 const DEFAULT_BACKGROUND_LIST_URL = './glb.txt'; // 1行につき「ファイル名,作者名(省略可),url(省略可)」。#始まりはコメント扱い
@@ -1858,6 +1906,78 @@ let geminiTokenModel = '';
 let realtimeMicStream = null;
 let realtimeAudioCtx = null;       // 受信音声の再生(24kHz) & リップシンク解析用
 let realtimeAnalyser = null;
+let realtimePlaybackGain = null;   // 🔊再生レベル:「Gemini Live音声」用のgain
+
+/* ---------------- 🔊 再生レベル / ⏺ 録画レベル(BGM・マイク入力・Gemini Live音声を個別調整) ----------------
+   「再生レベル」は実際にスピーカーから聞こえる音量、「録画レベル」は⏺録画で保存する動画に
+   含まれる音量で、それぞれ独立したGainNodeを対象の音声グラフに挿し込んで調整する。
+   録画レベルのgainノードは録画中(buildRecordingAudioStream実行中)のみ存在するため、
+   録画していない間にスライダーを動かしても次回録画開始時の初期値として使われるだけになる。
+------------------------------------------------------------------ */
+const AUDIO_LEVEL_IDS = ['lvlPlaybackBgm','lvlPlaybackMic','lvlPlaybackAi','lvlRecordBgm','lvlRecordMic','lvlRecordAi'];
+const AUDIO_LEVEL_STORAGE_KEY = 'vrmFaceTrackingViewer.audioLevels';
+
+function getLevelValue(id){ return parseFloat(document.getElementById(id).value); }
+function setLevelDisplay(id){ document.getElementById(id + 'V').textContent = getLevelValue(id).toFixed(2); }
+
+function saveAudioLevels(){
+  try{
+    const data = {};
+    AUDIO_LEVEL_IDS.forEach((id) => { data[id] = getLevelValue(id); });
+    localStorage.setItem(AUDIO_LEVEL_STORAGE_KEY, JSON.stringify(data));
+  }catch(e){ /* 保存できない環境は無視 */ }
+}
+(function restoreAudioLevels(){
+  try{
+    const raw = localStorage.getItem(AUDIO_LEVEL_STORAGE_KEY);
+    if(raw){
+      const data = JSON.parse(raw);
+      AUDIO_LEVEL_IDS.forEach((id) => { if(data[id] !== undefined) document.getElementById(id).value = data[id]; });
+    }
+  }catch(e){ /* 読めない/壊れている場合は既定値のまま */ }
+  AUDIO_LEVEL_IDS.forEach((id) => setLevelDisplay(id));
+})();
+
+// 稼働中のAudioグラフへ現在のスライダー値を反映する(存在しないノードは黙ってスキップ=未接続時でも安全)
+function applyAudioLevelsLive(){
+  if(bgmPlaybackGain) bgmPlaybackGain.gain.value = getLevelValue('lvlPlaybackBgm');
+  if(micMonitorGain) micMonitorGain.gain.value = getLevelValue('lvlPlaybackMic');
+  if(realtimePlaybackGain) realtimePlaybackGain.gain.value = getLevelValue('lvlPlaybackAi');
+  if(recBgmLevelGain) recBgmLevelGain.gain.value = getLevelValue('lvlRecordBgm');
+  if(recMicLevelGain) recMicLevelGain.gain.value = getLevelValue('lvlRecordMic');
+  if(recAiLevelGain) recAiLevelGain.gain.value = getLevelValue('lvlRecordAi');
+}
+
+AUDIO_LEVEL_IDS.forEach((id) => {
+  document.getElementById(id).addEventListener('input', () => {
+    setLevelDisplay(id);
+    saveAudioLevels();
+    applyAudioLevelsLive();
+  });
+});
+
+// マイク入力の自己モニター再生(既定は音量0でハウリングを防止)。
+// Gemini Live接続中のrealtimeMicStreamに対してのみ有効(録画専用に独自取得した一時マイクは対象外)。
+let micMonitorCtx = null;
+let micMonitorGain = null;
+function ensureMicMonitor(micStream){
+  teardownMicMonitor();
+  if(!micStream || !micStream.getAudioTracks().length) return;
+  try{
+    micMonitorCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const source = micMonitorCtx.createMediaStreamSource(micStream);
+    micMonitorGain = micMonitorCtx.createGain();
+    micMonitorGain.gain.value = getLevelValue('lvlPlaybackMic');
+    source.connect(micMonitorGain);
+    micMonitorGain.connect(micMonitorCtx.destination);
+  }catch(e){ log(`マイクのモニター再生準備に失敗しました: ${e.message || e}`, 'warn'); }
+}
+function teardownMicMonitor(){
+  if(micMonitorCtx){ try{ micMonitorCtx.close(); }catch(e){ /* 既に閉じている場合は無視 */ } }
+  micMonitorCtx = null;
+  micMonitorGain = null;
+}
+
 let realtimeRecDest = null;        // 録画時にAIの発話音声を拾うためのタップ(MediaStreamDestination)
 let realtimeMuted = false;
 let autoGestureEnabled = true;     // 会話中、内容/感情に応じて自動でジェスチャーモーションを再生するか
@@ -1893,6 +2013,7 @@ function computeRms(analyser){
 // あわせて、スクリーン映像ON時にBGM再生音もGeminiへ送れるよう、MediaStreamとして取り出しておく
 let bgmAudioCtx = null;
 let bgmAnalyser = null;
+let bgmPlaybackGain = null;  // 🔊再生レベル:「BGM」用のgain(実際にスピーカーへ出る音量)
 let bgmCaptureStream = null; // BGM再生音をGemini入力コンテキストへ橋渡しするためのMediaStream
 let bgmSendGain = null;      // スクリーン映像ON時だけ値を1にして、BGM音声をマイクと一緒にGeminiへ送る
 
@@ -1904,7 +2025,10 @@ function ensureBgmAnalyser(){
       bgmAnalyser = bgmAudioCtx.createAnalyser();
       bgmAnalyser.fftSize = 256;
       source.connect(bgmAnalyser);
-      bgmAnalyser.connect(bgmAudioCtx.destination); // 解析用に経由させるだけで、音自体はそのまま聞こえるようにする
+      bgmPlaybackGain = bgmAudioCtx.createGain();
+      bgmPlaybackGain.gain.value = getLevelValue('lvlPlaybackBgm');
+      bgmAnalyser.connect(bgmPlaybackGain);
+      bgmPlaybackGain.connect(bgmAudioCtx.destination); // 解析用に経由させるだけで、音自体はそのまま聞こえるようにする
       const bgmCaptureDest = bgmAudioCtx.createMediaStreamDestination();
       bgmAnalyser.connect(bgmCaptureDest);
       bgmCaptureStream = bgmCaptureDest.stream;
@@ -1984,7 +2108,10 @@ function ensurePlaybackGraph(){
   realtimeAudioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
   realtimeAnalyser = realtimeAudioCtx.createAnalyser();
   realtimeAnalyser.fftSize = 256;
-  realtimeAnalyser.connect(realtimeAudioCtx.destination);
+  realtimePlaybackGain = realtimeAudioCtx.createGain(); // 🔊再生レベル:「Gemini Live音声」用のgain
+  realtimePlaybackGain.gain.value = getLevelValue('lvlPlaybackAi');
+  realtimeAnalyser.connect(realtimePlaybackGain);
+  realtimePlaybackGain.connect(realtimeAudioCtx.destination);
   realtimeRecDest = realtimeAudioCtx.createMediaStreamDestination(); // 通常再生とは別に、録画用に同じ音声をタップする
   realtimeAnalyser.connect(realtimeRecDest);
   geminiNextPlayTime = realtimeAudioCtx.currentTime;
@@ -2161,6 +2288,7 @@ async function connectRealtime(){
 
   try{
     realtimeMicStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    ensureMicMonitor(realtimeMicStream); // 🔊再生レベルの「マイク入力」スライダーで自己モニター音量を調整可能に
   }catch(err){
     log(`マイク取得エラー: ${err.message || err}`, 'err');
     setRealtimeStatus('マイク許可エラー');
@@ -2276,6 +2404,7 @@ function disconnectRealtime(){
   if(realtimeAudioCtx){ try{ realtimeAudioCtx.close(); }catch(e){} realtimeAudioCtx = null; }
   realtimeAnalyser = null;
   if(realtimeMicStream){ realtimeMicStream.getTracks().forEach(t => t.stop()); realtimeMicStream = null; }
+  teardownMicMonitor();
   setRealtimeStatus('未接続');
   const btn = document.getElementById('btnRealtimeConnect');
   if(btn){ btn.textContent = '🎙️ 接続'; btn.classList.remove('on'); }
@@ -3098,11 +3227,15 @@ let recIsRecording = false;
 let recOwnMicStream = null;  // Gemini Live未接続時、録画のためだけに独自取得したマイク(録画終了時に解放)
 let recMixAudioCtx = null;   // AI発話・マイク・BGMを1本のトラックにミックスするための録画専用AudioContext
 let recMixDest = null;
+let recBgmLevelGain = null;  // ⏺録画レベル:「BGM」用のgain
+let recMicLevelGain = null;  // ⏺録画レベル:「マイク入力」用のgain
+let recAiLevelGain = null;   // ⏺録画レベル:「Gemini Live音声」用のgain
 
 // AI発話・マイク(ボイスチェンジャー適用可)・BGMの各音声を、録画専用の単一AudioContextで
 // 1本のMediaStreamAudioDestinationNodeにまとめてミックスする。
 // Safari/WebKit系はMediaRecorderに複数の音声トラックをまとめて渡しても正しく合成されないことがあるため、
-// 事前に1トラックへ統合しておくのが最も確実。
+// 事前に1トラックへ統合しておくのが最も確実。各音源にはレベル調整用のGainNodeを個別に挟み、
+// ⏺録画レベルタブのスライダーで録画中でもリアルタイムに音量バランスを調整できるようにしている。
 function buildRecordingAudioStream(micStreamForRecording, useVoiceChanger){
   teardownRecordingAudioMix();
   recMixAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -3110,23 +3243,29 @@ function buildRecordingAudioStream(micStreamForRecording, useVoiceChanger){
   const parts = [];
 
   if(realtimeRecDest && realtimeRecDest.stream.getAudioTracks().length){
-    recMixAudioCtx.createMediaStreamSource(realtimeRecDest.stream).connect(dest);
+    recAiLevelGain = recMixAudioCtx.createGain();
+    recAiLevelGain.gain.value = getLevelValue('lvlRecordAi');
+    recMixAudioCtx.createMediaStreamSource(realtimeRecDest.stream).connect(recAiLevelGain).connect(dest);
     parts.push('AIの発話音声');
   }
 
   if(micStreamForRecording && micStreamForRecording.getAudioTracks().length){
+    recMicLevelGain = recMixAudioCtx.createGain();
+    recMicLevelGain.gain.value = getLevelValue('lvlRecordMic');
     if(useVoiceChanger){
       const vcStream = buildVoiceChangerStream(micStreamForRecording); // 別のAudioContextで処理済みのストリーム
-      recMixAudioCtx.createMediaStreamSource(vcStream).connect(dest);
+      recMixAudioCtx.createMediaStreamSource(vcStream).connect(recMicLevelGain).connect(dest);
       parts.push('マイク入力(ボイスチェンジャー適用)');
     }else{
-      recMixAudioCtx.createMediaStreamSource(micStreamForRecording).connect(dest);
+      recMixAudioCtx.createMediaStreamSource(micStreamForRecording).connect(recMicLevelGain).connect(dest);
       parts.push('マイク入力');
     }
   }
 
   if(bgmCaptureStream && bgmCaptureStream.getAudioTracks().length){
-    recMixAudioCtx.createMediaStreamSource(bgmCaptureStream).connect(dest);
+    recBgmLevelGain = recMixAudioCtx.createGain();
+    recBgmLevelGain.gain.value = getLevelValue('lvlRecordBgm');
+    recMixAudioCtx.createMediaStreamSource(bgmCaptureStream).connect(recBgmLevelGain).connect(dest);
     parts.push('BGM');
   }
 
@@ -3140,6 +3279,9 @@ function teardownRecordingAudioMix(){
   }
   recMixAudioCtx = null;
   recMixDest = null;
+  recBgmLevelGain = null;
+  recMicLevelGain = null;
+  recAiLevelGain = null;
 }
 
 function recPickMimeType(){
