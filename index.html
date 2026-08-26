@@ -150,6 +150,14 @@
   .cam-tabs button.active{ opacity:1; border-color:var(--accent); color:var(--accent); background:#1c2531; }
   .cam-tab-panel{ display:none; }
   .cam-tab-panel.active{ display:block; }
+  /* #sliders(設定)パネル内のタブ切り替え。5タブあり画面幅が狭い端末でも収まるよう折り返しを許可する */
+  .settings-tabs{ display:flex; flex-wrap:wrap; gap:4px; margin:0 0 10px; }
+  .settings-tabs button{ flex:1 1 auto; min-width:58px; padding:7px 3px; font-size:10px; border-radius:8px; opacity:.55; white-space:nowrap; }
+  .settings-tabs button.active{ opacity:1; border-color:var(--accent); color:var(--accent); background:#1c2531; }
+  .settings-tab-panel{ display:none; }
+  .settings-tab-panel.active{ display:block; }
+  .settings-tab-panel .sub-toggle-row{ display:flex; justify-content:center; margin:0 0 8px; }
+  .settings-tab-panel .sub-toggle-row button{ flex:1; max-width:220px; }
   .motion-controls{ display:flex; gap:6px; flex-wrap:wrap; padding:8px 8px 6px; border-bottom:1px solid var(--border); }
   .motion-controls button{ flex:1; min-width:0; padding:7px 4px; font-size:11px; }
   .motion-progress-row{ padding:6px 10px 8px; border-bottom:1px solid var(--border); }
@@ -220,11 +228,7 @@
   <button id="btnRealtime">🎙️ 会話</button>
   <button id="btnCameraPanel">📷 カメラ</button>
   <button id="btnCalib">🎯 中央校正</button>
-  <button id="btnGyro">🧭 ジャイロ有効化</button>
-  <button id="btnAccel">🎚️ 加速度センサー有効化</button>
-  <button id="btnCalibScreen">📏 画面校正</button>
-  <button id="btnOffAxis">🪟 本格off-axis</button>
-  <button id="btnSliders">⚙ 調整</button>
+  <button id="btnSliders">⚙ 設定</button>
   <button id="btnLog">📋 ログ</button>
 </div>
 
@@ -353,40 +357,72 @@
 <div id="bottomPanel">
   <div id="sliders" class="hidden">
     <button class="panel-close-btn" id="btnCloseSliders" aria-label="閉じる">×</button>
-    <div class="slider-row"><label>左右感度</label><input type="range" id="sxy" min="0" max="3" step="0.05" value="1"><span id="sxyV">1.0</span></div>
-    <div class="slider-row">
-      <label>奥行き感度</label><input type="range" id="sz" min="0" max="3" step="0.05" value="1"><span id="szV">1.0</span>
+
+    <div class="settings-tabs">
+      <button class="settings-tab-btn active" data-tab="settingsTabGeneral">🔧 一般</button>
+      <button class="settings-tab-btn" data-tab="settingsTabGyro">🧭 ジャイロ</button>
+      <button class="settings-tab-btn" data-tab="settingsTabAccel">🎚️ 加速度</button>
+      <button class="settings-tab-btn" data-tab="settingsTabOffAxis">🪟 off-axis</button>
+      <button class="settings-tab-btn" data-tab="settingsTabTalk">🎙️ 会話</button>
     </div>
-    <div class="slider-row"><label>視点距離</label><input type="range" id="baseDist" min="0.5" max="5" step="0.1" value="2.2"><span id="baseDistV">2.2</span></div>
-    <div class="slider-row"><label>視線先高さ</label><input type="range" id="lookY" min="0" max="2" step="0.05" value="1.0"><span id="lookYV">1.0</span></div>
-    <div class="slider-row"><label>スムージング</label><input type="range" id="smooth" min="0.05" max="0.9" step="0.05" value="0.25"><span id="smoothV">0.25</span></div>
-    <div class="slider-row"><label>ミラー反転</label><button id="flipToggle" class="toggle-btn">OFF</button></div>
-    <div class="slider-row"><label>ジャイロ感度</label><input type="range" id="gsens" min="0" max="3" step="0.05" value="1"><span id="gsensV">1.0</span></div>
-    <div class="slider-row"><label>ジャイロ反転</label><button id="gflipToggle" class="toggle-btn">OFF</button></div>
-    <div class="slider-row"><label>直立補正</label><button id="uprightToggle" class="toggle-btn">OFF</button></div>
-    <div class="slider-row"><label>├左右 強度</label><button id="uprightSignLRToggle" class="sign-btn">+</button><input type="range" id="uprightStrengthLR" min="0" max="2" step="0.05" value="1"><span id="uprightStrengthLRV">1.00</span></div>
-    <div class="slider-row"><label>└前後 強度</label><button id="uprightSignFBToggle" class="sign-btn">+</button><input type="range" id="uprightStrengthFB" min="0" max="2" step="0.05" value="1"><span id="uprightStrengthFBV">1.00</span></div>
-    <div style="font-size:9.5px; color:var(--text-dim); padding:0 2px 4px;">
-      ※ジャイロセンサーが有効な状態で、端末を傾けてもキャラクターが現実世界に対して直立して見えるよう、
-      左右(ロール)・前後(ピッチ)の傾きを軸ごとに独立した強度で打ち消します(校正ボタンを押した時の姿勢を「まっすぐ」の基準にします)。
-      向きが逆に感じる軸は、その行の+/−ボタンで反転してください。
+
+    <div id="settingsTabGeneral" class="settings-tab-panel active">
+      <div class="slider-row"><label>左右感度</label><input type="range" id="sxy" min="0" max="3" step="0.05" value="1"><span id="sxyV">1.0</span></div>
+      <div class="slider-row">
+        <label>奥行き感度</label><input type="range" id="sz" min="0" max="3" step="0.05" value="1"><span id="szV">1.0</span>
+      </div>
+      <div class="slider-row"><label>視点距離</label><input type="range" id="baseDist" min="0.5" max="5" step="0.1" value="2.2"><span id="baseDistV">2.2</span></div>
+      <div class="slider-row"><label>視線先高さ</label><input type="range" id="lookY" min="0" max="2" step="0.05" value="1.0"><span id="lookYV">1.0</span></div>
+      <div class="slider-row"><label>スムージング</label><input type="range" id="smooth" min="0.05" max="0.9" step="0.05" value="0.25"><span id="smoothV">0.25</span></div>
+      <div class="slider-row"><label>ミラー反転</label><button id="flipToggle" class="toggle-btn">OFF</button></div>
+      <div class="slider-row"><label>回転量</label><input type="range" id="modelRotY" min="-180" max="180" step="1" value="0"><span id="modelRotYV">0</span>°</div>
+      <div class="slider-row"><label>テクスチャ上限</label><input type="range" id="texBudget" min="50" max="500" step="10" value="200"><span id="texBudgetV">200</span>MB</div>
+      <div class="slider-row"><label>口の開き最大値</label><input type="range" id="lipSyncMaxMouth" min="0.1" max="1.5" step="0.05" value="1"><span id="lipSyncMaxMouthV">1.00</span></div>
     </div>
-    <div class="slider-row"><label>移動補正</label><button id="moveFixToggle" class="toggle-btn">OFF</button></div>
-    <div class="slider-row"><label>├上下 強度</label><button id="moveSignUDToggle" class="sign-btn">+</button><input type="range" id="moveStrengthUD" min="0" max="2" step="0.05" value="1"><span id="moveStrengthUDV">1.00</span></div>
-    <div class="slider-row"><label>└前後 強度</label><button id="moveSignFBToggle" class="sign-btn">+</button><input type="range" id="moveStrengthFB" min="0" max="2" step="0.05" value="1"><span id="moveStrengthFBV">1.00</span></div>
-    <div style="font-size:9.5px; color:var(--text-dim); padding:0 2px 4px;">
-      ※加速度センサーが有効な状態で、端末を上下に動かすと「視線先高さ」を、前後に動かすと「視点距離」を
-      一時的に変化させます(手を止めると自動的に元へ戻ります)。向きが逆に感じる軸は、その行の+/−ボタンで反転してください。
+
+    <div id="settingsTabGyro" class="settings-tab-panel">
+      <div class="sub-toggle-row"><button id="btnGyro">🧭 ジャイロ有効化</button></div>
+      <div class="slider-row"><label>ジャイロ感度</label><input type="range" id="gsens" min="0" max="3" step="0.05" value="1"><span id="gsensV">1.0</span></div>
+      <div class="slider-row"><label>ジャイロ反転</label><button id="gflipToggle" class="toggle-btn">OFF</button></div>
+      <div class="slider-row"><label>直立補正</label><button id="uprightToggle" class="toggle-btn">OFF</button></div>
+      <div class="slider-row"><label>├左右 強度</label><button id="uprightSignLRToggle" class="sign-btn">+</button><input type="range" id="uprightStrengthLR" min="0" max="2" step="0.05" value="1"><span id="uprightStrengthLRV">1.00</span></div>
+      <div class="slider-row"><label>└前後 強度</label><button id="uprightSignFBToggle" class="sign-btn">+</button><input type="range" id="uprightStrengthFB" min="0" max="2" step="0.05" value="1"><span id="uprightStrengthFBV">1.00</span></div>
+      <div style="font-size:9.5px; color:var(--text-dim); padding:0 2px 4px;">
+        ※ジャイロセンサーが有効な状態で、端末を傾けてもキャラクターが現実世界に対して直立して見えるよう、
+        左右(ロール)・前後(ピッチ)の傾きを軸ごとに独立した強度で打ち消します(校正ボタンを押した時の姿勢を「まっすぐ」の基準にします)。
+        向きが逆に感じる軸は、その行の+/−ボタンで反転してください。
+      </div>
     </div>
-    <div class="slider-row"><label>回転量</label><input type="range" id="modelRotY" min="-180" max="180" step="1" value="0"><span id="modelRotYV">0</span>°</div>
-    <div style="border-top:1px solid var(--border); margin:6px 0 4px; padding-top:4px; color:var(--accent); font-size:10.5px;">— 本格off-axisモード用 —</div>
-    <div class="slider-row"><label>画面-モデル距離</label><input type="range" id="screenZ" min="0.1" max="1.5" step="0.05" value="0.4"><span id="screenZV">0.40</span></div>
-    <div class="slider-row"><label>目との距離(cm)</label><input type="range" id="eyeDistCm" min="15" max="80" step="1" value="40"><span id="eyeDistCmV">40</span></div>
-    <div class="slider-row"><label>左右cm換算</label><input type="range" id="cmRange" min="10" max="120" step="1" value="60"><span id="cmRangeV">60</span></div>
-    <div class="slider-row"><label>テクスチャ上限</label><input type="range" id="texBudget" min="50" max="500" step="10" value="200"><span id="texBudgetV">200</span>MB</div>
-    <div class="slider-row"><label>口の開き最大値</label><input type="range" id="lipSyncMaxMouth" min="0.1" max="1.5" step="0.05" value="1"><span id="lipSyncMaxMouthV">1.00</span></div>
-    <div style="border-top:1px solid var(--border); margin:6px 0 4px; padding-top:4px; color:var(--accent); font-size:10.5px;">— 🎙️ 会話(Gemini Live)の既定値 —</div>
-    <div class="slider-row"><label>会話 指示(既定)</label><input type="text" id="defaultRealtimeInstructions" class="text-input" placeholder="例: 明るく元気な口調で話してください"></div>
+
+    <div id="settingsTabAccel" class="settings-tab-panel">
+      <div class="sub-toggle-row"><button id="btnAccel">🎚️ 加速度センサー有効化</button></div>
+      <div class="slider-row"><label>移動補正</label><button id="moveFixToggle" class="toggle-btn">OFF</button></div>
+      <div class="slider-row"><label>├上下 強度</label><button id="moveSignUDToggle" class="sign-btn">+</button><input type="range" id="moveStrengthUD" min="0" max="2" step="0.05" value="1"><span id="moveStrengthUDV">1.00</span></div>
+      <div class="slider-row"><label>└前後 強度</label><button id="moveSignFBToggle" class="sign-btn">+</button><input type="range" id="moveStrengthFB" min="0" max="2" step="0.05" value="1"><span id="moveStrengthFBV">1.00</span></div>
+      <div style="font-size:9.5px; color:var(--text-dim); padding:0 2px 4px;">
+        ※加速度センサーが有効な状態で、端末を上下に動かすと「視線先高さ」を、前後に動かすと「視点距離」を
+        一時的に変化させます(手を止めると自動的に元へ戻ります)。向きが逆に感じる軸は、その行の+/−ボタンで反転してください。
+      </div>
+    </div>
+
+    <div id="settingsTabOffAxis" class="settings-tab-panel">
+      <div class="sub-toggle-row"><button id="btnOffAxis">🪟 本格off-axis</button></div>
+      <div class="slider-row"><label>画面-モデル距離</label><input type="range" id="screenZ" min="0.1" max="1.5" step="0.05" value="0.4"><span id="screenZV">0.40</span></div>
+      <div class="slider-row"><label>目との距離(cm)</label><input type="range" id="eyeDistCm" min="15" max="80" step="1" value="40"><span id="eyeDistCmV">40</span></div>
+      <div class="slider-row"><label>左右cm換算</label><input type="range" id="cmRange" min="10" max="120" step="1" value="60"><span id="cmRangeV">60</span></div>
+      <div class="sub-toggle-row" style="margin-top:6px;"><button id="btnCalibScreen">📏 画面校正</button></div>
+      <div style="font-size:9.5px; color:var(--text-dim); padding:6px 2px 4px;">
+        ※本格off-axisモードは、覗き窓のように画面越しにキャラクターが立体的に見える表示方式です。
+        「画面校正」で端末の実測サイズを測っておくと、距離感がより正確になります。
+      </div>
+    </div>
+
+    <div id="settingsTabTalk" class="settings-tab-panel">
+      <div class="slider-row"><label>会話 指示(既定)</label><input type="text" id="defaultRealtimeInstructions" class="text-input" placeholder="例: 明るく元気な口調で話してください"></div>
+      <div style="font-size:9.5px; color:var(--text-dim); padding:0 2px 4px;">
+        ※ここで設定した内容は、🎙️会話パネルを新しく開いた時の初期値として使われます。
+      </div>
+    </div>
   </div>
   <div id="log" class="hidden">
     <button class="panel-close-btn" id="btnCloseLog" aria-label="閉じる">×</button>
@@ -4060,6 +4096,16 @@ document.getElementById('btnSliders').addEventListener('click', () => {
 });
 document.getElementById('btnLog').addEventListener('click', () => {
   document.getElementById('log').classList.toggle('hidden');
+});
+
+// 設定パネル内のタブ切り替え(🔧一般 / 🧭ジャイロ / 🎚️加速度 / 🪟off-axis / 🎙️会話)
+document.querySelectorAll('.settings-tab-btn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.settings-tab-btn').forEach((b) => b.classList.remove('active'));
+    document.querySelectorAll('.settings-tab-panel').forEach((p) => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById(btn.dataset.tab).classList.add('active');
+  });
 });
 
 /* ---------------- 枠外タップで閉じる ---------------- */
