@@ -26,7 +26,7 @@ syuusei sakura jinnja.glb,餅丸よう,https://booth.pm/ja/items/3634581
 Dance Studio_black_haihuyou.glb,toumorocorn,https://booth.pm/ja/items/3835256,toumorocorn,https://booth.pm/ja/items/3835256
 Dance Studio_haihuyou.glb,toumorocorn,https://booth.pm/ja/items/3835256
 Dance Studio_haihuyou_plus mirror.glb,toumorocorn,https://booth.pm/ja/items/3835256
-cube-fuchi.glb,toumorocorn,https://booth.pm/ja/items/3835256
+#cube-fuchi.glb,toumorocorn,https://booth.pm/ja/items/3835256
 light_box.glb,toumorocorn,https://booth.pm/ja/items/3835256
 light_box_blue.glb,toumorocorn,https://booth.pm/ja/items/3835256
 light_box_nomal.glb,toumorocorn,https://booth.pm/ja/items/3835256
