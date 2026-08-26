@@ -360,6 +360,13 @@
     <div class="slider-row"><label>ミラー反転</label><button id="flipToggle" class="toggle-btn">OFF</button></div>
     <div class="slider-row"><label>ジャイロ感度</label><input type="range" id="gsens" min="0" max="3" step="0.05" value="1"><span id="gsensV">1.0</span></div>
     <div class="slider-row"><label>ジャイロ反転</label><button id="gflipToggle" class="toggle-btn">OFF</button></div>
+    <div class="slider-row"><label>直立補正</label><button id="uprightToggle" class="toggle-btn">OFF</button></div>
+    <div class="slider-row"><label>直立補正 強度</label><input type="range" id="uprightStrength" min="-2" max="2" step="0.05" value="1"><span id="uprightStrengthV">1.00</span></div>
+    <div style="font-size:9.5px; color:var(--text-dim); padding:0 2px 4px;">
+      ※ジャイロセンサーが有効な状態で、端末を傾けてもキャラクターが現実世界に対して直立して見えるよう、
+      前後・左右の傾きを自動で打ち消します(校正ボタンを押した時の姿勢を「まっすぐ」の基準にします)。
+      向きが逆に感じる場合は、強度をマイナス側にすると反転できます。
+    </div>
     <div class="slider-row"><label>回転量</label><input type="range" id="modelRotY" min="-180" max="180" step="1" value="0"><span id="modelRotYV">0</span>°</div>
     <div style="border-top:1px solid var(--border); margin:6px 0 4px; padding-top:4px; color:var(--accent); font-size:10.5px;">— 本格off-axisモード用 —</div>
     <div class="slider-row"><label>画面-モデル距離</label><input type="range" id="screenZ" min="0.1" max="1.5" step="0.05" value="0.4"><span id="screenZV">0.40</span></div>
@@ -3456,7 +3463,7 @@ let calib = { x:0, y:0, width:0.28 };
 
 const params = {
   sxy: 1.0, sz: 1.0, baseDist: 2.2, lookY: 1.0, smooth: 0.25, flip: 0,
-  gsens: 1.0, gflip: 0,
+  gsens: 1.0, gflip: 0, uprightFix: 0, uprightStrength: 1.0,
   offAxis: false, screenZ: 0.4, eyeDistCm: 40, cmRange: 60,
   texBudgetMB: 200, modelRotY: 0, lipSyncMaxMouth: 1.0
 };
@@ -3491,6 +3498,7 @@ const SLIDER_BINDINGS = [
   { id:'baseDist', key:'baseDist' }, { id:'lookY', key:'lookY' },
   { id:'smooth', key:'smooth' },
   { id:'gsens', key:'gsens' }, { id:'modelRotY', key:'modelRotY' },
+  { id:'uprightStrength', key:'uprightStrength' },
   { id:'screenZ', key:'screenZ' }, { id:'eyeDistCm', key:'eyeDistCm' },
   { id:'cmRange', key:'cmRange' }, { id:'texBudget', key:'texBudgetMB' },
   { id:'lipSyncMaxMouth', key:'lipSyncMaxMouth' }
@@ -3507,6 +3515,7 @@ function applyParamsToUI(){
   if(offAxisBtn) offAxisBtn.classList.toggle('on', params.offAxis);
   if(typeof applyFlipToggleUI === 'function') applyFlipToggleUI();
   if(typeof applyGflipToggleUI === 'function') applyGflipToggleUI();
+  if(typeof applyUprightToggleUI === 'function') applyUprightToggleUI();
 }
 
 /* ---------------- 画面サイズ校正(オンスクリーン) ---------------- */
@@ -3666,6 +3675,26 @@ function updateGyroSmoothing(){
   gyroSmoothed.gamma += (gyroRaw.gamma - gyroSmoothed.gamma) * a;
 }
 
+// 非VRモードでジャイロセンサーの値から端末の傾きを推定し、キャラクターの正中線(前後・左右)を
+// 逆方向に傾けることで、端末をどう傾けても現実世界に対して直立して見えるように補正する。
+// 校正ボタン(performCenterCalibration)を押した時の姿勢を「傾き0」の基準とする。
+// WebXRのVRセッション中はヘッドセット自身のトラッキングで姿勢が決まるため、ここでは何もしない。
+function updateUprightCorrection(){
+  if(!currentVRM) return;
+  if(renderer.xr.isPresenting) return; // VRモード中は対象外(ヘッドセットの実姿勢を使うため)
+  if(!params.uprightFix || !gyroEnabled || !gyroRaw.has){
+    currentVRM.scene.rotation.x = 0;
+    currentVRM.scene.rotation.z = 0;
+    return;
+  }
+  const gFlipSign = params.gflip ? -1 : 1;
+  const dGamma = (gyroSmoothed.gamma - gyroBaseline.gamma) * gFlipSign; // 校正基準からの左右傾きズレ(度)
+  const dBeta  = (gyroSmoothed.beta  - gyroBaseline.beta);              // 校正基準からの前後傾きズレ(度)
+  // 端末の傾きと逆方向にキャラクターを傾けて相殺する。向きが逆に感じる場合はuprightStrengthを負値にする。
+  currentVRM.scene.rotation.z = -THREE.MathUtils.degToRad(dGamma) * params.uprightStrength;
+  currentVRM.scene.rotation.x = -THREE.MathUtils.degToRad(dBeta)  * params.uprightStrength;
+}
+
 let detectFaceErrorLogged = false; // 毎フレーム同じエラーでログが埋まらないよう、初回のみ表示する
 
 function detectFace(){
@@ -3753,7 +3782,7 @@ function performCenterCalibration(){
   syncSliderUI('lookY', 1);
   syncSliderUI('modelRotY', 0);
   let msg = `中央校正しました (x:${calib.x.toFixed(2)} y:${calib.y.toFixed(2)} w:${calib.width.toFixed(2)}) / 視線先高さ・回転量をリセット`;
-  if(gyroEnabled && gyroRaw.has){
+  if((gyroEnabled || params.uprightFix) && gyroRaw.has){
     gyroBaseline = { beta: gyroSmoothed.beta, gamma: gyroSmoothed.gamma };
     msg += ` / ジャイロ基準(beta:${gyroBaseline.beta.toFixed(1)} gamma:${gyroBaseline.gamma.toFixed(1)})`;
   }
@@ -3860,6 +3889,13 @@ bindSlider('smooth','smooth', v=>v.toFixed(2));
 const applyFlipToggleUI = bindToggle('flipToggle','flip');
 bindSlider('gsens','gsens', v=>v.toFixed(2));
 const applyGflipToggleUI = bindToggle('gflipToggle','gflip');
+const applyUprightToggleUI = bindToggle('uprightToggle','uprightFix');
+document.getElementById('uprightToggle').addEventListener('click', () => {
+  if(params.uprightFix && !gyroEnabled){
+    log('直立補正を使うには「🧭 ジャイロ有効化」も併せてONにしてください', 'warn');
+  }
+});
+bindSlider('uprightStrength','uprightStrength', v=>v.toFixed(2));
 bindSlider('modelRotY','modelRotY', v=>v.toFixed(0));
 bindSlider('screenZ','screenZ', v=>v.toFixed(2));
 bindSlider('eyeDistCm','eyeDistCm', v=>v.toFixed(0));
@@ -4153,6 +4189,7 @@ function animate(){
   updateBlink(delta);
   updateSmoothing();
   updateGyroSmoothing();
+  updateUprightCorrection();
   updateCameraFromFace();
   drawMosaicPreview();
   renderer.render(scene, camera);
