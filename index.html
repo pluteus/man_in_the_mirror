@@ -3733,27 +3733,41 @@ function updateGyroSmoothing(){
   gyroSmoothed.gamma += (gyroRaw.gamma - gyroSmoothed.gamma) * a;
 }
 
-// 非VRモードでジャイロセンサーの値から端末の傾きを推定し、キャラクターの正中線(前後・左右)を
+// 非VRモードでジャイロセンサーの値から端末の傾きを推定し、キャラクター(と背景)の正中線(前後・左右)を
 // 逆方向に傾けることで、端末をどう傾けても現実世界に対して直立して見えるように補正する。
 // 校正ボタン(performCenterCalibration)を押した時の姿勢を「傾き0」の基準とする。
 // WebXRのVRセッション中はヘッドセット自身のトラッキングで姿勢が決まるため、ここでは何もしない。
+let uprightRotX = 0, uprightRotZ = 0; // 直立補正の回転量。キャラクターと背景の両方に同じ値を適用する。
+
 function updateUprightCorrection(){
-  if(!currentVRM) return;
-  if(renderer.xr.isPresenting) return; // VRモード中は対象外(ヘッドセットの実姿勢を使うため)
-  if(!params.uprightFix || !gyroEnabled || !gyroRaw.has){
-    currentVRM.scene.rotation.x = 0;
-    currentVRM.scene.rotation.z = 0;
-    return;
+  if(renderer.xr.isPresenting){
+    // VRモード中は対象外(ヘッドセットの実姿勢を使うため)
+    uprightRotX = 0; uprightRotZ = 0;
+  }else if(!params.uprightFix || !gyroEnabled || !gyroRaw.has){
+    uprightRotX = 0; uprightRotZ = 0;
+  }else{
+    const gFlipSign = params.gflip ? -1 : 1;
+    const dGamma = (gyroSmoothed.gamma - gyroBaseline.gamma) * gFlipSign; // 校正基準からの左右傾きズレ(度)
+    const dBeta  = (gyroSmoothed.beta  - gyroBaseline.beta);              // 校正基準からの前後傾きズレ(度)
+    // 端末の傾きと逆方向に傾けて相殺する。軸ごとに強度・符号を独立して指定できる。
+    // 向きが逆に感じる軸は、対応するuprightSignLR/uprightSignFBの±トグルで反転する。
+    const lrSign = params.uprightSignLR ? -1 : 1;
+    const fbSign = params.uprightSignFB ? -1 : 1;
+    uprightRotZ = -THREE.MathUtils.degToRad(dGamma) * params.uprightStrengthLR * lrSign;
+    uprightRotX = -THREE.MathUtils.degToRad(dBeta)  * params.uprightStrengthFB * fbSign;
   }
-  const gFlipSign = params.gflip ? -1 : 1;
-  const dGamma = (gyroSmoothed.gamma - gyroBaseline.gamma) * gFlipSign; // 校正基準からの左右傾きズレ(度)
-  const dBeta  = (gyroSmoothed.beta  - gyroBaseline.beta);              // 校正基準からの前後傾きズレ(度)
-  // 端末の傾きと逆方向にキャラクターを傾けて相殺する。軸ごとに強度・符号を独立して指定できる。
-  // 向きが逆に感じる軸は、対応するuprightSignLR/uprightSignFBの±トグルで反転する。
-  const lrSign = params.uprightSignLR ? -1 : 1;
-  const fbSign = params.uprightSignFB ? -1 : 1;
-  currentVRM.scene.rotation.z = -THREE.MathUtils.degToRad(dGamma) * params.uprightStrengthLR * lrSign;
-  currentVRM.scene.rotation.x = -THREE.MathUtils.degToRad(dBeta)  * params.uprightStrengthFB * fbSign;
+  if(currentVRM){
+    currentVRM.scene.rotation.x = uprightRotX;
+    currentVRM.scene.rotation.z = uprightRotZ;
+  }
+  // 背景にも同じ回転量を適用し、キャラクターと同じ「世界の傾き」を共有させる(「背景なし」の時はobjectがnull)
+  if(activeBackgroundIndex >= 0){
+    const activeBgEntry = backgroundClips[activeBackgroundIndex];
+    if(activeBgEntry && activeBgEntry.object){
+      activeBgEntry.object.rotation.x = uprightRotX;
+      activeBgEntry.object.rotation.z = uprightRotZ;
+    }
+  }
 }
 
 /* ---------------- 加速度センサー(端末の並進移動) ---------------- */
