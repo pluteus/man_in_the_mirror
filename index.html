@@ -82,6 +82,8 @@
   /* ランダムボタンが加わる分、キャラクター/背景パネルは現在ファイル名の幅を狭める */
   #characterListPanel .panel-current-file, #backgroundListPanel .panel-current-file{ right:196px; }
   .toggle-btn{ flex:1; }
+  /* スライダーと同じ行に置く、符号(+/−)反転専用の小さいトグルボタン */
+  .sign-btn{ flex:none; width:32px; padding:8px 0; text-align:center; }
 
   /* フルスクリーン中はUIとカメラ表示を隠す。タップで数秒だけ再表示 */
   body.fs-active #topbar,
@@ -219,6 +221,7 @@
   <button id="btnCameraPanel">📷 カメラ</button>
   <button id="btnCalib">🎯 中央校正</button>
   <button id="btnGyro">🧭 ジャイロ有効化</button>
+  <button id="btnAccel">🎚️ 加速度センサー有効化</button>
   <button id="btnCalibScreen">📏 画面校正</button>
   <button id="btnOffAxis">🪟 本格off-axis</button>
   <button id="btnSliders">⚙ 調整</button>
@@ -361,11 +364,19 @@
     <div class="slider-row"><label>ジャイロ感度</label><input type="range" id="gsens" min="0" max="3" step="0.05" value="1"><span id="gsensV">1.0</span></div>
     <div class="slider-row"><label>ジャイロ反転</label><button id="gflipToggle" class="toggle-btn">OFF</button></div>
     <div class="slider-row"><label>直立補正</label><button id="uprightToggle" class="toggle-btn">OFF</button></div>
-    <div class="slider-row"><label>直立補正 強度</label><input type="range" id="uprightStrength" min="-2" max="2" step="0.05" value="1"><span id="uprightStrengthV">1.00</span></div>
+    <div class="slider-row"><label>├左右 強度</label><button id="uprightSignLRToggle" class="sign-btn">+</button><input type="range" id="uprightStrengthLR" min="0" max="2" step="0.05" value="1"><span id="uprightStrengthLRV">1.00</span></div>
+    <div class="slider-row"><label>└前後 強度</label><button id="uprightSignFBToggle" class="sign-btn">+</button><input type="range" id="uprightStrengthFB" min="0" max="2" step="0.05" value="1"><span id="uprightStrengthFBV">1.00</span></div>
     <div style="font-size:9.5px; color:var(--text-dim); padding:0 2px 4px;">
       ※ジャイロセンサーが有効な状態で、端末を傾けてもキャラクターが現実世界に対して直立して見えるよう、
-      前後・左右の傾きを自動で打ち消します(校正ボタンを押した時の姿勢を「まっすぐ」の基準にします)。
-      向きが逆に感じる場合は、強度をマイナス側にすると反転できます。
+      左右(ロール)・前後(ピッチ)の傾きを軸ごとに独立した強度で打ち消します(校正ボタンを押した時の姿勢を「まっすぐ」の基準にします)。
+      向きが逆に感じる軸は、その行の+/−ボタンで反転してください。
+    </div>
+    <div class="slider-row"><label>移動補正</label><button id="moveFixToggle" class="toggle-btn">OFF</button></div>
+    <div class="slider-row"><label>├上下 強度</label><button id="moveSignUDToggle" class="sign-btn">+</button><input type="range" id="moveStrengthUD" min="0" max="2" step="0.05" value="1"><span id="moveStrengthUDV">1.00</span></div>
+    <div class="slider-row"><label>└前後 強度</label><button id="moveSignFBToggle" class="sign-btn">+</button><input type="range" id="moveStrengthFB" min="0" max="2" step="0.05" value="1"><span id="moveStrengthFBV">1.00</span></div>
+    <div style="font-size:9.5px; color:var(--text-dim); padding:0 2px 4px;">
+      ※加速度センサーが有効な状態で、端末を上下に動かすと「視線先高さ」を、前後に動かすと「視点距離」を
+      一時的に変化させます(手を止めると自動的に元へ戻ります)。向きが逆に感じる軸は、その行の+/−ボタンで反転してください。
     </div>
     <div class="slider-row"><label>回転量</label><input type="range" id="modelRotY" min="-180" max="180" step="1" value="0"><span id="modelRotYV">0</span>°</div>
     <div style="border-top:1px solid var(--border); margin:6px 0 4px; padding-top:4px; color:var(--accent); font-size:10.5px;">— 本格off-axisモード用 —</div>
@@ -3463,7 +3474,12 @@ let calib = { x:0, y:0, width:0.28 };
 
 const params = {
   sxy: 1.0, sz: 1.0, baseDist: 2.2, lookY: 1.0, smooth: 0.25, flip: 0,
-  gsens: 1.0, gflip: 0, uprightFix: 0, uprightStrength: 1.0,
+  gsens: 1.0, gflip: 0, uprightFix: 0,
+  uprightStrengthLR: 1.0, uprightSignLR: 0,
+  uprightStrengthFB: 1.0, uprightSignFB: 0,
+  moveFix: 0,
+  moveStrengthUD: 1.0, moveSignUD: 0,
+  moveStrengthFB: 1.0, moveSignFB: 0,
   offAxis: false, screenZ: 0.4, eyeDistCm: 40, cmRange: 60,
   texBudgetMB: 200, modelRotY: 0, lipSyncMaxMouth: 1.0
 };
@@ -3498,7 +3514,8 @@ const SLIDER_BINDINGS = [
   { id:'baseDist', key:'baseDist' }, { id:'lookY', key:'lookY' },
   { id:'smooth', key:'smooth' },
   { id:'gsens', key:'gsens' }, { id:'modelRotY', key:'modelRotY' },
-  { id:'uprightStrength', key:'uprightStrength' },
+  { id:'uprightStrengthLR', key:'uprightStrengthLR' }, { id:'uprightStrengthFB', key:'uprightStrengthFB' },
+  { id:'moveStrengthUD', key:'moveStrengthUD' }, { id:'moveStrengthFB', key:'moveStrengthFB' },
   { id:'screenZ', key:'screenZ' }, { id:'eyeDistCm', key:'eyeDistCm' },
   { id:'cmRange', key:'cmRange' }, { id:'texBudget', key:'texBudgetMB' },
   { id:'lipSyncMaxMouth', key:'lipSyncMaxMouth' }
@@ -3516,6 +3533,11 @@ function applyParamsToUI(){
   if(typeof applyFlipToggleUI === 'function') applyFlipToggleUI();
   if(typeof applyGflipToggleUI === 'function') applyGflipToggleUI();
   if(typeof applyUprightToggleUI === 'function') applyUprightToggleUI();
+  if(typeof applyUprightSignLRUI === 'function') applyUprightSignLRUI();
+  if(typeof applyUprightSignFBUI === 'function') applyUprightSignFBUI();
+  if(typeof applyMoveFixToggleUI === 'function') applyMoveFixToggleUI();
+  if(typeof applyMoveSignUDUI === 'function') applyMoveSignUDUI();
+  if(typeof applyMoveSignFBUI === 'function') applyMoveSignFBUI();
 }
 
 /* ---------------- 画面サイズ校正(オンスクリーン) ---------------- */
@@ -3690,9 +3712,96 @@ function updateUprightCorrection(){
   const gFlipSign = params.gflip ? -1 : 1;
   const dGamma = (gyroSmoothed.gamma - gyroBaseline.gamma) * gFlipSign; // 校正基準からの左右傾きズレ(度)
   const dBeta  = (gyroSmoothed.beta  - gyroBaseline.beta);              // 校正基準からの前後傾きズレ(度)
-  // 端末の傾きと逆方向にキャラクターを傾けて相殺する。向きが逆に感じる場合はuprightStrengthを負値にする。
-  currentVRM.scene.rotation.z = -THREE.MathUtils.degToRad(dGamma) * params.uprightStrength;
-  currentVRM.scene.rotation.x = -THREE.MathUtils.degToRad(dBeta)  * params.uprightStrength;
+  // 端末の傾きと逆方向にキャラクターを傾けて相殺する。軸ごとに強度・符号を独立して指定できる。
+  // 向きが逆に感じる軸は、対応するuprightSignLR/uprightSignFBの±トグルで反転する。
+  const lrSign = params.uprightSignLR ? -1 : 1;
+  const fbSign = params.uprightSignFB ? -1 : 1;
+  currentVRM.scene.rotation.z = -THREE.MathUtils.degToRad(dGamma) * params.uprightStrengthLR * lrSign;
+  currentVRM.scene.rotation.x = -THREE.MathUtils.degToRad(dBeta)  * params.uprightStrengthFB * fbSign;
+}
+
+/* ---------------- 加速度センサー(端末の並進移動) ---------------- */
+// devicemotionのaccelerationIncludingGravityを低域通過フィルタにかけて重力成分(≒端末の姿勢)を推定し、
+// 生値から差し引くことで並進方向の加速度(ハイパスフィルタ後の成分)だけを取り出す。
+// これを速度→位置へ積分して「動いた量」の目安にするが、加速度センサーだけでは誤差が蓄積して
+// 際限なくドリフトしてしまうため、速度・オフセットともに毎フレーム減衰させ、
+// 端末の動きが止まれば自然に基準値へ戻る「バネ」のような挙動にしている。
+let accelEnabled = false;
+const accelRaw = { x: 0, y: 0, z: 0, has: false };
+const accelGravity = { x: 0, y: 0, z: 0 };
+let moveVelUD = 0, moveVelFB = 0;       // 推定並進速度(毎フレーム減衰)
+let moveOffsetUD = 0, moveOffsetFB = 0; // 視線先高さ/視点距離に加算する一時オフセット
+
+function handleMotion(e){
+  const a = e.accelerationIncludingGravity;
+  if(!a || a.x === null || a.y === null || a.z === null) return;
+  accelRaw.x = a.x; accelRaw.y = a.y; accelRaw.z = a.z;
+  if(!accelRaw.has){
+    // 初回受信時に重力推定値もその場で初期化(起動時の飛びを防ぐ)
+    accelGravity.x = a.x; accelGravity.y = a.y; accelGravity.z = a.z;
+    accelRaw.has = true;
+  }
+}
+
+async function toggleAccel(){
+  const btn = document.getElementById('btnAccel');
+  if(accelEnabled){
+    window.removeEventListener('devicemotion', handleMotion);
+    accelEnabled = false;
+    moveVelUD = moveVelFB = moveOffsetUD = moveOffsetFB = 0;
+    btn.textContent = '🎚️ 加速度センサー有効化';
+    btn.classList.remove('on');
+    log('加速度センサートラッキング停止');
+    return;
+  }
+  if(typeof DeviceMotionEvent === 'undefined'){
+    log('この端末は加速度センサー(DeviceMotion)に対応していません', 'warn');
+    return;
+  }
+  if(typeof DeviceMotionEvent.requestPermission === 'function'){
+    // iOS: ユーザー操作の直後でないと許可ダイアログが出ないため、ボタン押下内で呼ぶ
+    try{
+      const perm = await DeviceMotionEvent.requestPermission();
+      if(perm !== 'granted'){
+        log('加速度センサーの利用が許可されませんでした', 'warn');
+        return;
+      }
+    }catch(err){
+      log(`加速度センサー許可の要求に失敗: ${err.message || err}`, 'err');
+      return;
+    }
+  }
+  window.addEventListener('devicemotion', handleMotion);
+  accelEnabled = true;
+  btn.textContent = '🎚️ 加速度センサー停止';
+  btn.classList.add('on');
+  log('加速度センサートラッキング開始', 'ok');
+}
+document.getElementById('btnAccel').addEventListener('click', toggleAccel);
+
+// 端末の上下・前後方向の並進移動を検知し、視線先高さ/視点距離に加える一時的なオフセットを更新する。
+// dt: 直前フレームからの経過秒数
+function updateMoveCorrection(dt){
+  if(!accelEnabled || !accelRaw.has || !params.moveFix){
+    // OFF/未有効時は残っているオフセットを滑らかに0へ戻す
+    moveVelUD *= 0.85; moveVelFB *= 0.85;
+    moveOffsetUD *= 0.85; moveOffsetFB *= 0.85;
+    return;
+  }
+  const gAlpha = 0.06; // 重力(低周波成分)推定の追従係数
+  accelGravity.x += (accelRaw.x - accelGravity.x) * gAlpha;
+  accelGravity.y += (accelRaw.y - accelGravity.y) * gAlpha;
+  accelGravity.z += (accelRaw.z - accelGravity.z) * gAlpha;
+  const linUD = accelRaw.y - accelGravity.y; // 上下方向の並進加速度(m/s^2)
+  const linFB = accelRaw.z - accelGravity.z; // 前後(画面に垂直)方向の並進加速度(m/s^2)
+
+  const velDamping  = 0.90; // 速度の減衰(蓄積誤差によるドリフトを防ぐ)
+  const offsetDecay = 0.94; // オフセットを基準値へ徐々に戻す(バネ的な復元)
+
+  moveVelUD = (moveVelUD + linUD * dt) * velDamping;
+  moveVelFB = (moveVelFB + linFB * dt) * velDamping;
+  moveOffsetUD = (moveOffsetUD + moveVelUD * dt) * offsetDecay;
+  moveOffsetFB = (moveOffsetFB + moveVelFB * dt) * offsetDecay;
 }
 
 let detectFaceErrorLogged = false; // 毎フレーム同じエラーでログが埋まらないよう、初回のみ表示する
@@ -3781,6 +3890,7 @@ function performCenterCalibration(){
   calib = { x: smoothed.x, y: smoothed.y, width: smoothed.width };
   syncSliderUI('lookY', 1);
   syncSliderUI('modelRotY', 0);
+  moveVelUD = moveVelFB = moveOffsetUD = moveOffsetFB = 0;
   let msg = `中央校正しました (x:${calib.x.toFixed(2)} y:${calib.y.toFixed(2)} w:${calib.width.toFixed(2)}) / 視線先高さ・回転量をリセット`;
   if((gyroEnabled || params.uprightFix) && gyroRaw.has){
     gyroBaseline = { beta: gyroSmoothed.beta, gamma: gyroSmoothed.gamma };
@@ -3791,11 +3901,11 @@ function performCenterCalibration(){
 document.getElementById('btnCalib').addEventListener('click', performCenterCalibration);
 
 /* ---------------- カメラ視点更新（覗き窓効果） ---------------- */
-function updateOffAxisFromHead(totalDx, totalDy, depthRatio){
+function updateOffAxisFromHead(totalDx, totalDy, depthRatio, lookYOffset, distOffset){
   // 校正済みの物理画面サイズ(cm→m)でスクリーン矩形をワールド座標に定義
   const Wm = (screenWidthCm/100)/2;
   const Hm = (screenHeightCm/100)/2;
-  const cy = params.lookY; // スクリーン中心の高さをモデルの視線先高さに合わせる
+  const cy = params.lookY + lookYOffset; // スクリーン中心の高さをモデルの視線先高さ(+移動補正分)に合わせる
   const pa = new THREE.Vector3(-Wm, cy - Hm, 0); // 左下
   const pb = new THREE.Vector3( Wm, cy - Hm, 0); // 右下
   const pc = new THREE.Vector3(-Wm, cy + Hm, 0); // 左上
@@ -3803,7 +3913,7 @@ function updateOffAxisFromHead(totalDx, totalDy, depthRatio){
   const rangeM = (params.cmRange/100) * params.sxy;
   const eyeX = totalDx * rangeM;
   const eyeY = cy + totalDy * rangeM * 0.85;
-  const eyeZ = (params.eyeDistCm/100) / Math.pow(Math.max(depthRatio, 0.3), params.sz);
+  const eyeZ = ((params.eyeDistCm/100) + distOffset) / Math.pow(Math.max(depthRatio, 0.3), params.sz);
   const pe = new THREE.Vector3(eyeX, eyeY, eyeZ);
 
   // モデルは画面(z=0)の奥側に置くことで「窓の中」の錯覚を作る
@@ -3832,8 +3942,14 @@ function updateCameraFromFace(){
     totalDy += -dBeta * gScaleNorm * 0.85;
   }
 
+  // 加速度センサーによる移動補正:上下移動→視線先高さ、前後移動→視点距離への一時オフセット
+  const udSign = params.moveSignUD ? -1 : 1;
+  const fbSign = params.moveSignFB ? -1 : 1;
+  const moveLookYOffset = moveOffsetUD * udSign * params.moveStrengthUD;
+  const moveDistOffset  = moveOffsetFB * fbSign * params.moveStrengthFB;
+
   if(params.offAxis){
-    updateOffAxisFromHead(totalDx, totalDy, depthRatio);
+    updateOffAxisFromHead(totalDx, totalDy, depthRatio, moveLookYOffset, moveDistOffset);
     document.querySelector('#camPreview .dot').style.left = `${(1-smoothed.x)*100}%`;
     document.querySelector('#camPreview .dot').style.top = `${smoothed.y*100}%`;
     return;
@@ -3843,12 +3959,13 @@ function updateCameraFromFace(){
   const range = 1.6 * params.sxy;
   const camX = totalDx * range;
   const camY = totalDy * range * 0.85;
-  const dist = params.baseDist / Math.pow(Math.max(depthRatio, 0.3), params.sz);
+  const dist = params.baseDist / Math.pow(Math.max(depthRatio, 0.3), params.sz) + moveDistOffset;
+  const lookY = params.lookY + moveLookYOffset;
 
   camera.position.x += (camX - camera.position.x) * 0.35;
-  camera.position.y += ((params.lookY + camY) - camera.position.y) * 0.35;
+  camera.position.y += ((lookY + camY) - camera.position.y) * 0.35;
   camera.position.z += (dist - camera.position.z) * 0.35;
-  camera.lookAt(0, params.lookY, 0);
+  camera.lookAt(0, lookY, 0);
 
   document.querySelector('#camPreview .dot').style.left = `${(1-smoothed.x)*100}%`;
   document.querySelector('#camPreview .dot').style.top = `${smoothed.y*100}%`;
@@ -3881,6 +3998,22 @@ function bindToggle(id, key){
   return apply;
 }
 
+// ±符号トグルボタン(0:+ / 1:−)。強度スライダーとは独立に、軸ごとの向きだけを反転させる。
+function bindSignToggle(id, key){
+  const btn = document.getElementById(id);
+  const apply = () => {
+    btn.classList.toggle('on', !!params[key]);
+    btn.textContent = params[key] ? '−' : '+';
+  };
+  btn.addEventListener('click', () => {
+    params[key] = params[key] ? 0 : 1;
+    apply();
+    saveParamsToStorage();
+  });
+  apply();
+  return apply;
+}
+
 bindSlider('sxy','sxy', v=>v.toFixed(2));
 bindSlider('sz','sz', v=>v.toFixed(2));
 bindSlider('baseDist','baseDist', v=>v.toFixed(1));
@@ -3895,7 +4028,20 @@ document.getElementById('uprightToggle').addEventListener('click', () => {
     log('直立補正を使うには「🧭 ジャイロ有効化」も併せてONにしてください', 'warn');
   }
 });
-bindSlider('uprightStrength','uprightStrength', v=>v.toFixed(2));
+const applyUprightSignLRUI = bindSignToggle('uprightSignLRToggle','uprightSignLR');
+bindSlider('uprightStrengthLR','uprightStrengthLR', v=>v.toFixed(2));
+const applyUprightSignFBUI = bindSignToggle('uprightSignFBToggle','uprightSignFB');
+bindSlider('uprightStrengthFB','uprightStrengthFB', v=>v.toFixed(2));
+const applyMoveFixToggleUI = bindToggle('moveFixToggle','moveFix');
+document.getElementById('moveFixToggle').addEventListener('click', () => {
+  if(params.moveFix && !accelEnabled){
+    log('移動補正を使うには「🎚️ 加速度センサー有効化」も併せてONにしてください', 'warn');
+  }
+});
+const applyMoveSignUDUI = bindSignToggle('moveSignUDToggle','moveSignUD');
+bindSlider('moveStrengthUD','moveStrengthUD', v=>v.toFixed(2));
+const applyMoveSignFBUI = bindSignToggle('moveSignFBToggle','moveSignFB');
+bindSlider('moveStrengthFB','moveStrengthFB', v=>v.toFixed(2));
 bindSlider('modelRotY','modelRotY', v=>v.toFixed(0));
 bindSlider('screenZ','screenZ', v=>v.toFixed(2));
 bindSlider('eyeDistCm','eyeDistCm', v=>v.toFixed(0));
@@ -4190,6 +4336,7 @@ function animate(){
   updateSmoothing();
   updateGyroSmoothing();
   updateUprightCorrection();
+  updateMoveCorrection(delta);
   updateCameraFromFace();
   drawMosaicPreview();
   renderer.render(scene, camera);
