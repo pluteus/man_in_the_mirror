@@ -19,7 +19,7 @@
 
   /* モデル表示エリアを最大限確保するため、右上の2要素は小さく半透明なオーバーレイにする。
      右上端から順に「フルスクリーン」「❔ヘルプ」「インカメラプレビュー」を並べる。 */
-  #camPreview{ position:fixed; top:calc(env(safe-area-inset-top,0px) + 8px); right:100px;
+  #camPreview{ position:fixed; top:calc(env(safe-area-inset-top,0px) + 8px); right:146px;
     width:70px; height:52px; border-radius:8px; overflow:hidden; border:1px solid var(--border);
     background:#000; z-index:20; opacity:.55; transition:opacity .3s; }
   #camPreview:active{ opacity:.9; }
@@ -34,8 +34,15 @@
     font-size:16px; opacity:.55; transition:opacity .3s; }
   #btnFullscreen:active{ opacity:.9; }
 
-  /* ❔ヘルプボタン(about.htmlを開く)。右上端のフルスクリーンボタンのすぐ左に配置 */
-  #btnHelp{ position:fixed; top:calc(env(safe-area-inset-top,0px) + 8px); right:54px;
+  /* 🥽 VRボタン(WebXR対応端末のみ表示)。フルスクリーンボタンのすぐ左に配置 */
+  #btnVR{ position:fixed; top:calc(env(safe-area-inset-top,0px) + 8px); right:54px;
+    z-index:21; width:40px; height:40px; padding:0; display:none; align-items:center; justify-content:center;
+    font-size:16px; opacity:.55; transition:opacity .3s; }
+  #btnVR:active{ opacity:.9; }
+  #btnVR.on{ opacity:.9; }
+
+  /* ❔ヘルプボタン(about.htmlを開く)。VRボタンのさらに左に配置 */
+  #btnHelp{ position:fixed; top:calc(env(safe-area-inset-top,0px) + 8px); right:100px;
     z-index:21; width:40px; height:40px; padding:0; display:flex; align-items:center; justify-content:center;
     font-size:16px; opacity:.55; transition:opacity .3s; }
   #btnHelp:active{ opacity:.9; }
@@ -84,6 +91,7 @@
   body.fs-active #bgmListPanel,
   body.fs-active #backgroundListPanel,
   body.fs-active #btnFullscreen,
+  body.fs-active #btnVR,
   body.fs-active #btnHelp,
   body.fs-active #camPreview{ opacity:0; pointer-events:none; transition:opacity .3s; }
   body.fs-active.show-controls #topbar,
@@ -93,6 +101,7 @@
   body.fs-active.show-controls #bgmListPanel,
   body.fs-active.show-controls #backgroundListPanel,
   body.fs-active.show-controls #btnFullscreen,
+  body.fs-active.show-controls #btnVR,
   body.fs-active.show-controls #btnHelp{ opacity:1; pointer-events:auto; }
   /* カメラ表示はプライバシー配慮のためフルスクリーン中は常に非表示のまま */
   body.fs-active.show-controls #camPreview{ opacity:0; pointer-events:none; }
@@ -193,6 +202,7 @@
 <div id="camPreview"><video id="cam" playsinline muted></video><canvas id="camMosaic"></canvas><div class="dot"></div></div>
 
 <button id="btnHelp" title="ヘルプ">❔</button>
+<button id="btnVR" title="VR表示(Meta Questなど)">🥽</button>
 <button id="btnFullscreen" title="フルスクリーン">⛶</button>
 
 <div id="topbar">
@@ -527,6 +537,7 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputEncoding = THREE.sRGBEncoding;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.xr.enabled = true; // Meta Quest等でのWebXR立体視表示用
 container.appendChild(renderer.domElement);
 
 scene.add(new THREE.HemisphereLight(0xffffff, 0x444455, 1.1));
@@ -563,6 +574,46 @@ window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+/* ---------------- 🥽 WebXR(Meta Quest等でのVR立体視表示) ----------------
+   navigator.xrが存在し、かつ'immersive-vr'セッションに対応している端末でのみボタンを表示する。
+   (iPad Safari等、WebXR非対応環境では自動的に非表示のままになる)
+   VRセッション中はrenderer.xrが左右目のステレオ描画・頭部トラッキングを自動的に行うため、
+   カメラや描画コード自体を書き換える必要はない。
+   ボタンをもう一度押す(またはヘッドセット側のシステム操作)でセッションを終了し、通常表示に戻る。
+------------------------------------------------------------------ */
+const btnVR = document.getElementById('btnVR');
+let xrSession = null;
+
+async function checkVrSupport(){
+  if(!navigator.xr){ return; } // display:noneのままにしておく(WebXR自体非対応)
+  try{
+    const supported = await navigator.xr.isSessionSupported('immersive-vr');
+    if(supported) btnVR.style.display = 'flex';
+  }catch(e){ /* 判定に失敗した場合もボタンは出さない */ }
+}
+checkVrSupport();
+
+async function enterVR(){
+  try{
+    const session = await navigator.xr.requestSession('immersive-vr', {
+      optionalFeatures: ['local-floor', 'bounded-floor']
+    });
+    xrSession = session;
+    await renderer.xr.setSession(session);
+    btnVR.classList.add('on');
+    session.addEventListener('end', () => {
+      xrSession = null;
+      btnVR.classList.remove('on');
+    });
+  }catch(e){
+    log(`VR表示の開始に失敗しました: ${e.message || e}`, 'err');
+  }
+}
+
+btnVR.addEventListener('click', () => {
+  if(xrSession){ xrSession.end(); } else { enterVR(); }
 });
 
 /* ---------------- VRM / VRMA 読み込み ---------------- */
@@ -4076,9 +4127,11 @@ function endGesturePointer(e){
 gestureEl.addEventListener('pointerup', endGesturePointer);
 gestureEl.addEventListener('pointercancel', endGesturePointer);
 
-/* ---------------- メインループ ---------------- */
+/* ---------------- メインループ ----------------
+   requestAnimationFrameではなくrenderer.setAnimationLoop()を使う。
+   通常時はrequestAnimationFrameと同じように動作しつつ、WebXRセッション中は
+   ヘッドセットのリフレッシュレートに同期して呼ばれるようになり、立体視描画に必要。 */
 function animate(){
-  requestAnimationFrame(animate);
   const delta = clock.getDelta();
   if(mixer) mixer.update(delta);
   if(currentVRM){
@@ -4104,7 +4157,7 @@ function animate(){
   drawMosaicPreview();
   renderer.render(scene, camera);
 }
-animate();
+renderer.setAnimationLoop(animate);
 
 log('起動しました。VRMを選択してカメラを開始してください。');
 </script>
