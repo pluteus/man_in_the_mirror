@@ -624,6 +624,15 @@ grid.position.y = 0;
 grid.visible = false; // 床グリッドは非表示(必要ならtrueに戻せば復活可)
 scene.add(grid);
 
+// ジャイロ直立補正用のグループ。キャラクターと背景の両方をこの下に入れ、
+// 傾き補正の回転(X/Z)はこのグループにだけ適用する。
+// (キャラクターと背景はそれぞれ別のY軸向き(正面の向き)を持っており、
+//  もし各オブジェクト自身のrotation.x/zに直接補正を入れると、
+//  オイラー角の合成順序の都合でY軸の向きの差がX/Z補正の符号に干渉し、
+//  片方だけ傾く向きが逆転してしまう。共通の親に補正を集約することでこれを避ける)
+const uprightGroup = new THREE.Group();
+scene.add(uprightGroup);
+
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
@@ -1238,7 +1247,7 @@ function ensureCharacterLoaded(entry){
 // エントリのVRMをシーンから外してdisposeし、メモリを解放する(ファイル名リストへの登録自体は維持)
 function releaseCharacter(entry){
   if(!entry || !entry.object) return;
-  scene.remove(entry.object.scene);
+  uprightGroup.remove(entry.object.scene);
   disposeObject3D(entry.object.scene);
   entry.object = null;
 }
@@ -1267,7 +1276,7 @@ async function setActiveCharacter(idx){
   if(prevEntry && prevEntry !== nextEntry) releaseCharacter(prevEntry);
 
   currentVRM = vrm;
-  if(!vrm.scene.parent) scene.add(vrm.scene); // 初回読込時はまだシーンに未追加のため
+  if(!vrm.scene.parent) uprightGroup.add(vrm.scene); // 初回読込時はまだシーンに未追加のため(直立補正グループの下に追加)
   vrm.scene.traverse((obj) => { if(obj.isMesh) obj.castShadow = true; }); // 地面に影を落とす
   if(vrm.lookAt) vrm.lookAt.target = camera; // 視線を常にカメラ(視聴者側)に向ける
   baseModelRotY = vrm.scene.rotation.y; // ユーザーの回転量スライダーはこの基準角に加算する
@@ -1748,7 +1757,7 @@ function ensureBackgroundLoaded(entry){
     .then((object) => {
       entry.object = object;
       object.visible = false;
-      scene.add(object);
+      uprightGroup.add(object); // 直立補正グループの下に追加(キャラクターと同じ親)
       entry.loadPromise = null;
       updateBackgroundListUI();
       return object;
@@ -1764,7 +1773,7 @@ function ensureBackgroundLoaded(entry){
 // エントリのGLBをシーンから外してdisposeし、メモリを解放する(ファイル名リストへの登録自体は維持)
 function releaseBackground(entry){
   if(!entry || !entry.object) return;
-  scene.remove(entry.object);
+  uprightGroup.remove(entry.object);
   disposeObject3D(entry.object);
   entry.object = null;
 }
@@ -3756,18 +3765,17 @@ function updateUprightCorrection(){
     uprightRotZ = -THREE.MathUtils.degToRad(dGamma) * params.uprightStrengthLR * lrSign;
     uprightRotX = -THREE.MathUtils.degToRad(dBeta)  * params.uprightStrengthFB * fbSign;
   }
-  if(currentVRM){
-    currentVRM.scene.rotation.x = uprightRotX;
-    currentVRM.scene.rotation.z = uprightRotZ;
-  }
-  // 背景にも同じ回転量を適用し、キャラクターと同じ「世界の傾き」を共有させる(「背景なし」の時はobjectがnull)
-  if(activeBackgroundIndex >= 0){
-    const activeBgEntry = backgroundClips[activeBackgroundIndex];
-    if(activeBgEntry && activeBgEntry.object){
-      activeBgEntry.object.rotation.x = uprightRotX;
-      activeBgEntry.object.rotation.z = uprightRotZ;
-    }
-  }
+  // キャラクターと背景を両方まとめて格納しているuprightGroup自体を傾けることで、
+  // 「世界の傾き」を共有させる。
+  // (以前は各オブジェクト自身のrotation.x/zに直接この値を入れていたが、
+  //  キャラクターと背景はそれぞれ別のY軸向き(正面の向き。例えばキャラクターは
+  //  baseModelRotYが約180°入っているのに対し背景は0°)を持っているため、
+  //  オイラー角XYZの合成順序の都合でY軸の向きがX/Z補正の符号に干渉し、
+  //  背景だけ傾く向きが逆転してしまっていた。共通の親グループにだけ
+  //  補正を掛け、キャラクター・背景それぞれの正面向き(rotation.y)は
+  //  子オブジェクト側でそのまま独立に保持することでこれを避ける)
+  uprightGroup.rotation.x = uprightRotX;
+  uprightGroup.rotation.z = uprightRotZ;
 }
 
 /* ---------------- 加速度センサー(端末の並進移動) ---------------- */
