@@ -158,6 +158,12 @@
   .settings-tab-panel.active{ display:block; }
   .settings-tab-panel .sub-toggle-row{ display:flex; justify-content:center; margin:0 0 8px; }
   .settings-tab-panel .sub-toggle-row button{ flex:1; max-width:220px; }
+  /* #realtimePanel(会話)内のタブ切り替え。一般/送信内容/YouTube連携の3タブ */
+  .realtime-tabs{ display:flex; flex-wrap:wrap; gap:4px; margin:0 0 10px; }
+  .realtime-tabs button{ flex:1 1 auto; min-width:70px; padding:7px 3px; font-size:10px; border-radius:8px; opacity:.55; white-space:nowrap; }
+  .realtime-tabs button.active{ opacity:1; border-color:var(--accent); color:var(--accent); background:#1c2531; }
+  .realtime-tab-panel{ display:none; }
+  .realtime-tab-panel.active{ display:block; }
   .motion-controls{ display:flex; gap:6px; flex-wrap:wrap; padding:8px 8px 6px; border-bottom:1px solid var(--border); }
   .motion-controls button{ flex:1; min-width:0; padding:7px 4px; font-size:11px; }
   .motion-progress-row{ padding:6px 10px 8px; border-bottom:1px solid var(--border); }
@@ -430,60 +436,78 @@
   </div>
   <div id="realtimePanel" class="hidden">
     <button class="panel-close-btn" id="btnCloseRealtime" aria-label="閉じる">×</button>
-    <div class="slider-row">
-      <label>Gemini APIキー</label>
-      <input type="password" id="realtimeApiKey" class="text-input" placeholder="AIzaSy... (ご自身のキー)" autocomplete="off">
-    </div>
-    <div style="font-size:9.5px; color:var(--text-dim); padding:0 2px 4px;">
-      ※ このキーはあなたの端末のブラウザ内(localStorage)にのみ保存され、Gemini(Google)への通信以外には送信されません。
-      共有・公共PCでは使用後に消去してください。キー未取得の場合は
-      <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" style="color:var(--accent);">Google AI Studio</a>
-      で無料発行できます。
-    </div>
-    <div class="slider-row">
-      <label>指示(任意)</label>
-      <input type="text" id="realtimeInstructions" class="text-input" placeholder="例: 明るく元気な口調で話してください">
-    </div>
-    <div class="motion-controls" style="border-bottom:none; padding-left:0; padding-right:0;">
-      <button id="btnRealtimeConnect">🎙️ 接続</button>
-      <button id="btnRealtimeMute">🔇 ミュート</button>
-      <button id="btnAutoGesture" class="on">🎭 自動ジェスチャー:ON</button>
-      <button id="btnSendVideoIn">🤳 インカメラ映像:OFF</button>
-      <button id="btnSendVideoOut">📷 アウトカメラ映像:OFF</button>
-      <button id="btnSendVideoScreen">🖥️ スクリーン映像:OFF</button>
-      <button id="btnLocation">📍 位置情報:OFF</button>
-      <button id="btnRealtimeClearKey">🗑️ キー消去</button>
-    </div>
-    <div id="realtimeStatus">未接続</div>
-    <div id="realtimeTranscript"></div>
-    <div class="slider-row" style="margin-top:6px;">
-      <button id="btnRealtimeAttach" title="ファイルを添付してGemini Liveに送る">＋</button>
-      <input type="file" id="realtimeAttachFile" accept="image/*,.pdf,.txt,.md,.csv,.json" style="display:none">
-      <input type="text" id="realtimeTextInput" class="text-input" placeholder="文字でGemini Liveに指示・メッセージを送る" autocomplete="off">
-      <button id="btnRealtimeSendText">📨 送信</button>
-    </div>
-    <div id="realtimeAttachName" style="font-size:11px; color:var(--text-dim); padding:2px 2px 0; display:none;"></div>
 
-    <div style="border-top:1px solid var(--border); margin:8px 0 4px; padding-top:6px; color:var(--accent); font-size:10.5px;">— 📺 YouTubeライブチャット連携 —</div>
-    <div class="slider-row">
-      <label>YouTube APIキー</label>
-      <input type="password" id="ytApiKey" class="text-input" placeholder="AIzaSy... (YouTube Data API v3)" autocomplete="off">
+    <div class="realtime-tabs">
+      <button class="realtime-tab-btn active" data-tab="realtimeTabGeneral">🔧 一般</button>
+      <button class="realtime-tab-btn" data-tab="realtimeTabSend">📡 送信内容</button>
+      <button class="realtime-tab-btn" data-tab="realtimeTabYoutube">📺 YouTube連携</button>
     </div>
-    <div style="font-size:9.5px; color:var(--text-dim); padding:0 2px 4px;">
-      ※ Google Cloud Consoleで「YouTube Data API v3」を有効にして発行したキーを使用してください。
-      このキーもこの端末のブラウザ内(localStorage)にのみ保存されます。OBSでの配信映像そのものは扱わず、
-      YouTube側のAPIから直接コメントを取得します。
+
+    <div id="realtimeTabGeneral" class="realtime-tab-panel active">
+      <div class="slider-row">
+        <label>Gemini APIキー</label>
+        <input type="password" id="realtimeApiKey" class="text-input" placeholder="AIzaSy... (ご自身のキー)" autocomplete="off">
+      </div>
+      <div style="font-size:9.5px; color:var(--text-dim); padding:0 2px 4px;">
+        ※ このキーはあなたの端末のブラウザ内(localStorage)にのみ保存され、Gemini(Google)への通信以外には送信されません。
+        共有・公共PCでは使用後に消去してください。キー未取得の場合は
+        <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" style="color:var(--accent);">Google AI Studio</a>
+        で無料発行できます。
+      </div>
+      <div class="slider-row">
+        <label>指示(任意)</label>
+        <input type="text" id="realtimeInstructions" class="text-input" placeholder="例: 明るく元気な口調で話してください">
+      </div>
+      <div class="motion-controls" style="border-bottom:none; padding-left:0; padding-right:0;">
+        <button id="btnRealtimeConnect">🎙️ 接続</button>
+        <button id="btnRealtimeMute">🔇 ミュート</button>
+        <button id="btnAutoGesture" class="on">🎭 自動ジェスチャー:ON</button>
+        <button id="btnRealtimeClearKey">🗑️ キー消去</button>
+      </div>
+      <div id="realtimeStatus">未接続</div>
+      <div id="realtimeTranscript"></div>
+      <div class="slider-row" style="margin-top:6px;">
+        <button id="btnRealtimeAttach" title="ファイルを添付してGemini Liveに送る">＋</button>
+        <input type="file" id="realtimeAttachFile" accept="image/*,.pdf,.txt,.md,.csv,.json" style="display:none">
+        <input type="text" id="realtimeTextInput" class="text-input" placeholder="文字でGemini Liveに指示・メッセージを送る" autocomplete="off">
+        <button id="btnRealtimeSendText">📨 送信</button>
+      </div>
+      <div id="realtimeAttachName" style="font-size:11px; color:var(--text-dim); padding:2px 2px 0; display:none;"></div>
     </div>
-    <div class="slider-row">
-      <label>動画ID / URL</label>
-      <input type="text" id="ytVideoId" class="text-input" placeholder="配信中の動画ID、またはYouTube URLをそのまま貼り付け" autocomplete="off">
+
+    <div id="realtimeTabSend" class="realtime-tab-panel">
+      <div style="font-size:9.5px; color:var(--text-dim); padding:0 2px 6px;">
+        ※Gemini Liveへリアルタイムに送信する映像・情報のON/OFFです。会話の「接続」自体とは独立して切り替えられます。
+      </div>
+      <div class="motion-controls" style="border-bottom:none; padding-left:0; padding-right:0;">
+        <button id="btnSendVideoIn">🤳 インカメラ映像:OFF</button>
+        <button id="btnSendVideoOut">📷 アウトカメラ映像:OFF</button>
+        <button id="btnSendVideoScreen">🖥️ スクリーン映像:OFF</button>
+        <button id="btnLocation">📍 位置情報:OFF</button>
+      </div>
     </div>
-    <div class="motion-controls" style="border-bottom:none; padding-left:0; padding-right:0;">
-      <button id="btnYtChatConnect">📺 チャット取得開始</button>
-      <button id="btnYtChatAutoSend" class="on">📨 Geminiへ自動転送:ON</button>
+
+    <div id="realtimeTabYoutube" class="realtime-tab-panel">
+      <div class="slider-row">
+        <label>YouTube APIキー</label>
+        <input type="password" id="ytApiKey" class="text-input" placeholder="AIzaSy... (YouTube Data API v3)" autocomplete="off">
+      </div>
+      <div style="font-size:9.5px; color:var(--text-dim); padding:0 2px 4px;">
+        ※ Google Cloud Consoleで「YouTube Data API v3」を有効にして発行したキーを使用してください。
+        このキーもこの端末のブラウザ内(localStorage)にのみ保存されます。OBSでの配信映像そのものは扱わず、
+        YouTube側のAPIから直接コメントを取得します。
+      </div>
+      <div class="slider-row">
+        <label>動画ID / URL</label>
+        <input type="text" id="ytVideoId" class="text-input" placeholder="配信中の動画ID、またはYouTube URLをそのまま貼り付け" autocomplete="off">
+      </div>
+      <div class="motion-controls" style="border-bottom:none; padding-left:0; padding-right:0;">
+        <button id="btnYtChatConnect">📺 チャット取得開始</button>
+        <button id="btnYtChatAutoSend" class="on">📨 Geminiへ自動転送:ON</button>
+      </div>
+      <div id="ytChatStatus" style="padding:6px 2px 2px; font-size:11px; color:var(--text-dim);">未接続</div>
+      <div id="ytChatLog" style="max-height:100px; overflow-y:auto; padding:4px 2px 2px; font-size:11px; border-top:1px dashed var(--border);"></div>
     </div>
-    <div id="ytChatStatus" style="padding:6px 2px 2px; font-size:11px; color:var(--text-dim);">未接続</div>
-    <div id="ytChatLog" style="max-height:100px; overflow-y:auto; padding:4px 2px 2px; font-size:11px; border-top:1px dashed var(--border);"></div>
   </div>
 </div>
 
@@ -661,14 +685,18 @@ checkVrSupport();
 async function enterVR(){
   try{
     const session = await navigator.xr.requestSession('immersive-vr', {
-      optionalFeatures: ['local-floor', 'bounded-floor']
+      optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking']
     });
     xrSession = session;
     await renderer.xr.setSession(session);
     btnVR.classList.add('on');
+    ensureVrPanelMesh();
+    captureUiToTexture();
+    vrPanelNeedsPlacement = true; // 最初のXRフレームで、その時点の頭の向きを基準にパネルを目の前へ配置する
     session.addEventListener('end', () => {
       xrSession = null;
       btnVR.classList.remove('on');
+      vrUiPanelGroup.visible = false;
     });
   }catch(e){
     log(`VR表示の開始に失敗しました: ${e.message || e}`, 'err');
@@ -678,6 +706,256 @@ async function enterVR(){
 btnVR.addEventListener('click', () => {
   if(xrSession){ xrSession.end(); } else { enterVR(); }
 });
+
+/* ---------------- 🥽 VR空間内フローティングUI ----------------
+   通常時に画面へ重ねて表示している既存のボタン・パネル群(#topbar、各種リストパネル、設定パネル等)は、
+   イマーシブVRセッション中はヘッドセット側には描画されない(WebXRはWebGL描画内容しかヘッドセットに
+   映さないため)。またマウス/タッチのイベント自体もイマーシブ中はブラウザから発火しなくなる。
+   そこで、それらのDOM UIをまとめて1枚のテクスチャとして定期的に撮影し、VR空間内にフローティングパネルとして
+   描画する。操作はコントローラーのレイ(Meta Questのハンドトラッキングによるピンチ操作も同じ
+   selectstart/selectendイベントとして扱われるため、そのまま使える)によるポインティング+
+   トリガー(select)で行い、当たった座標の実DOM要素に対して実際のクリック/スライダー操作を発行する。
+------------------------------------------------------------------ */
+
+// トップバーや各種パネルなど、既存の全UI要素をまとめるラッパー。
+// (#canvas-containerと裏側専用の#outCamBgは対象外。要素をappendChildで移動するだけなので、
+//  既存のイベントリスナーやposition:fixedの見た目は変わらない)
+const vrUiMirrorRoot = document.createElement('div');
+vrUiMirrorRoot.id = 'vrUiMirrorRoot';
+{
+  const excluded = new Set(['canvas-container', 'outCamBg']);
+  Array.from(document.body.children).forEach((el) => {
+    if(excluded.has(el.id)) return;
+    vrUiMirrorRoot.appendChild(el);
+  });
+  document.body.appendChild(vrUiMirrorRoot);
+}
+
+// ページの<style>内容(CSS変数含む)をそのままSVGへ埋め込むための取得
+const vrUiStyleText = Array.from(document.querySelectorAll('style')).map(s => s.textContent).join('\n');
+
+const VR_UI_TEX_W = 1600, VR_UI_TEX_H = 1600; // 実際のビューポート比率に合わせて中央にfitさせて使う
+let vrUiCanvas = null, vrUiCtx = null, vrUiTexture = null, vrUiLastDrawRect = null;
+
+function ensureVrUiCanvas(){
+  if(vrUiCanvas) return;
+  vrUiCanvas = document.createElement('canvas');
+  vrUiCanvas.width = VR_UI_TEX_W;
+  vrUiCanvas.height = VR_UI_TEX_H;
+  vrUiCtx = vrUiCanvas.getContext('2d');
+  vrUiTexture = new THREE.CanvasTexture(vrUiCanvas);
+  if('colorSpace' in vrUiTexture) vrUiTexture.colorSpace = THREE.SRGBColorSpace;
+}
+
+// DOM(vrUiMirrorRoot)を1枚のcanvasに焼き付ける(SVGのforeignObjectを経由してImageとして読み込む手法)。
+// input[type=range]の見た目など一部のフォームコントロールは環境によって完全には再現されないことがあるが、
+// 主要なボタン・パネルの見た目とテキストはそのまま表示できる。
+let vrUiCaptureBusy = false;
+async function captureUiToTexture(){
+  if(vrUiCaptureBusy) return;
+  vrUiCaptureBusy = true;
+  let url = null;
+  try{
+    ensureVrUiCanvas();
+    const w = window.innerWidth, h = window.innerHeight;
+    const clone = vrUiMirrorRoot.cloneNode(true);
+    // input/textarea/selectの現在値はcloneNodeでは反映されないため明示的にコピーする
+    const origInputs = vrUiMirrorRoot.querySelectorAll('input, textarea, select');
+    const cloneInputs = clone.querySelectorAll('input, textarea, select');
+    origInputs.forEach((origEl, i) => {
+      const cEl = cloneInputs[i];
+      if(!cEl) return;
+      if(origEl.type === 'checkbox' || origEl.type === 'radio') cEl.checked = origEl.checked;
+      else cEl.value = origEl.value;
+    });
+    const svgMarkup = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">`
+      + `<foreignObject width="100%" height="100%">`
+      + `<div xmlns="http://www.w3.org/1999/xhtml" style="width:${w}px;height:${h}px;">`
+      + `<style>${vrUiStyleText}</style>${clone.outerHTML}`
+      + `</div></foreignObject></svg>`;
+    const svgBlob = new Blob([svgMarkup], { type: 'image/svg+xml;charset=utf-8' });
+    url = URL.createObjectURL(svgBlob);
+    const img = await new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => resolve(image);
+      image.onerror = reject;
+      image.src = url;
+    });
+    vrUiCtx.fillStyle = '#0a0e14';
+    vrUiCtx.fillRect(0, 0, VR_UI_TEX_W, VR_UI_TEX_H);
+    const scale = Math.min(VR_UI_TEX_W / w, VR_UI_TEX_H / h);
+    const dw = w * scale, dh = h * scale;
+    const dx = (VR_UI_TEX_W - dw) / 2, dy = (VR_UI_TEX_H - dh) / 2;
+    vrUiCtx.drawImage(img, dx, dy, dw, dh);
+    vrUiTexture.needsUpdate = true;
+    vrUiLastDrawRect = { x: dx, y: dy, w: dw, h: dh, pageW: w, pageH: h };
+  }catch(err){
+    log(`VR UIの描画に失敗しました: ${err.message || err}`, 'warn');
+  }finally{
+    if(url) URL.revokeObjectURL(url);
+    vrUiCaptureBusy = false;
+  }
+}
+
+// --- VR空間内のフローティングパネル(既存UIをそのまま貼り付けた板) ---
+const vrUiPanelGroup = new THREE.Group();
+vrUiPanelGroup.visible = false;
+scene.add(vrUiPanelGroup);
+
+const VR_PANEL_WIDTH = 1.4; // メートル
+let vrPanelMesh = null;
+function ensureVrPanelMesh(){
+  if(vrPanelMesh) return;
+  ensureVrUiCanvas();
+  const aspect = window.innerHeight / window.innerWidth;
+  const geo = new THREE.PlaneGeometry(VR_PANEL_WIDTH, VR_PANEL_WIDTH * aspect);
+  const mat = new THREE.MeshBasicMaterial({ map: vrUiTexture, transparent: true, side: THREE.DoubleSide, depthTest: false });
+  vrPanelMesh = new THREE.Mesh(geo, mat);
+  vrPanelMesh.renderOrder = 999;
+  vrUiPanelGroup.add(vrPanelMesh);
+}
+
+// パネルを現在の頭の向き(水平方向のみ)の正面・目の前に配置し直す
+function recenterVrPanel(){
+  ensureVrPanelMesh();
+  const camPos = new THREE.Vector3();
+  const camDir = new THREE.Vector3();
+  camera.getWorldPosition(camPos);
+  camera.getWorldDirection(camDir);
+  camDir.y = 0; // 見上げ/見下ろしで角度が付き過ぎるのを防ぐため、水平方向だけを向かせる
+  if(camDir.lengthSq() < 1e-6) camDir.set(0, 0, -1);
+  camDir.normalize();
+  const panelY = camPos.y - 0.05;
+  vrUiPanelGroup.position.set(camPos.x + camDir.x * 1.1, panelY, camPos.z + camDir.z * 1.1);
+  vrUiPanelGroup.lookAt(camPos.x, panelY, camPos.z);
+  vrUiPanelGroup.visible = true;
+}
+let vrPanelNeedsPlacement = false;
+
+// --- コントローラー / ハンドトラッキングのレイポインター ---
+const vrRayGeometry = new THREE.BufferGeometry().setFromPoints([
+  new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -1)
+]);
+function makeControllerRay(){
+  const line = new THREE.Line(vrRayGeometry, new THREE.LineBasicMaterial({ color: 0x4f9dff, transparent: true, opacity: 0.85 }));
+  line.scale.z = 3;
+  line.name = 'vrRay';
+  return line;
+}
+const vrReticleGeo = new THREE.SphereGeometry(0.012, 12, 12);
+const vrReticleMat = new THREE.MeshBasicMaterial({ color: 0x4f9dff, depthTest: false });
+function makeReticle(){
+  const m = new THREE.Mesh(vrReticleGeo, vrReticleMat);
+  m.renderOrder = 1000;
+  m.visible = false;
+  return m;
+}
+
+const vrRaycaster = new THREE.Raycaster();
+const vrControllers = [];
+
+function setupVrController(index){
+  const controller = renderer.xr.getController(index);
+  const ray = makeControllerRay();
+  const reticle = makeReticle();
+  controller.add(ray);
+  scene.add(reticle);
+  const state = { controller, reticle, activeInputEl: null };
+  controller.addEventListener('selectstart', () => onVrSelectStart(state));
+  controller.addEventListener('selectend', () => onVrSelectEnd(state));
+  controller.addEventListener('connected', () => { ray.visible = true; });
+  controller.addEventListener('disconnected', () => { ray.visible = false; reticle.visible = false; });
+  scene.add(controller);
+  vrControllers.push(state);
+}
+setupVrController(0);
+setupVrController(1);
+
+// コントローラー(またはピンチ由来)のレイとVRパネルとの交点を求め、対応する実ページ座標を返す
+function raycastVrPanel(controller){
+  if(!vrPanelMesh || !vrUiPanelGroup.visible || !vrUiLastDrawRect) return null;
+  const origin = new THREE.Vector3();
+  const quat = new THREE.Quaternion();
+  const dir = new THREE.Vector3(0, 0, -1);
+  controller.getWorldPosition(origin);
+  controller.getWorldQuaternion(quat);
+  dir.applyQuaternion(quat);
+  vrRaycaster.set(origin, dir);
+  const hits = vrRaycaster.intersectObject(vrPanelMesh, false);
+  if(!hits.length || !hits[0].uv) return null;
+  const hit = hits[0];
+  const texX = hit.uv.x * VR_UI_TEX_W;
+  const texY = (1 - hit.uv.y) * VR_UI_TEX_H; // uv原点は板の左下、canvasは左上原点のため反転
+  const rect = vrUiLastDrawRect;
+  if(texX < rect.x || texX > rect.x + rect.w || texY < rect.y || texY > rect.y + rect.h) return null; // 余白部分
+  const pageX = (texX - rect.x) / rect.w * rect.pageW;
+  const pageY = (texY - rect.y) / rect.h * rect.pageH;
+  return { point: hit.point, pageX, pageY };
+}
+
+function setSliderValueFromPageX(inputEl, pageX){
+  const r = inputEl.getBoundingClientRect();
+  if(r.width <= 0) return;
+  const ratio = Math.min(1, Math.max(0, (pageX - r.left) / r.width));
+  const min = parseFloat(inputEl.min || '0');
+  const max = parseFloat(inputEl.max || '100');
+  const step = parseFloat(inputEl.step || '1') || 1;
+  let value = min + ratio * (max - min);
+  value = Math.round(value / step) * step;
+  inputEl.value = String(value);
+  inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+  inputEl.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+function onVrSelectStart(state){
+  const hit = raycastVrPanel(state.controller);
+  if(!hit){
+    recenterVrPanel(); // パネル外を選択した場合は、パネルを目の前に呼び戻す
+    return;
+  }
+  const el = document.elementFromPoint(hit.pageX, hit.pageY);
+  if(!el) return;
+  const inputEl = el.closest('input[type="range"]');
+  if(inputEl){
+    state.activeInputEl = inputEl;
+    setSliderValueFromPageX(inputEl, hit.pageX);
+    return;
+  }
+  const clickable = el.closest('button, .file-btn, [role="button"]') || el;
+  if(clickable && typeof clickable.click === 'function') clickable.click();
+}
+
+function onVrSelectEnd(state){
+  state.activeInputEl = null;
+}
+
+// 毎フレーム: レティクル位置更新・スライダーのドラッグ継続・パネルテクスチャの定期更新(200ms間隔)
+let vrUiLastCaptureTime = 0;
+function updateVrUi(time){
+  if(!renderer.xr.isPresenting){
+    if(vrUiPanelGroup.visible) vrUiPanelGroup.visible = false;
+    vrControllers.forEach((state) => { state.reticle.visible = false; });
+    return;
+  }
+  if(vrPanelNeedsPlacement){
+    recenterVrPanel();
+    vrPanelNeedsPlacement = false;
+  }
+  vrControllers.forEach((state) => {
+    const hit = raycastVrPanel(state.controller);
+    if(hit){
+      state.reticle.visible = true;
+      state.reticle.position.copy(hit.point);
+      if(state.activeInputEl) setSliderValueFromPageX(state.activeInputEl, hit.pageX);
+    }else{
+      state.reticle.visible = false;
+    }
+  });
+  if(!vrUiLastCaptureTime || time - vrUiLastCaptureTime > 200){
+    vrUiLastCaptureTime = time;
+    captureUiToTexture();
+  }
+}
 
 /* ---------------- VRM / VRMA 読み込み ---------------- */
 let currentVRM = null;
@@ -4130,6 +4408,16 @@ document.querySelectorAll('.settings-tab-btn').forEach((btn) => {
   });
 });
 
+// 会話パネル内のタブ切り替え(🔧一般 / 📡送信内容 / 📺YouTube連携)
+document.querySelectorAll('.realtime-tab-btn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.realtime-tab-btn').forEach((b) => b.classList.remove('active'));
+    document.querySelectorAll('.realtime-tab-panel').forEach((p) => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById(btn.dataset.tab).classList.add('active');
+  });
+});
+
 /* ---------------- 枠外タップで閉じる ---------------- */
 const dismissiblePanels = [
   {
@@ -4381,8 +4669,9 @@ gestureEl.addEventListener('pointercancel', endGesturePointer);
    requestAnimationFrameではなくrenderer.setAnimationLoop()を使う。
    通常時はrequestAnimationFrameと同じように動作しつつ、WebXRセッション中は
    ヘッドセットのリフレッシュレートに同期して呼ばれるようになり、立体視描画に必要。 */
-function animate(){
+function animate(time){
   const delta = clock.getDelta();
+  updateVrUi(time || performance.now());
   if(mixer) mixer.update(delta);
   if(currentVRM){
     currentVRM.update(delta);
