@@ -2606,31 +2606,122 @@ function computeVowelWeights(f1, f2){
 
 const lipSyncVowelSmooth = { aa: 0, ih: 0, ou: 0, ee: 0, oh: 0 };
 
+// ---- ミュート中(AI音声を再生しない時)向け:発話テキストからの母音推定リップシンク ----
+// ミュート中はAI音声を再生しない(playAudioChunkが早期returnする)ため、音声ベースの
+// フォルマント解析ができない。その代わり、受信したトランスクリプト文字列(かな)を
+// 母音列に変換し、平均的なモーラ長で時間軸に沿って再生する擬似リップシンクを行う。
+// 漢字・英数字などかなに変換できない文字は、代用として「あ」を弱めに割り当てる簡易フォールバック。
+const KANA_VOWEL_MAP = (() => {
+  const rows = {
+    'あかがさざただなはばぱまやらわ': 'a',
+    'いきぎしじちぢにひびぴみり': 'i',
+    'うくぐすずつづぬふぶぷむゆる': 'u',
+    'えけげせぜてでねへべぺめれ': 'e',
+    'おこごそぞとどのほぼぽもよろを': 'o'
+  };
+  const map = {};
+  for(const chars in rows){
+    const vowel = rows[chars];
+    for(const ch of chars) map[ch] = vowel;
+  }
+  // カタカナ(ひらがなよりコードポイントが0x60大きい)にも同じ母音を割り当てる
+  for(const ch of Object.keys(map)){
+    map[String.fromCharCode(ch.charCodeAt(0) + 0x60)] = map[ch];
+  }
+  return map;
+})();
+const YOUON_VOWEL_MAP = { 'ゃ': 'a', 'ゅ': 'u', 'ょ': 'o', 'ャ': 'a', 'ュ': 'u', 'ョ': 'o' };
+const SOKUON_CHARS = new Set(['っ', 'ッ']); // 促音(つまる音)は短い無音として扱う
+const CHOON_CHARS = new Set(['ー']);        // 長音符は直前の母音を延長する
+const PAUSE_CHARS = new Set(['、', '。', '！', '？', '!', '?', '.', ',', '\n']);
+const VOWEL_KEY_BY_ROMAN = { a: 'aa', i: 'ih', u: 'ou', e: 'ee', o: 'oh' };
+const MORA_MS = 120, PAUSE_MS = 220, SOKUON_MS = 90, CHOON_EXTEND_MS = 120;
+
+let textLipSyncQueue = []; // { vowel: 'aa'|'ih'|'ou'|'ee'|'oh'|null, ms, weak? }[] (vowel=nullは無音)
+
+// トランスクリプトのテキスト断片を、母音つきの時間フレーム列に変換してキューへ追加する
+function pushTextToLipSyncQueue(text){
+  for(const ch of text){
+    if(SOKUON_CHARS.has(ch)){ textLipSyncQueue.push({ vowel: null, ms: SOKUON_MS }); continue; }
+    if(CHOON_CHARS.has(ch)){
+      const last = textLipSyncQueue[textLipSyncQueue.length - 1];
+      if(last) last.ms += CHOON_EXTEND_MS;
+      continue;
+    }
+    if(YOUON_VOWEL_MAP[ch]){
+      // 拗音(きゃ等)は直前のモーラの母音を上書きするだけで、新しいフレームは追加しない
+      const last = textLipSyncQueue[textLipSyncQueue.length - 1];
+      if(last) last.vowel = VOWEL_KEY_BY_ROMAN[YOUON_VOWEL_MAP[ch]];
+      continue;
+    }
+    if(PAUSE_CHARS.has(ch)){ textLipSyncQueue.push({ vowel: null, ms: PAUSE_MS }); continue; }
+    if(ch === ' ' || ch === '\t' || ch === '\r') continue;
+    const roman = KANA_VOWEL_MAP[ch];
+    if(roman){
+      textLipSyncQueue.push({ vowel: VOWEL_KEY_BY_ROMAN[roman], ms: MORA_MS });
+    }else{
+      // 漢字・英数字など読みが分からない文字は「あ」を弱めに割り当てて代用する
+      textLipSyncQueue.push({ vowel: 'aa', ms: MORA_MS, weak: true });
+    }
+  }
+  const MAX_QUEUE = 400; // 長時間ミュートのまま溜まり続けた場合の保険(上限を超えた古い分は捨てる)
+  if(textLipSyncQueue.length > MAX_QUEUE) textLipSyncQueue.splice(0, textLipSyncQueue.length - MAX_QUEUE);
+}
+
+let textLipSyncElapsed = 0;      // 現在消化中フレームの経過時間(ms)
+let textLipSyncLastTime = null;  // 前回advanceTextLipSyncQueueを呼んだ時刻(ms)
+
+// キューを実時間で消化しながら、現在発音中とみなす母音の重み({aa,ih,ou,ee,oh})を返す
+function advanceTextLipSyncQueue(nowMs){
+  if(textLipSyncLastTime === null) textLipSyncLastTime = nowMs;
+  textLipSyncElapsed += nowMs - textLipSyncLastTime;
+  textLipSyncLastTime = nowMs;
+  while(textLipSyncQueue.length && textLipSyncElapsed >= textLipSyncQueue[0].ms){
+    textLipSyncElapsed -= textLipSyncQueue[0].ms;
+    textLipSyncQueue.shift();
+  }
+  const target = { aa: 0, ih: 0, ou: 0, ee: 0, oh: 0 };
+  const current = textLipSyncQueue[0];
+  if(current && current.vowel) target[current.vowel] = current.weak ? 0.5 : 1;
+  return target;
+}
+
+function resetTextLipSyncQueue(){
+  textLipSyncQueue = [];
+  textLipSyncElapsed = 0;
+  textLipSyncLastTime = null;
+}
+
 // 音量(RMS)ベースの口の開き具合(mouthAmount)に、フォルマント推定で求めた5母音の重みを掛け合わせ、
 // VRMの母音ブレンドシェイプ(aa/ih/ou/ee/oh)へなめらかに反映する。
 // 会話中(Gemini接続中)は受信音声を優先し、そうでなければBGM再生中ならBGMの音声で「歌っている」演出をする。
 function updateLipSync(){
   if(!currentVRM || !currentVRM.expressionManager) return;
   const conversationActive = !!(geminiWs && geminiWs.readyState === WebSocket.OPEN);
-  let analyser = null, sampleRate = 24000, volume = 0;
-  if(conversationActive && realtimeAnalyser){
-    analyser = realtimeAnalyser;
-    sampleRate = realtimeAudioCtx.sampleRate;
-    volume = computeRms(analyser) * 6; // 感度は経験則、必要に応じて係数を調整
-  }else if(!bgmPlayer.paused && bgmAnalyser){
-    analyser = bgmAnalyser;
-    sampleRate = bgmAudioCtx.sampleRate;
-    volume = computeRms(analyser) * 6;
-  }
-  const mouthAmount = Math.min(1, volume) * params.lipSyncMaxMouth;
-  const target = { aa: 0, ih: 0, ou: 0, ee: 0, oh: 0 };
-  if(analyser && mouthAmount > 0.02){
-    const formants = estimateFormants(analyser, sampleRate);
-    if(formants){
-      const w = computeVowelWeights(formants.f1, formants.f2);
-      for(const key in target) target[key] = w[key] * mouthAmount;
-    }else{
-      target.aa = mouthAmount; // フォルマントが安定して取れない場合は従来通り「あ」で代用
+  let target = { aa: 0, ih: 0, ou: 0, ee: 0, oh: 0 };
+  if(conversationActive && realtimeMuted){
+    // ミュート中はAI音声を再生しないため、代わりにトランスクリプト文字から推定した母音キューで動かす
+    target = advanceTextLipSyncQueue(performance.now());
+  }else{
+    let analyser = null, sampleRate = 24000, volume = 0;
+    if(conversationActive && realtimeAnalyser){
+      analyser = realtimeAnalyser;
+      sampleRate = realtimeAudioCtx.sampleRate;
+      volume = computeRms(analyser) * 6; // 感度は経験則、必要に応じて係数を調整
+    }else if(!bgmPlayer.paused && bgmAnalyser){
+      analyser = bgmAnalyser;
+      sampleRate = bgmAudioCtx.sampleRate;
+      volume = computeRms(analyser) * 6;
+    }
+    const mouthAmount = Math.min(1, volume) * params.lipSyncMaxMouth;
+    if(analyser && mouthAmount > 0.02){
+      const formants = estimateFormants(analyser, sampleRate);
+      if(formants){
+        const w = computeVowelWeights(formants.f1, formants.f2);
+        for(const key in target) target[key] = w[key] * mouthAmount;
+      }else{
+        target.aa = mouthAmount; // フォルマントが安定して取れない場合は従来通り「あ」で代用
+      }
     }
   }
   // フレーム間の急変(パタパタしたブレ)を抑えるための平滑化
@@ -2888,7 +2979,7 @@ async function connectRealtime(){
 
       if(evt.serverContent){
         const sc = evt.serverContent;
-        if(sc.interrupted){ stopPlayback(); currentTurnOutputText = ''; pendingEmotionMotionIndex = null; }
+        if(sc.interrupted){ stopPlayback(); currentTurnOutputText = ''; pendingEmotionMotionIndex = null; resetTextLipSyncQueue(); }
         if(sc.modelTurn && sc.modelTurn.parts){
           for(const part of sc.modelTurn.parts){
             if(part.inlineData && part.inlineData.data) playAudioChunk(part.inlineData.data);
@@ -2900,6 +2991,7 @@ async function connectRealtime(){
         if(sc.outputTranscription && sc.outputTranscription.text){
           addRealtimeTranscript(`🤖 ${sc.outputTranscription.text}`);
           currentTurnOutputText += sc.outputTranscription.text; // ターン内の発話をまとめて後で感情分類する
+          pushTextToLipSyncQueue(sc.outputTranscription.text); // ミュート中の母音推定リップシンク用キューにも積んでおく
         }
         if(sc.turnComplete){
           updateConversationExpression(currentTurnOutputText);
@@ -2951,6 +3043,7 @@ function disconnectRealtime(){
       try{ currentVRM.expressionManager.setValue(key, 0); }catch(e){}
     }
   }
+  resetTextLipSyncQueue();
   conversationDetectedExpression = 'neutral'; // 切断後は会話由来の表情推定をリセット(以降はモーション切替時のランダム表情に戻る)
 }
 
@@ -2966,6 +3059,7 @@ document.getElementById('btnRealtimeMute').addEventListener('click', () => {
   const btn = document.getElementById('btnRealtimeMute');
   btn.classList.toggle('on', realtimeMuted);
   btn.textContent = realtimeMuted ? '🔇 ミュート中' : '🔇 ミュート';
+  textLipSyncLastTime = null; // ミュート状態の切り替え時に経過時間の基準をリセット(切替中の空白時間を消化に含めないため)
   if(realtimeMuted){
     stopPlayback(); // 再生中の音声も即座に停止し、以後はトランスクリプト表示のみにする(電車内などでの使用を想定)
     log('ミュート中は音声を再生せず、トランスクリプト表示のみになります');
