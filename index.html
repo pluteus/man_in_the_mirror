@@ -391,9 +391,9 @@
       <div class="slider-row"><label>ジャイロ感度</label><input type="range" id="gsens" min="0" max="3" step="0.05" value="1"><span id="gsensV">1.0</span></div>
       <div class="slider-row"><label>ジャイロ反転</label><button id="gflipToggle" class="toggle-btn">OFF</button></div>
       <div class="slider-row"><label>直立補正</label><button id="uprightToggle" class="toggle-btn">OFF</button></div>
-      <div class="slider-row"><label>├左右 強度</label><button id="uprightSignLRToggle" class="sign-btn">+</button><input type="range" id="uprightStrengthLR" min="0" max="2" step="0.05" value="1"><span id="uprightStrengthLRV">1.00</span></div>
-      <div class="slider-row"><label>├前後 強度</label><button id="uprightSignFBToggle" class="sign-btn">+</button><input type="range" id="uprightStrengthFB" min="0" max="2" step="0.05" value="1"><span id="uprightStrengthFBV">1.00</span></div>
-      <div class="slider-row"><label>└回転(ヨー) 強度</label><button id="uprightSignYawToggle" class="sign-btn">+</button><input type="range" id="uprightStrengthYaw" min="0" max="2" step="0.05" value="1"><span id="uprightStrengthYawV">1.00</span></div>
+      <div class="slider-row"><label>├時計回り(ロール) 強度</label><button id="uprightSignLRToggle" class="sign-btn">+</button><input type="range" id="uprightStrengthLR" min="0" max="2" step="0.05" value="1"><span id="uprightStrengthLRV">1.00</span></div>
+      <div class="slider-row"><label>├ハイローアングル(ピッチ) 強度</label><button id="uprightSignFBToggle" class="sign-btn">+</button><input type="range" id="uprightStrengthFB" min="0" max="2" step="0.05" value="1"><span id="uprightStrengthFBV">1.00</span></div>
+      <div class="slider-row"><label>└首振り(ヨー) 強度</label><button id="uprightSignYawToggle" class="sign-btn">+</button><input type="range" id="uprightStrengthYaw" min="0" max="2" step="0.05" value="1"><span id="uprightStrengthYawV">1.00</span></div>
       <div style="font-size:9.5px; color:var(--text-dim); padding:0 2px 4px;">
         ※ジャイロセンサーが有効な状態で、端末を傾けてもキャラクターが現実世界に対して直立して見えるよう、
         左右(ロール)・前後(ピッチ)・回転(ヨー。端末を持ったまま体ごと左右に向きを変える動き)のブレを
@@ -4280,6 +4280,19 @@ function updateGyroSmoothing(){
 let uprightRotX = 0, uprightRotZ = 0; // 直立補正の回転量。キャラクターと背景の両方に同じ値を適用する。
 let uprightRotYaw = 0; // ヨー軸の補正量(ラジアン)。一般タブの「回転量」(params.modelRotY)に加算して使う。
 
+// ジャイロの値が動いている最中かどうかの指標。gyroRaw(即時値)とgyroSmoothed(平滑化後)の
+// 差が大きいほど「まだ変化の途中」とみなせる(静止すれば差は指数関数的にゼロへ収束する)。
+function computeGyroActivity(){
+  if(!gyroEnabled || !gyroRaw.has) return 0;
+  const dG = Math.abs(gyroRaw.gamma - gyroSmoothed.gamma);
+  const dB = Math.abs(gyroRaw.beta - gyroSmoothed.beta);
+  const dA = Math.abs(((gyroRaw.alpha - gyroSmoothed.alpha + 540) % 360) - 180);
+  return Math.max(dG, dB, dA);
+}
+let gyroLookAtWeight = 0; // 0=固定注視点、1=キャラクター頭部を完全に追跡(なめらかに遷移させる)
+const _camLookTarget = new THREE.Vector3();
+const _charHeadPos = new THREE.Vector3();
+
 function updateUprightCorrection(){
   if(renderer.xr.isPresenting){
     // VRモード中は対象外(ヘッドセットの実姿勢を使うため)
@@ -4558,7 +4571,26 @@ function updateCameraFromFace(){
   camera.position.x += (camX - camera.position.x) * 0.35;
   camera.position.y += ((lookY + camY) - camera.position.y) * 0.35;
   camera.position.z += (dist - camera.position.z) * 0.35;
-  camera.lookAt(0, lookY, 0);
+
+  // ジャイロ+直立補正が有効な間は、uprightGroupの傾き補正でキャラクターの頭部が
+  // 固定注視点(0, lookY, 0)から見た目上ズレて画面外へはみ出しやすくなる。
+  // センサー値が変動している(=まだ傾きが動いている)間は、注視点をキャラクターの
+  // 頭部の実際のワールド座標へなめらかに寄せることで、追従して中央に収まるようにする。
+  let targetWeight = 0;
+  if(gyroEnabled && params.uprightFix && currentVRM && currentVRM.humanoid){
+    const activity = computeGyroActivity();
+    targetWeight = clamp((activity - 0.15) / (1.5 - 0.15), 0, 1); // 小さなブレは無視する閾値
+  }
+  gyroLookAtWeight += (targetWeight - gyroLookAtWeight) * 0.15;
+  _camLookTarget.set(0, lookY, 0);
+  if(gyroLookAtWeight > 0.001){
+    const headBone = currentVRM.humanoid.getNormalizedBoneNode('head');
+    if(headBone){
+      headBone.getWorldPosition(_charHeadPos);
+      _camLookTarget.lerp(_charHeadPos, gyroLookAtWeight);
+    }
+  }
+  camera.lookAt(_camLookTarget);
 
   document.querySelector('#camPreview .dot').style.left = `${(1-smoothed.x)*100}%`;
   document.querySelector('#camPreview .dot').style.top = `${smoothed.y*100}%`;
