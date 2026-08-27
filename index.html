@@ -2415,7 +2415,7 @@ function ensureBgmAnalyser(){
       bgmAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
       const source = bgmAudioCtx.createMediaElementSource(bgmPlayer);
       bgmAnalyser = bgmAudioCtx.createAnalyser();
-      bgmAnalyser.fftSize = 256;
+      bgmAnalyser.fftSize = 2048; // 母音推定(LPCフォルマント解析)に十分な時間領域サンプル数を確保するため256から拡大
       source.connect(bgmAnalyser);
       bgmPlaybackGain = bgmAudioCtx.createGain();
       bgmPlaybackGain.gain.value = getLevelValue('lvlPlaybackBgm');
@@ -2479,27 +2479,172 @@ function wireBgmIntoGeminiInput(){
   }catch(e){ log(`BGM音声のGemini送信への接続に失敗しました: ${e.message || e}`, 'warn'); }
 }
 
-// 音量(RMS)ベースの簡易口パク。表情プリセット'aa'(母音「あ」の口)の重みを音量に応じて動かすだけで、
-// 音素(ビゼーム)ごとの厳密な口形状ではないが、「喋っている感」を出す最初のステップとして実装。
-// 会話中(Gemini接続中)は受信音声を優先し、そうでなければBGM再生中ならBGMの音量で「歌っている」演出をする。
+// ---- 母音(A/I/U/E/O)推定によるリップシンク ----
+// 簡易LPC(線形予測)でスペクトル包絡を求め、そのピーク(フォルマントF1/F2)から
+// 日本語5母音のどれに近いかを判定し、VRMの母音ブレンドシェイプ(aa/ih/ou/ee/oh)へ
+// なめらかに反映する。音量(RMS)だけで常に'aa'を動かしていた従来方式を置き換える。
+// ※BGMのように歌声以外の楽器音を含む音源では、複数の音が混ざってF1/F2が不明瞭になるため、
+//   フォルマント推定の精度は歌声・会話音声単体の場合より落ちる(あくまで簡易的な近似)。
+const VOWEL_TARGETS = {
+  aa: { f1: 800, f2: 1200 }, // あ
+  ih: { f1: 300, f2: 2500 }, // い
+  ou: { f1: 350, f2: 1100 }, // う
+  ee: { f1: 500, f2: 2000 }, // え
+  oh: { f1: 500, f2: 900 }   // お
+};
+const lipSyncTimeBuf = new WeakMap(); // analyser -> 再利用するFloat32Array(毎フレームの確保を避けGC負荷を軽減)
+
+function getLpcTimeData(analyser){
+  let buf = lipSyncTimeBuf.get(analyser);
+  if(!buf || buf.length !== analyser.fftSize){
+    buf = new Float32Array(analyser.fftSize);
+    lipSyncTimeBuf.set(analyser, buf);
+  }
+  analyser.getFloatTimeDomainData(buf);
+  return buf;
+}
+
+// 自己相関法+Levinson-Durbin再帰でLPC係数を求める(次数order、a[0]=1の全極フィルタ係数)
+function computeLpcCoeffs(samples, order){
+  const n = samples.length;
+  // プリエンファシス(高域を持ち上げてスペクトル傾斜を平坦化。フォルマント抽出の定番の前処理)
+  const pre = new Float32Array(n);
+  pre[0] = samples[0];
+  for(let i = 1; i < n; i++) pre[i] = samples[i] - 0.97 * samples[i - 1];
+  // ハミング窓
+  for(let i = 0; i < n; i++) pre[i] *= 0.54 - 0.46 * Math.cos((2 * Math.PI * i) / (n - 1));
+  // 自己相関
+  const ac = new Float64Array(order + 1);
+  for(let lag = 0; lag <= order; lag++){
+    let sum = 0;
+    for(let i = 0; i < n - lag; i++) sum += pre[i] * pre[i + lag];
+    ac[lag] = sum;
+  }
+  if(ac[0] <= 1e-8) return null; // ほぼ無音
+  // Levinson-Durbin
+  let a = new Float64Array(order + 1);
+  a[0] = 1;
+  let e = ac[0];
+  for(let i = 1; i <= order; i++){
+    let acc = ac[i];
+    for(let j = 1; j < i; j++) acc += a[j] * ac[i - j];
+    const k = -acc / e;
+    const newA = a.slice();
+    newA[i] = k;
+    for(let j = 1; j < i; j++) newA[j] = a[j] + k * a[i - j];
+    a = newA;
+    e *= (1 - k * k);
+    if(e <= 0) break;
+  }
+  return a;
+}
+
+// LPCの全極スペクトル包絡 |1/A(e^jw)|^2 を0〜4000Hzの範囲でnBins点評価し、
+// 極大点(ピーク)の周波数を低い方から2つ、F1・F2として返す
+function estimateFormants(analyser, sampleRate){
+  const order = Math.min(20, Math.max(8, Math.round(sampleRate / 1000)));
+  const samples = getLpcTimeData(analyser);
+  const a = computeLpcCoeffs(samples, order);
+  if(!a) return null;
+  const nBins = 200;
+  const maxFreq = Math.min(4000, sampleRate / 2 - 100);
+  const envelope = new Float64Array(nBins);
+  for(let b = 0; b < nBins; b++){
+    const freq = (b / (nBins - 1)) * maxFreq;
+    const w = (2 * Math.PI * freq) / sampleRate;
+    let reSum = 1, imSum = 0; // k=0項(a[0]=1)分をあらかじめ加えておく
+    for(let k = 1; k < a.length; k++){
+      reSum += a[k] * Math.cos(-w * k);
+      imSum += a[k] * Math.sin(-w * k);
+    }
+    const mag2 = reSum * reSum + imSum * imSum;
+    envelope[b] = mag2 > 1e-9 ? 1 / mag2 : 0;
+  }
+  const peaks = [];
+  for(let b = 2; b < nBins - 2; b++){
+    if(envelope[b] > envelope[b - 1] && envelope[b] > envelope[b + 1]
+       && envelope[b] > envelope[b - 2] && envelope[b] > envelope[b + 2]){
+      peaks.push((b / (nBins - 1)) * maxFreq);
+    }
+  }
+  if(peaks.length < 2) return null;
+  peaks.sort((p, q) => p - q);
+  // 最も低い2つのピークをF1・F2とみなす(近すぎるピークは同一フォルマントの分裂とみなし除外)
+  let f1 = null, f2 = null;
+  for(const freq of peaks){
+    if(f1 === null){ f1 = freq; continue; }
+    if(freq - f1 > 150){ f2 = freq; break; }
+  }
+  if(f1 === null || f2 === null) return null;
+  return { f1, f2 };
+}
+
+// (F1,F2)と各母音の基準値との対数距離から、5母音それぞれの重み(合計1)を求める
+function computeVowelWeights(f1, f2){
+  const logF1 = Math.log(f1), logF2 = Math.log(f2);
+  const dists = {};
+  let minDist = Infinity;
+  for(const key in VOWEL_TARGETS){
+    const t = VOWEL_TARGETS[key];
+    const d1 = logF1 - Math.log(t.f1);
+    const d2 = logF2 - Math.log(t.f2);
+    const dist = Math.sqrt(d1 * d1 + d2 * d2);
+    dists[key] = dist;
+    if(dist < minDist) minDist = dist;
+  }
+  const temperature = 0.35; // 小さいほど1母音に鋭く寄り、大きいほど複数の母音がなめらかに混ざる
+  let sum = 0;
+  const weights = {};
+  for(const key in dists){
+    const wgt = Math.exp(-(dists[key] - minDist) / temperature);
+    weights[key] = wgt;
+    sum += wgt;
+  }
+  for(const key in weights) weights[key] /= sum;
+  return weights;
+}
+
+const lipSyncVowelSmooth = { aa: 0, ih: 0, ou: 0, ee: 0, oh: 0 };
+
+// 音量(RMS)ベースの口の開き具合(mouthAmount)に、フォルマント推定で求めた5母音の重みを掛け合わせ、
+// VRMの母音ブレンドシェイプ(aa/ih/ou/ee/oh)へなめらかに反映する。
+// 会話中(Gemini接続中)は受信音声を優先し、そうでなければBGM再生中ならBGMの音声で「歌っている」演出をする。
 function updateLipSync(){
   if(!currentVRM || !currentVRM.expressionManager) return;
   const conversationActive = !!(geminiWs && geminiWs.readyState === WebSocket.OPEN);
-  let mouth = 0;
+  let analyser = null, sampleRate = 24000, volume = 0;
   if(conversationActive && realtimeAnalyser){
-    mouth = computeRms(realtimeAnalyser) * 6; // 感度は経験則、必要に応じて係数を調整
+    analyser = realtimeAnalyser;
+    sampleRate = realtimeAudioCtx.sampleRate;
+    volume = computeRms(analyser) * 6; // 感度は経験則、必要に応じて係数を調整
   }else if(!bgmPlayer.paused && bgmAnalyser){
-    mouth = computeRms(bgmAnalyser) * 6;
+    analyser = bgmAnalyser;
+    sampleRate = bgmAudioCtx.sampleRate;
+    volume = computeRms(analyser) * 6;
   }
-  mouth = Math.min(1, mouth) * params.lipSyncMaxMouth;
-  try{ currentVRM.expressionManager.setValue('aa', mouth); }catch(e){ /* 表情プリセット非対応のVRMは無視 */ }
+  const mouthAmount = Math.min(1, volume) * params.lipSyncMaxMouth;
+  const target = { aa: 0, ih: 0, ou: 0, ee: 0, oh: 0 };
+  if(analyser && mouthAmount > 0.02){
+    const formants = estimateFormants(analyser, sampleRate);
+    if(formants){
+      const w = computeVowelWeights(formants.f1, formants.f2);
+      for(const key in target) target[key] = w[key] * mouthAmount;
+    }else{
+      target.aa = mouthAmount; // フォルマントが安定して取れない場合は従来通り「あ」で代用
+    }
+  }
+  // フレーム間の急変(パタパタしたブレ)を抑えるための平滑化
+  for(const key in lipSyncVowelSmooth){
+    lipSyncVowelSmooth[key] += (target[key] - lipSyncVowelSmooth[key]) * 0.5;
+    try{ currentVRM.expressionManager.setValue(key, lipSyncVowelSmooth[key]); }catch(e){ /* 表情プリセット非対応のVRMは無視 */ }
+  }
 }
 
 function ensurePlaybackGraph(){
   if(realtimeAudioCtx) return;
   realtimeAudioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
   realtimeAnalyser = realtimeAudioCtx.createAnalyser();
-  realtimeAnalyser.fftSize = 256;
+  realtimeAnalyser.fftSize = 2048; // 母音推定(LPCフォルマント解析)に十分な時間領域サンプル数を確保するため256から拡大
   realtimePlaybackGain = realtimeAudioCtx.createGain(); // 🔊再生レベル:「Gemini Live音声」用のgain
   realtimePlaybackGain.gain.value = getLevelValue('lvlPlaybackAi');
   realtimeAnalyser.connect(realtimePlaybackGain);
@@ -2801,7 +2946,10 @@ function disconnectRealtime(){
   const btn = document.getElementById('btnRealtimeConnect');
   if(btn){ btn.textContent = '🎙️ 接続'; btn.classList.remove('on'); }
   if(currentVRM && currentVRM.expressionManager){
-    try{ currentVRM.expressionManager.setValue('aa', 0); }catch(e){}
+    for(const key in lipSyncVowelSmooth){
+      lipSyncVowelSmooth[key] = 0;
+      try{ currentVRM.expressionManager.setValue(key, 0); }catch(e){}
+    }
   }
   conversationDetectedExpression = 'neutral'; // 切断後は会話由来の表情推定をリセット(以降はモーション切替時のランダム表情に戻る)
 }
