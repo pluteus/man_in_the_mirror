@@ -564,9 +564,11 @@ function log(msg, level=''){
 }
 
 // vrm.txt/vrma.txt/bgm.txt/glb.txt の1行を「ファイル名,作者名(省略可),url(省略可)」として分解する
+// vrm.txtのみ4列目に「デフォルトの口調(省略可)」を追加指定でき、そのキャラクターに切り替えた際に
+// 会話パネルの「指示(任意)」欄へ自動で反映される(他のリストでは4列目があっても無視される)。
 function parseAssetLine(line){
   const parts = line.split(',').map(p => p.trim());
-  return { file: parts[0] || '', author: parts[1] || '', sourceUrl: parts[2] || '' };
+  return { file: parts[0] || '', author: parts[1] || '', sourceUrl: parts[2] || '', tone: parts[3] || '' };
 }
 
 // フォルダ名とファイル名から実際に読み込むURLを組み立てる。
@@ -2019,14 +2021,24 @@ document.getElementById('btnMotionList').addEventListener('click', () => {
    切替時は直前のキャラクターのVRM(ジオメトリ/マテリアル/テクスチャ)とMixerを解放してメモリを空け、
    さらにキャッシュ済みモーションクリップ(旧キャラクターの体格でリターゲット済み)を破棄して、
    新しいキャラクターに対して再取得させる。 */
-const DEFAULT_VRM_LIST_URL = './vrm.txt'; // 1行につき「ファイル名,作者名(省略可),url(省略可)」。#始まりはコメント扱い
+const DEFAULT_VRM_LIST_URL = './vrm.txt'; // 1行につき「ファイル名,作者名(省略可),url(省略可),デフォルトの口調(省略可)」。#始まりはコメント扱い
 const FALLBACK_DEFAULT_VRM_FILE = 'AliciaSolid.vrm';
 
-let characterClips = []; // { name, url, author, sourceUrl, object:null|VRM, loadPromise:null|Promise }
+let characterClips = []; // { name, url, author, sourceUrl, tone, object:null|VRM, loadPromise:null|Promise }
 let activeCharacterIndex = -1;
 
-function makeCharacterEntry(name, url, author='', sourceUrl=''){
-  return { name, url, author, sourceUrl, object: null, loadPromise: null };
+function makeCharacterEntry(name, url, author='', sourceUrl='', tone=''){
+  return { name, url, author, sourceUrl, tone, object: null, loadPromise: null };
+}
+
+// キャラクターにデフォルトの口調が設定されていれば、会話パネルの「指示(任意)」欄へ反映する
+// (口調未指定のキャラクターに切り替えた場合は、既存の指示をそのまま残す)
+function applyCharacterToneToInstructions(entry){
+  if(!entry || !entry.tone) return;
+  const el = document.getElementById('realtimeInstructions');
+  if(!el) return;
+  el.value = entry.tone;
+  log(`キャラクターのデフォルト口調を指示欄へ反映: ${entry.tone}`, 'ok');
 }
 
 function ensureCharacterLoaded(entry){
@@ -2097,6 +2109,7 @@ async function setActiveCharacter(idx){
 
   activeCharacterIndex = idx;
   updateCharacterListUI();
+  applyCharacterToneToInstructions(nextEntry); // 口調指定があれば会話パネルの「指示(任意)」欄へ反映
   log(`キャラクターを切替: ${nextEntry.name}`, 'ok');
 
   if(motionClips.length) playRandomMotion();
@@ -2215,13 +2228,13 @@ async function loadDefaultCharacterFileNames(){
     return entries;
   }catch(err){
     log(`vrm.txtの読込に失敗したため既定のキャラクター(${FALLBACK_DEFAULT_VRM_FILE})のみを使用します: ${err.message || err}`, 'warn');
-    return [{ file: FALLBACK_DEFAULT_VRM_FILE, author:'', sourceUrl:'' }];
+    return [{ file: FALLBACK_DEFAULT_VRM_FILE, author:'', sourceUrl:'', tone:'' }];
   }
 }
 
-// エントリ({file,author,sourceUrl})のリストから、VRM未読込のエントリだけをcharacterClipsに登録する(即時・軽量)
+// エントリ({file,author,sourceUrl,tone})のリストから、VRM未読込のエントリだけをcharacterClipsに登録する(即時・軽量)
 function loadCharacterList(entries){
-  characterClips = entries.map(e => makeCharacterEntry(e.file, assetPath('vrm', e.file), e.author, e.sourceUrl));
+  characterClips = entries.map(e => makeCharacterEntry(e.file, assetPath('vrm', e.file), e.author, e.sourceUrl, e.tone));
   log(`キャラクターリストを登録しました(${characterClips.length}件・ファイル名のみ、選択時に読込みます)`, characterClips.length ? 'ok' : 'warn');
   activeCharacterIndex = -1;
   updateCharacterListUI();
