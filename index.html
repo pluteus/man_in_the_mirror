@@ -696,6 +696,7 @@ async function enterVR(){
     ensureVrPanelMesh();
     ensureVrButtonMesh();
     vrMenuOpen = false; // 入室直後はポップアップは閉じた状態、メニューボタンだけを表示する
+    vrSetView('main');
     drawVrPanel();
     drawVrButton(false);
     registerVrActivity();
@@ -707,6 +708,9 @@ async function enterVR(){
       vrMenuOpen = false;
       vrUiHidden = false;
       vrUiLastActivity = 0;
+      vrMoveX = 0; vrMoveY = 0; vrMoveZ = 0;
+      uprightGroup.position.set(0, 0, 0);
+      vrSetView('main');
     });
   }catch(e){
     log(`VR表示の開始に失敗しました: ${e.message || e}`, 'err');
@@ -750,19 +754,144 @@ function registerVrActivity(){
 }
 
 const VR_CANVAS_W = 900, VR_CANVAS_H = 1360;
-// mirror:trueの項目は対応する実ボタンのtextContent/on状態をそのまま表示に反映する。
-// mirror:falseの項目は常に固定ラベルを表示する(押した動作自体は同じくdomIdのボタンをclickする)。
-const VR_MENU_ITEMS = [
-  { domId: 'btnRandomCharacter', label: '🔀 キャラクター:ランダム', mirror: false },
-  { domId: 'btnMotion',          label: '▶ モーション',           mirror: true  },
-  { domId: 'btnRandomBackground',label: '🔀 背景:ランダム',       mirror: false },
-  { domId: 'btnGyro',            label: '🧭 ジャイロ有効化',       mirror: true  },
-  { domId: 'uprightToggle',      label: '📐 直立補正: OFF',        mirror: true, prefix: '📐 直立補正: ' },
-  { domId: 'btnCalib',           label: '🎯 中央校正',             mirror: false },
-  { domId: 'btnRealtimeConnect', label: '🎙️ 接続',                mirror: true  },
-  { domId: 'btnRealtimeMute',    label: '🔇 ミュート',             mirror: true  },
-  { domId: 'btnVR',              label: '🚪 VR終了',              mirror: false }
+
+/* ▼ 2026-08修正: VRメニューを「一覧+選択項目のフラットな9個」から、非VRモードのトップバーと
+   同じ項目数を省略しない構成に拡張。
+   - type:'list' の項目を選ぶと、キャラクター/モーション/BGM/背景/ログの一覧(サブビュー)を開く。
+     一覧はそれぞれの実データ配列(characterClips等)から毎回組み立てるため、非VRモードで選べる
+     項目を1件も省略しない。
+   - type:'action' の項目(mirror:trueなら対応する実ボタンのtextContent/on状態をそのまま反映)は
+     既存の実ボタンをclick()するだけなので、動作ロジック自体は完全に既存のものを再利用する。
+   - パネルの表示領域に収まりきらない場合は右側の▲▼ボタンでスクロールして選択できる
+     (drawVrPanel/vrBuildItems/vrActivateItem 参照)。 */
+const VR_MAIN_MENU = [
+  { type: 'list',   view: 'character',      label: '🧑 キャラクター一覧' },
+  { type: 'action', domId: 'btnRandomCharacter', label: '🔀 キャラクター:ランダム' },
+  { type: 'list',   view: 'motion',         label: '🎞 モーション一覧' },
+  { type: 'action', domId: 'btnMotion',        label: '▶ モーション再生/一時停止', mirror: true },
+  { type: 'action', domId: 'btnRandom',        label: '🔀 モーション:ランダム',     mirror: true },
+  { type: 'action', domId: 'btnRepeat',        label: '🔁 モーション:リピート',     mirror: true },
+  { type: 'list',   view: 'bgm',           label: '🎵 BGM一覧' },
+  { type: 'action', domId: 'btnBgm',           label: '▶ BGM再生/一時停止',        mirror: true },
+  { type: 'action', domId: 'btnBgmRandom',     label: '🔀 BGM:ランダム',            mirror: true },
+  { type: 'action', domId: 'btnBgmRepeat',     label: '🔁 BGM:リピート',            mirror: true },
+  { type: 'list',   view: 'background',    label: '🏞 背景一覧' },
+  { type: 'action', domId: 'btnRandomBackground', label: '🔀 背景:ランダム' },
+  { type: 'action', domId: 'btnRealtimeConnect', label: '🎙️ 会話:接続',            mirror: true },
+  { type: 'action', domId: 'btnRealtimeMute',    label: '🔇 会話:ミュート',          mirror: true },
+  { type: 'action', domId: 'btnAutoGesture',     label: '🎭 自動ジェスチャー',        mirror: true },
+  { type: 'action', domId: 'btnCam',           label: '▶ インカメラ',              mirror: true },
+  { type: 'action', domId: 'btnOutCam',        label: '📷 アウトカメラ',            mirror: true },
+  { type: 'action', domId: 'btnScreenshot',    label: '📸 撮影' },
+  { type: 'action', domId: 'btnRecord',        label: '⏺ 録画',                    mirror: true },
+  { type: 'action', domId: 'btnCalib',         label: '🎯 中央校正' },
+  { type: 'action', domId: 'btnGyro',          label: '🧭 ジャイロ有効化',          mirror: true },
+  { type: 'action', domId: 'uprightToggle',    label: '📐 直立補正: OFF', mirror: true, prefix: '📐 直立補正: ' },
+  { type: 'action', domId: 'btnAccel',         label: '🎚️ 加速度センサー有効化',   mirror: true },
+  { type: 'action', domId: 'btnOffAxis',       label: '🪟 本格off-axis',           mirror: true },
+  { type: 'list',   view: 'log',           label: '📋 ログ' },
+  { type: 'action', domId: 'btnVR',            label: '🚪 VR終了' }
 ];
+
+let vrView = 'main';        // 'main' | 'character' | 'motion' | 'bgm' | 'background' | 'log'
+let vrScrollOffset = 0;     // 現在のビューのスクロール量(px)
+let vrMaxScroll = 0;
+let vrVisibleItems = [];    // 現フレームで実際に描画された選択可能項目の当たり判定(rect)一覧
+let vrBackRect = null, vrScrollUpRect = null, vrScrollDownRect = null;
+
+function vrSetView(view){
+  vrView = view;
+  vrScrollOffset = 0;
+}
+
+// キャラクター/モーション/BGM/背景の一覧サブビュー用に、対応する実データ配列と選択関数を返す
+function vrListSourceForView(view){
+  if(view === 'character') return { items: characterClips, activeIndex: activeCharacterIndex, onSelect: (i) => setActiveCharacter(i) };
+  if(view === 'motion')    return { items: motionClips,    activeIndex: lastMotionIndex,       onSelect: (i) => playMotion(i) };
+  if(view === 'bgm')       return { items: bgmClips,       activeIndex: lastBgmIndex,           onSelect: (i) => playBgm(i) };
+  if(view === 'background')return { items: backgroundClips,activeIndex: activeBackgroundIndex,  onSelect: (i) => setActiveBackground(i) };
+  return null;
+}
+
+// ログパネル(#logContent)の内容をそのままテキスト一覧として読む(閲覧専用・直近60件)
+function vrLogLines(){
+  const el = document.getElementById('logContent');
+  if(!el) return [];
+  return Array.from(el.children).slice(-60).map((n) => n.textContent);
+}
+
+function vrPanelTitle(){
+  switch(vrView){
+    case 'character': return '🧑 キャラクター選択';
+    case 'motion':     return '🎞 モーション選択';
+    case 'bgm':        return '🎵 BGM選択';
+    case 'background': return '🏞 背景選択';
+    case 'log':        return '📋 ログ';
+    default:           return '🕹️ VR操作パネル';
+  }
+}
+
+// 現在のビューで表示すべき項目({label, on, isText})の配列を組み立てる
+function vrBuildItems(){
+  if(vrView === 'main'){
+    return VR_MAIN_MENU.map((it) => {
+      if(it.type === 'list') return { label: it.label, on: false };
+      let label = it.label, on = false;
+      if(it.mirror){
+        const el = document.getElementById(it.domId);
+        if(el){ label = it.prefix ? it.prefix + el.textContent : el.textContent; on = el.classList.contains('on'); }
+      }
+      return { label, on };
+    });
+  }
+  if(vrView === 'log'){
+    const lines = vrLogLines();
+    return lines.length ? lines.map((l) => ({ label: l, isText: true })) : [{ label: '(ログはまだありません)', isText: true }];
+  }
+  const src = vrListSourceForView(vrView);
+  if(!src) return [];
+  if(!src.items.length) return [{ label: '(項目がありません)', isText: true }];
+  return src.items.map((entry, i) => {
+    const active = i === src.activeIndex;
+    return { label: (active ? '▶ ' : '') + entry.name, on: active };
+  });
+}
+
+// 選択された項目(index)を実行する。'main'ならリスト遷移かボタンclick、サブビューなら実データを選択する。
+function vrActivateItem(i){
+  if(vrView === 'main'){
+    const it = VR_MAIN_MENU[i];
+    if(!it) return;
+    if(it.type === 'list'){ vrSetView(it.view); drawVrPanel(); return; }
+    const el = document.getElementById(it.domId);
+    if(el) el.click();
+    drawVrPanel();
+    return;
+  }
+  if(vrView === 'log') return; // ログは閲覧専用(選択不可)
+  const src = vrListSourceForView(vrView);
+  if(!src || !src.items.length) return;
+  src.onSelect(i);
+  drawVrPanel();
+}
+
+// レイが当たっているcanvas座標(x,y)から、戻る/▲/▼/一覧項目のどれに当たっているかを判定する
+function resolveVrPanelHit(hit){
+  if(!hit || hit.canvasX === undefined) return null;
+  const x = hit.canvasX, y = hit.canvasY;
+  if(vrBackRect && x >= vrBackRect.x && x <= vrBackRect.x + vrBackRect.w && y >= vrBackRect.y && y <= vrBackRect.y + vrBackRect.h){
+    return { type: 'back' };
+  }
+  if(vrScrollUpRect && x >= vrScrollUpRect.x && x <= vrScrollUpRect.x + vrScrollUpRect.w && y >= vrScrollUpRect.y && y <= vrScrollUpRect.y + vrScrollUpRect.h){
+    return { type: 'scrollUp' };
+  }
+  if(vrScrollDownRect && x >= vrScrollDownRect.x && x <= vrScrollDownRect.x + vrScrollDownRect.w && y >= vrScrollDownRect.y && y <= vrScrollDownRect.y + vrScrollDownRect.h){
+    return { type: 'scrollDown' };
+  }
+  const found = vrVisibleItems.find((v) => v.selectable
+    && x >= v.rect.x && x <= v.rect.x + v.rect.w && y >= v.rect.y && y <= v.rect.y + v.rect.h);
+  return found ? { type: 'item', index: found.index } : null;
+}
 
 let vrUiCanvas = null, vrUiCtx = null, vrUiTexture = null;
 function ensureVrUiCanvas(){
@@ -785,8 +914,14 @@ function drawRoundedRect(ctx, x, y, w, h, r){
   ctx.closePath();
 }
 
-// メニュー内容をcanvasに描き直し、各ボタンのヒット矩形(canvasピクセル座標)を更新する。
-// レイが当たっている項目(hoverItemIndex)はON状態とは別の色でハイライトする。
+// メニュー内容をcanvasに描き直し、各項目のヒット矩形(canvasピクセル座標)を更新する。
+// レイが当たっている項目はON状態とは別の色でハイライトする。表示しきれない項目は
+// スクロール可能な領域内にクリップして描画し、収まらない場合だけ右側に▲▼ボタンを出す。
+const VR_PANEL_TOP = 150;          // ヘッダー(タイトル/戻るボタン)の高さ
+const VR_PANEL_BOTTOM_MARGIN = 40;
+const VR_ROW_PAD = 40;
+const VR_SCROLL_STEP = 240;        // ▲▼を1回選択した時のスクロール量(px)
+
 function drawVrPanel(){
   ensureVrUiCanvas();
   const ctx = vrUiCtx;
@@ -799,40 +934,101 @@ function drawVrPanel(){
   drawRoundedRect(ctx, 4, 4, VR_CANVAS_W - 8, VR_CANVAS_H - 8, 22);
   ctx.stroke();
 
-  ctx.fillStyle = '#7fb2ff';
-  ctx.font = 'bold 44px sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText('🕹️ VR操作パネル', VR_CANVAS_W / 2, 80);
 
-  const hoverSet = new Set(vrControllers.map((s) => s.hoverItemIndex).filter((i) => i >= 0));
+  const hoverKeys = new Set(vrControllers.map((s) => s.hoverKey).filter(Boolean));
 
-  const top = 150, rowH = 118, gap = 16, pad = 40;
-  const btnW = VR_CANVAS_W - pad * 2;
-  VR_MENU_ITEMS.forEach((item, i) => {
-    const y = top + i * (rowH + gap);
-    let label = item.label;
-    let on = false;
-    if(item.mirror){
-      const el = document.getElementById(item.domId);
-      if(el){
-        label = item.prefix ? item.prefix + el.textContent : el.textContent;
-        on = el.classList.contains('on');
-      }
-    }
-    const hovered = hoverSet.has(i);
-    ctx.fillStyle = hovered ? '#e08a2e' : (on ? '#2f6fd6' : '#1c2531');
-    drawRoundedRect(ctx, pad, y, btnW, rowH, 18);
+  // ヘッダー: サブビュー(一覧)では左に「戻る」ボタンを出す
+  vrBackRect = null;
+  if(vrView !== 'main'){
+    const backW = 130, backH = 64, backX = 30, backY = 40;
+    const backHover = hoverKeys.has('back');
+    ctx.fillStyle = backHover ? '#e08a2e' : '#1c2531';
+    drawRoundedRect(ctx, backX, backY, backW, backH, 14);
     ctx.fill();
-    ctx.strokeStyle = hovered ? '#ffd08a' : (on ? '#8fc0ff' : '#3a4557');
-    ctx.lineWidth = hovered ? 4 : 2;
-    drawRoundedRect(ctx, pad, y, btnW, rowH, 18);
+    ctx.strokeStyle = backHover ? '#ffd08a' : '#3a4557';
+    ctx.lineWidth = backHover ? 4 : 2;
+    drawRoundedRect(ctx, backX, backY, backW, backH, 14);
     ctx.stroke();
     ctx.fillStyle = '#eef3fb';
-    ctx.font = '38px sans-serif';
-    ctx.fillText(label, VR_CANVAS_W / 2, y + rowH / 2, btnW - 40);
-    item.rect = { x: pad, y, w: btnW, h: rowH };
+    ctx.font = '30px sans-serif';
+    ctx.fillText('◀ 戻る', backX + backW / 2, backY + backH / 2 + 2);
+    vrBackRect = { x: backX, y: backY, w: backW, h: backH };
+  }
+
+  ctx.fillStyle = '#7fb2ff';
+  ctx.font = 'bold 40px sans-serif';
+  ctx.fillText(vrPanelTitle(), VR_CANVAS_W / 2, 76);
+
+  const built = vrBuildItems();
+  const viewportTop = VR_PANEL_TOP;
+  const viewportBottom = VR_CANVAS_H - VR_PANEL_BOTTOM_MARGIN;
+  const viewportH = viewportBottom - viewportTop;
+  const rowH = vrView === 'main' ? 100 : 90;
+  const gap = 14;
+  const totalH = built.length ? built.length * rowH + (built.length - 1) * gap : 0;
+  vrMaxScroll = Math.max(0, totalH - viewportH);
+  vrScrollOffset = clamp(vrScrollOffset, 0, vrMaxScroll);
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, viewportTop, VR_CANVAS_W, viewportH);
+  ctx.clip();
+
+  const btnW = VR_CANVAS_W - VR_ROW_PAD * 2;
+  vrVisibleItems = [];
+  built.forEach((entry, i) => {
+    const y = viewportTop + i * (rowH + gap) - vrScrollOffset;
+    if(y + rowH < viewportTop || y > viewportBottom) return; // 画面外の項目は描画も当たり判定も行わない
+    if(entry.isText){
+      ctx.fillStyle = '#aab4c2';
+      ctx.font = '24px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText(entry.label, VR_ROW_PAD, y + rowH / 2, btnW);
+      ctx.textAlign = 'center';
+    }else{
+      const hovered = hoverKeys.has('item:' + i);
+      ctx.fillStyle = hovered ? '#e08a2e' : (entry.on ? '#2f6fd6' : '#1c2531');
+      drawRoundedRect(ctx, VR_ROW_PAD, y, btnW, rowH, 16);
+      ctx.fill();
+      ctx.strokeStyle = hovered ? '#ffd08a' : (entry.on ? '#8fc0ff' : '#3a4557');
+      ctx.lineWidth = hovered ? 4 : 2;
+      drawRoundedRect(ctx, VR_ROW_PAD, y, btnW, rowH, 16);
+      ctx.stroke();
+      ctx.fillStyle = '#eef3fb';
+      ctx.font = (vrView === 'main' ? '34px' : '30px') + ' sans-serif';
+      ctx.fillText(entry.label, VR_CANVAS_W / 2, y + rowH / 2, btnW - 40);
+      vrVisibleItems.push({ index: i, rect: { x: VR_ROW_PAD, y, w: btnW, h: rowH }, selectable: true });
+    }
   });
+  ctx.restore();
+
+  // スクロール矢印(内容がビューポートに収まりきらない時だけ表示)
+  vrScrollUpRect = null; vrScrollDownRect = null;
+  if(vrMaxScroll > 0){
+    const arrowSize = 64, arrowX = VR_CANVAS_W - arrowSize - 24;
+    const upY = viewportTop - arrowSize - 6, downY = viewportBottom + 6;
+    const canUp = vrScrollOffset > 0, canDown = vrScrollOffset < vrMaxScroll;
+    const drawArrow = (x, y, enabled, hoverKey, symbol) => {
+      const hover = enabled && hoverKeys.has(hoverKey);
+      ctx.fillStyle = !enabled ? '#161c26' : (hover ? '#e08a2e' : '#1c2531');
+      drawRoundedRect(ctx, x, y, arrowSize, arrowSize, 12);
+      ctx.fill();
+      ctx.strokeStyle = !enabled ? '#232b38' : (hover ? '#ffd08a' : '#3a4557');
+      ctx.lineWidth = hover ? 4 : 2;
+      drawRoundedRect(ctx, x, y, arrowSize, arrowSize, 12);
+      ctx.stroke();
+      ctx.fillStyle = enabled ? '#eef3fb' : '#4a5568';
+      ctx.font = '30px sans-serif';
+      ctx.fillText(symbol, x + arrowSize / 2, y + arrowSize / 2 + 2);
+    };
+    drawArrow(arrowX, upY, canUp, 'scrollUp', '▲');
+    drawArrow(arrowX, downY, canDown, 'scrollDown', '▼');
+    if(canUp) vrScrollUpRect = { x: arrowX, y: upY, w: arrowSize, h: arrowSize };
+    if(canDown) vrScrollDownRect = { x: arrowX, y: downY, w: arrowSize, h: arrowSize };
+  }
+
   vrUiTexture.needsUpdate = true;
 }
 
@@ -969,10 +1165,10 @@ function setupVrController(index){
   const reticle = makeReticle();
   controller.add(ray);
   scene.add(reticle);
-  const state = { controller, reticle, inputSource: null, hoverItemIndex: -1, hoverButton: false };
+  const state = { controller, reticle, inputSource: null, hoverKey: null, hoverButton: false };
   controller.addEventListener('selectstart', () => onVrSelectStart(state));
   controller.addEventListener('connected', (ev) => { state.inputSource = ev.data; ray.visible = true; });
-  controller.addEventListener('disconnected', () => { state.inputSource = null; ray.visible = false; reticle.visible = false; });
+  controller.addEventListener('disconnected', () => { state.inputSource = null; ray.visible = false; reticle.visible = false; state.hoverKey = null; });
   scene.add(controller);
   vrControllers.push(state);
 }
@@ -1020,24 +1216,22 @@ function onVrSelectStart(state){
   const btnHit = raycastVrButton(state.controller);
   if(btnHit){
     vrMenuOpen = !vrMenuOpen;
-    if(vrMenuOpen) drawVrPanel();
+    if(vrMenuOpen){ vrSetView('main'); drawVrPanel(); }
     drawVrButton(state.hoverButton);
     return;
   }
   const hit = raycastVrPanel(state.controller);
-  if(!hit || hit.canvasX === undefined) return;
-  const item = VR_MENU_ITEMS.find((it) => it.rect
-    && hit.canvasX >= it.rect.x && hit.canvasX <= it.rect.x + it.rect.w
-    && hit.canvasY >= it.rect.y && hit.canvasY <= it.rect.y + it.rect.h);
-  if(!item) return;
-  const el = document.getElementById(item.domId);
-  if(el) el.click();
-  drawVrPanel(); // クリック直後の状態変化(ON/OFF等)を即座に反映
+  const target = resolveVrPanelHit(hit);
+  if(!target) return;
+  if(target.type === 'back'){ vrSetView('main'); drawVrPanel(); return; }
+  if(target.type === 'scrollUp'){ vrScrollOffset = clamp(vrScrollOffset - VR_SCROLL_STEP, 0, vrMaxScroll); drawVrPanel(); return; }
+  if(target.type === 'scrollDown'){ vrScrollOffset = clamp(vrScrollOffset + VR_SCROLL_STEP, 0, vrMaxScroll); drawVrPanel(); return; }
+  if(target.type === 'item'){ vrActivateItem(target.index); } // クリック直後の状態変化(ON/OFF・一覧遷移等)はvrActivateItem内でdrawVrPanel済み
 }
 
 // --- 左右サムスティックによる操作(タッチジェスチャーの代替) ---
 // 右スティック: 上下→垂直視点移動(視線先高さ) / 左右→回転操作(キャラクター・背景の回転量)
-// 左スティック: 水平視点移動(キャラクター・背景の左右位置)
+// 左スティック: 左右→水平視点移動(キャラクター・背景の左右位置) / 上下→キャラクターに近づく・遠ざかる操作
 // ※VR中はrenderer.xrがヘッドセットの実姿勢からcamera.positionを毎フレーム上書きするため、
 //   カメラそのものを動かしてもVR内では反映されない。そのため「視点移動」は、視聴者から見て
 //   同じ効果が得られるキャラクター・背景側(uprightGroup)の平行移動として実装している。
@@ -1045,7 +1239,11 @@ const VR_STICK_DEADZONE = 0.15;
 const VR_MOVE_SPEED = 0.6;      // m/秒(スティック全開時)
 const VR_MOVE_LIMIT = 1.0;      // m
 const VR_ROTATE_SPEED = 90;     // 度/秒(スティック全開時)
-let vrMoveX = 0, vrMoveY = 0;
+// VR入室時、ヘッドセットの初期位置がキャラクターに近すぎるため、既定でこの分だけ奥へ離して表示する。
+// 左スティックの上下操作でさらにこの基準から近づく/遠ざかることができる(vrMoveZがその追加分)。
+const VR_DEFAULT_DIST_Z = -1.1; // m(負値=キャラクター側を奥へ離す)
+const VR_APPROACH_RANGE = 1.2;  // m(基準からさらに近づける/離せる範囲)
+let vrMoveX = 0, vrMoveY = 0, vrMoveZ = 0;
 
 function readStickAxes(inputSource){
   const gp = inputSource && inputSource.gamepad;
@@ -1073,9 +1271,11 @@ function updateVrThumbsticks(dt){
       syncSliderUI('modelRotY', newRotY);
     }else if(state.inputSource.handedness === 'left'){
       vrMoveX = clamp(vrMoveX + axes.x * VR_MOVE_SPEED * dt, -VR_MOVE_LIMIT, VR_MOVE_LIMIT);
+      // 上下(axes.y、スティックを奥へ倒す=負値)→キャラクターに近づく、手前に倒す=正値→遠ざかる
+      vrMoveZ = clamp(vrMoveZ - axes.y * VR_MOVE_SPEED * dt, -VR_APPROACH_RANGE, VR_APPROACH_RANGE);
     }
   });
-  uprightGroup.position.set(vrMoveX, vrMoveY, 0);
+  uprightGroup.position.set(vrMoveX, vrMoveY, VR_DEFAULT_DIST_Z + vrMoveZ);
   if(moved) registerVrActivity();
 }
 
@@ -1116,12 +1316,9 @@ function updateVrUi(time, delta){
       state.reticle.visible = false;
     }
     state.hoverButton = hoveredButton;
-    const idx = (hit && !hoveredButton && hit.canvasX !== undefined)
-      ? VR_MENU_ITEMS.findIndex((it) => it.rect
-          && hit.canvasX >= it.rect.x && hit.canvasX <= it.rect.x + it.rect.w
-          && hit.canvasY >= it.rect.y && hit.canvasY <= it.rect.y + it.rect.h)
-      : -1;
-    if(state.hoverItemIndex !== idx){ state.hoverItemIndex = idx; panelHoverChanged = true; }
+    const target = (!hoveredButton) ? resolveVrPanelHit(hit) : null;
+    const key = target ? (target.type + (target.index !== undefined ? ':' + target.index : '')) : null;
+    if(state.hoverKey !== key){ state.hoverKey = key; panelHoverChanged = true; }
   });
   if(anyHover) registerVrActivity();
 
