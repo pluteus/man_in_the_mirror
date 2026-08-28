@@ -9,20 +9,20 @@ AnimalKawaii_02_Ryoku.vrm,七百屋 [ Nao - Ya ],https://7a04m.booth.pm/items/49
 5804829143715711442.vrm,バーネット,https://hub.vroid.com/users/52759865,素直で明るい、ちょっと元気系の後輩みたいな口調の少女
 7800949340856773323.vrm,アニメ塗りマン,https://hub.vroid.com/users/72777205,ちょっと気が強いけど素直で可愛い、元気寄りの学級委員長口調
 #5876570490179264320.vrm
-8329890252317737768.vrm,VRoid Project,https://hub.vroid.com/users/36144806
-7714289881874798246.vrm
-8496491754682859078.vrm
+#8329890252317737768.vrm,VRoid Project,https://hub.vroid.com/users/36144806
+7714289881874798246.vrm,畑のお肉,https://hub.vroid.com/characters/8323597107161129178/models/4085021507307774469,気さくでノリが軽い、ちょっと悪ガキっぽいフランクな口調の少女
+#8496491754682859078.vrm
 #8590256991748008892.vrm
-AliciaSolid.vrm,黒星紅白_雨刻,https://3d.nicovideo.jp/alicia/,丁寧だけど少し甘えた、可憐系の話し方
-Liqu.vrm,KARAKURIPOWER,https://kar.booth.pm/
-School-Uniform-Girl_01_A.vrm,七百屋,https://hub.vroid.com/users/53360284
-School-Uniform-Girl_02_B.vrm,七百屋,https://hub.vroid.com/users/53360284
-School-Uniform-Girl_03_C.vrm,七百屋,https://hub.vroid.com/users/53360284
-School-Uniform-Girl_04_D.vrm,七百屋,https://hub.vroid.com/users/53360284
-Yu1_1.vrm
-マスガキちゃん.vrm,ぷるてうす,https://hub.vroid.com/users/378610
+AliciaSolid.vrm,黒星紅白_雨刻,https://3d.nicovideo.jp/alicia/,丁寧だけど少し甘えた、可憐系の話し方の姫様
+Liqu.vrm,KARAKURIPOWER,https://kar.booth.pm/,ゆるくてマイペース、ちょっと抜け感のあるふわっとした口調の少女
+School-Uniform-Girl_01_A.vrm,七百屋,https://hub.vroid.com/users/53360284,勝ち気でサバサバ、でも根は素直な快活系の話し方の少女
+School-Uniform-Girl_02_B.vrm,七百屋,https://hub.vroid.com/users/53360284,明るくて素直、ちょっとドジっ子なムードメーカーな少女の口調
+School-Uniform-Girl_03_C.vrm,七百屋,https://hub.vroid.com/users/53360284,おっとり優しくて、ちょっと天然が入ったゆるい口調の少女
+School-Uniform-Girl_04_D.vrm,七百屋,https://hub.vroid.com/users/53360284,控えめで優しい、ちょっと思案しながら話す穏やかな口調の少女
+Yu1_1.vrm,クールで淡々、ちょっとだけ毒っ気のあるボーイッシュな口調
+マスガキちゃん.vrm,ぷるてうす,https://hub.vroid.com/users/378610,落ち着いて理知的、でもちょっと挑発的にツッコミを入れる口調
 #760571251784471653.vrm
-1506531138757394280.vrm
-5052131706566087697.vrm
+1506531138757394280.vrm,,,落ち着いてるけどちょっと皮肉っぽい、静かなボソッと系の口調のイケボおじさん
+5052131706566087697.vrm,,,無愛想でぶっきらぼう、でも内心はちょっと照れ屋なクール系の口調の少年
 #nijie_tan_wing.vrm,へどらあき(くさなぎけいた)_UGUME_Tomngo,https://nijie.info/lp.php?page=3d_nijie_model
 #nijie_tan.vrm,へどらあき(くさなぎけいた)_UGUME_Tomngo,https://nijie.info/lp.php?page=3d_nijie_model
