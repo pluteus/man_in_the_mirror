@@ -1,3 +1,10 @@
+AnimalKawaii_01_Kuro.vrm,七百屋 [ Nao - Ya ],https://7a04m.booth.pm/items/4936193
+AnimalKawaii_02_Ryoku.vrm,七百屋 [ Nao - Ya ],https://7a04m.booth.pm/items/4936193
+AnimalKawaii_03_Sei.vrm,七百屋 [ Nao - Ya ],https://7a04m.booth.pm/items/4936193
+AnimalKawaii_04_Sumire.vrm,七百屋 [ Nao - Ya ],https://7a04m.booth.pm/items/4936193
+4043018172957611916.vrm,あわ,https://hub.vroid.com/characters/1786977751194326803/models/2419470718683337502
+505443538708341331.vrm,鳥卵,https://hub.vroid.com/characters/3258484240368596580/models/3849977228002340058
+2840094700387871768.vrm,たびマル,https://hub.vroid.com/characters/4218181662504667370/models/837894793231081598
 7732437234087404279.vrm,バーネット,https://hub.vroid.com/users/52759865
 5804829143715711442.vrm,バーネット,https://hub.vroid.com/users/52759865
 7800949340856773323.vrm,アニメ塗りマン,https://hub.vroid.com/users/72777205
@@ -16,7 +23,6 @@ Yu1_1.vrm
 マスガキちゃん.vrm,ぷるてうす,https://hub.vroid.com/users/378610
 #760571251784471653.vrm
 1506531138757394280.vrm
-4043018172957611916.vrm
 5052131706566087697.vrm
 #nijie_tan_wing.vrm,へどらあき(くさなぎけいた)_UGUME_Tomngo,https://nijie.info/lp.php?page=3d_nijie_model
 #nijie_tan.vrm,へどらあき(くさなぎけいた)_UGUME_Tomngo,https://nijie.info/lp.php?page=3d_nijie_model
