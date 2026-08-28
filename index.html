@@ -694,7 +694,7 @@ async function enterVR(){
     await renderer.xr.setSession(session);
     btnVR.classList.add('on');
     ensureVrPanelMesh();
-    captureUiToTexture();
+    drawVrPanel();
     vrPanelNeedsPlacement = true; // 最初のXRフレームで、その時点の頭の向きを基準にパネルを目の前へ配置する
     session.addEventListener('end', () => {
       xrSession = null;
@@ -711,107 +711,114 @@ btnVR.addEventListener('click', () => {
 });
 
 /* ---------------- 🥽 VR空間内フローティングUI ----------------
-   通常時に画面へ重ねて表示している既存のボタン・パネル群(#topbar、各種リストパネル、設定パネル等)は、
-   イマーシブVRセッション中はヘッドセット側には描画されない(WebXRはWebGL描画内容しかヘッドセットに
-   映さないため)。またマウス/タッチのイベント自体もイマーシブ中はブラウザから発火しなくなる。
-   そこで、それらのDOM UIをまとめて1枚のテクスチャとして定期的に撮影し、VR空間内にフローティングパネルとして
-   描画する。操作はコントローラーのレイ(Meta Questのハンドトラッキングによるピンチ操作も同じ
-   selectstart/selectendイベントとして扱われるため、そのまま使える)によるポインティング+
-   トリガー(select)で行い、当たった座標の実DOM要素に対して実際のクリック/スライダー操作を発行する。
+   通常時に画面へ重ねて表示している既存のボタン群は、イマーシブVRセッション中はヘッドセット側には
+   描画されない(WebXRはWebGL描画内容しかヘッドセットに映さないため)。またマウス/タッチのイベント
+   自体もイマーシブ中はブラウザから発火しなくなる。
+   以前はDOM全体をSVGのforeignObject経由でcanvasに焼き付けて貼り付ける方式を試みたが、
+   環境によってこの手法自体が描画に失敗する(canvasが真っ黒/透明のままになる)ことがあり、
+   結果としてパネルが全く表示されない不具合につながっていた。
+   そのため、主要な操作だけをCanvas2Dで直接描画する専用のVRメニューに変更する
+   (canvas 2D描画は環境依存の失敗要因がなく確実に表示される)。
+   各ボタンは既存の実ボタン(id指定)のラベル/on状態をそのまま反映し、選択時はその実ボタンを
+   click()するので、動作ロジック自体は完全に既存のものを再利用する。
+   操作はコントローラーのレイ(Meta Questのハンドトラッキングによるピンチ操作も同じ
+   selectstart/selectendイベントとして扱われるため、そのまま使える)+トリガー(select)で行う。
 ------------------------------------------------------------------ */
 
-// トップバーや各種パネルなど、既存の全UI要素をまとめるラッパー。
-// (#canvas-containerと裏側専用の#outCamBgは対象外。要素をappendChildで移動するだけなので、
-//  既存のイベントリスナーやposition:fixedの見た目は変わらない)
-const vrUiMirrorRoot = document.createElement('div');
-vrUiMirrorRoot.id = 'vrUiMirrorRoot';
-{
-  const excluded = new Set(['canvas-container', 'outCamBg']);
-  Array.from(document.body.children).forEach((el) => {
-    if(excluded.has(el.id)) return;
-    vrUiMirrorRoot.appendChild(el);
-  });
-  document.body.appendChild(vrUiMirrorRoot);
-}
+const VR_CANVAS_W = 900, VR_CANVAS_H = 1360;
+// mirror:trueの項目は対応する実ボタンのtextContent/on状態をそのまま表示に反映する。
+// mirror:falseの項目は常に固定ラベルを表示する(押した動作自体は同じくdomIdのボタンをclickする)。
+const VR_MENU_ITEMS = [
+  { domId: 'btnRandomCharacter', label: '🔀 キャラクター:ランダム', mirror: false },
+  { domId: 'btnMotion',          label: '▶ モーション',           mirror: true  },
+  { domId: 'btnRandomBackground',label: '🔀 背景:ランダム',       mirror: false },
+  { domId: 'btnGyro',            label: '🧭 ジャイロ有効化',       mirror: true  },
+  { domId: 'uprightToggle',      label: '📐 直立補正: OFF',        mirror: true, prefix: '📐 直立補正: ' },
+  { domId: 'btnCalib',           label: '🎯 中央校正',             mirror: false },
+  { domId: 'btnRealtimeConnect', label: '🎙️ 接続',                mirror: true  },
+  { domId: 'btnRealtimeMute',    label: '🔇 ミュート',             mirror: true  },
+  { domId: 'btnVR',              label: '🚪 VR終了',              mirror: false }
+];
 
-// ページの<style>内容(CSS変数含む)をそのままSVGへ埋め込むための取得
-const vrUiStyleText = Array.from(document.querySelectorAll('style')).map(s => s.textContent).join('\n');
-
-const VR_UI_TEX_W = 1600, VR_UI_TEX_H = 1600; // 実際のビューポート比率に合わせて中央にfitさせて使う
-let vrUiCanvas = null, vrUiCtx = null, vrUiTexture = null, vrUiLastDrawRect = null;
-
+let vrUiCanvas = null, vrUiCtx = null, vrUiTexture = null;
 function ensureVrUiCanvas(){
   if(vrUiCanvas) return;
   vrUiCanvas = document.createElement('canvas');
-  vrUiCanvas.width = VR_UI_TEX_W;
-  vrUiCanvas.height = VR_UI_TEX_H;
+  vrUiCanvas.width = VR_CANVAS_W;
+  vrUiCanvas.height = VR_CANVAS_H;
   vrUiCtx = vrUiCanvas.getContext('2d');
   vrUiTexture = new THREE.CanvasTexture(vrUiCanvas);
   if('colorSpace' in vrUiTexture) vrUiTexture.colorSpace = THREE.SRGBColorSpace;
 }
 
-// DOM(vrUiMirrorRoot)を1枚のcanvasに焼き付ける(SVGのforeignObjectを経由してImageとして読み込む手法)。
-// input[type=range]の見た目など一部のフォームコントロールは環境によって完全には再現されないことがあるが、
-// 主要なボタン・パネルの見た目とテキストはそのまま表示できる。
-let vrUiCaptureBusy = false;
-async function captureUiToTexture(){
-  if(vrUiCaptureBusy) return;
-  vrUiCaptureBusy = true;
-  let url = null;
-  try{
-    ensureVrUiCanvas();
-    const w = window.innerWidth, h = window.innerHeight;
-    const clone = vrUiMirrorRoot.cloneNode(true);
-    // input/textarea/selectの現在値はcloneNodeでは反映されないため明示的にコピーする
-    const origInputs = vrUiMirrorRoot.querySelectorAll('input, textarea, select');
-    const cloneInputs = clone.querySelectorAll('input, textarea, select');
-    origInputs.forEach((origEl, i) => {
-      const cEl = cloneInputs[i];
-      if(!cEl) return;
-      if(origEl.type === 'checkbox' || origEl.type === 'radio') cEl.checked = origEl.checked;
-      else cEl.value = origEl.value;
-    });
-    const svgMarkup = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">`
-      + `<foreignObject width="100%" height="100%">`
-      + `<div xmlns="http://www.w3.org/1999/xhtml" style="width:${w}px;height:${h}px;">`
-      + `<style>${vrUiStyleText}</style>${clone.outerHTML}`
-      + `</div></foreignObject></svg>`;
-    const svgBlob = new Blob([svgMarkup], { type: 'image/svg+xml;charset=utf-8' });
-    url = URL.createObjectURL(svgBlob);
-    const img = await new Promise((resolve, reject) => {
-      const image = new Image();
-      image.onload = () => resolve(image);
-      image.onerror = reject;
-      image.src = url;
-    });
-    vrUiCtx.fillStyle = '#0a0e14';
-    vrUiCtx.fillRect(0, 0, VR_UI_TEX_W, VR_UI_TEX_H);
-    const scale = Math.min(VR_UI_TEX_W / w, VR_UI_TEX_H / h);
-    const dw = w * scale, dh = h * scale;
-    const dx = (VR_UI_TEX_W - dw) / 2, dy = (VR_UI_TEX_H - dh) / 2;
-    vrUiCtx.drawImage(img, dx, dy, dw, dh);
-    vrUiTexture.needsUpdate = true;
-    vrUiLastDrawRect = { x: dx, y: dy, w: dw, h: dh, pageW: w, pageH: h };
-  }catch(err){
-    log(`VR UIの描画に失敗しました: ${err.message || err}`, 'warn');
-  }finally{
-    if(url) URL.revokeObjectURL(url);
-    vrUiCaptureBusy = false;
-  }
+function drawRoundedRect(ctx, x, y, w, h, r){
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
 }
 
-// --- VR空間内のフローティングパネル(既存UIをそのまま貼り付けた板) ---
+// メニュー内容をcanvasに描き直し、各ボタンのヒット矩形(canvasピクセル座標)を更新する
+function drawVrPanel(){
+  ensureVrUiCanvas();
+  const ctx = vrUiCtx;
+  ctx.clearRect(0, 0, VR_CANVAS_W, VR_CANVAS_H);
+  ctx.fillStyle = '#0f141c';
+  drawRoundedRect(ctx, 0, 0, VR_CANVAS_W, VR_CANVAS_H, 24);
+  ctx.fill();
+  ctx.strokeStyle = '#2a3444';
+  ctx.lineWidth = 3;
+  drawRoundedRect(ctx, 4, 4, VR_CANVAS_W - 8, VR_CANVAS_H - 8, 22);
+  ctx.stroke();
+
+  ctx.fillStyle = '#7fb2ff';
+  ctx.font = 'bold 44px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('🕹️ VR操作パネル', VR_CANVAS_W / 2, 80);
+
+  const top = 150, rowH = 118, gap = 16, pad = 40;
+  const btnW = VR_CANVAS_W - pad * 2;
+  VR_MENU_ITEMS.forEach((item, i) => {
+    const y = top + i * (rowH + gap);
+    let label = item.label;
+    let on = false;
+    if(item.mirror){
+      const el = document.getElementById(item.domId);
+      if(el){
+        label = item.prefix ? item.prefix + el.textContent : el.textContent;
+        on = el.classList.contains('on');
+      }
+    }
+    ctx.fillStyle = on ? '#2f6fd6' : '#1c2531';
+    drawRoundedRect(ctx, pad, y, btnW, rowH, 18);
+    ctx.fill();
+    ctx.strokeStyle = on ? '#8fc0ff' : '#3a4557';
+    ctx.lineWidth = 2;
+    drawRoundedRect(ctx, pad, y, btnW, rowH, 18);
+    ctx.stroke();
+    ctx.fillStyle = '#eef3fb';
+    ctx.font = '38px sans-serif';
+    ctx.fillText(label, VR_CANVAS_W / 2, y + rowH / 2, btnW - 40);
+    item.rect = { x: pad, y, w: btnW, h: rowH };
+  });
+  vrUiTexture.needsUpdate = true;
+}
+
+// --- VR空間内のフローティングパネル ---
 const vrUiPanelGroup = new THREE.Group();
 vrUiPanelGroup.visible = false;
 scene.add(vrUiPanelGroup);
 
-const VR_PANEL_WIDTH = 1.4; // メートル
+const VR_PANEL_WIDTH = 0.75; // メートル
 let vrPanelMesh = null;
 function ensureVrPanelMesh(){
   if(vrPanelMesh) return;
   ensureVrUiCanvas();
-  const aspect = window.innerHeight / window.innerWidth;
-  const geo = new THREE.PlaneGeometry(VR_PANEL_WIDTH, VR_PANEL_WIDTH * aspect);
+  const geo = new THREE.PlaneGeometry(VR_PANEL_WIDTH, VR_PANEL_WIDTH * (VR_CANVAS_H / VR_CANVAS_W));
   const mat = new THREE.MeshBasicMaterial({ map: vrUiTexture, transparent: true, side: THREE.DoubleSide, depthTest: false });
   vrPanelMesh = new THREE.Mesh(geo, mat);
   vrPanelMesh.renderOrder = 999;
@@ -828,8 +835,8 @@ function recenterVrPanel(){
   camDir.y = 0; // 見上げ/見下ろしで角度が付き過ぎるのを防ぐため、水平方向だけを向かせる
   if(camDir.lengthSq() < 1e-6) camDir.set(0, 0, -1);
   camDir.normalize();
-  const panelY = camPos.y - 0.05;
-  vrUiPanelGroup.position.set(camPos.x + camDir.x * 1.1, panelY, camPos.z + camDir.z * 1.1);
+  const panelY = camPos.y;
+  vrUiPanelGroup.position.set(camPos.x + camDir.x * 0.75, panelY, camPos.z + camDir.z * 0.75);
   vrUiPanelGroup.lookAt(camPos.x, panelY, camPos.z);
   vrUiPanelGroup.visible = true;
 }
@@ -863,20 +870,19 @@ function setupVrController(index){
   const reticle = makeReticle();
   controller.add(ray);
   scene.add(reticle);
-  const state = { controller, reticle, activeInputEl: null };
+  const state = { controller, reticle, inputSource: null };
   controller.addEventListener('selectstart', () => onVrSelectStart(state));
-  controller.addEventListener('selectend', () => onVrSelectEnd(state));
-  controller.addEventListener('connected', () => { ray.visible = true; });
-  controller.addEventListener('disconnected', () => { ray.visible = false; reticle.visible = false; });
+  controller.addEventListener('connected', (ev) => { state.inputSource = ev.data; ray.visible = true; });
+  controller.addEventListener('disconnected', () => { state.inputSource = null; ray.visible = false; reticle.visible = false; });
   scene.add(controller);
   vrControllers.push(state);
 }
 setupVrController(0);
 setupVrController(1);
 
-// コントローラー(またはピンチ由来)のレイとVRパネルとの交点を求め、対応する実ページ座標を返す
+// コントローラー(またはピンチ由来)のレイとVRパネルとの交点を求め、対応するcanvasピクセル座標を返す
 function raycastVrPanel(controller){
-  if(!vrPanelMesh || !vrUiPanelGroup.visible || !vrUiLastDrawRect) return null;
+  if(!vrPanelMesh || !vrUiPanelGroup.visible) return null;
   const origin = new THREE.Vector3();
   const quat = new THREE.Quaternion();
   const dir = new THREE.Vector3(0, 0, -1);
@@ -887,27 +893,9 @@ function raycastVrPanel(controller){
   const hits = vrRaycaster.intersectObject(vrPanelMesh, false);
   if(!hits.length || !hits[0].uv) return null;
   const hit = hits[0];
-  const texX = hit.uv.x * VR_UI_TEX_W;
-  const texY = (1 - hit.uv.y) * VR_UI_TEX_H; // uv原点は板の左下、canvasは左上原点のため反転
-  const rect = vrUiLastDrawRect;
-  if(texX < rect.x || texX > rect.x + rect.w || texY < rect.y || texY > rect.y + rect.h) return null; // 余白部分
-  const pageX = (texX - rect.x) / rect.w * rect.pageW;
-  const pageY = (texY - rect.y) / rect.h * rect.pageH;
-  return { point: hit.point, pageX, pageY };
-}
-
-function setSliderValueFromPageX(inputEl, pageX){
-  const r = inputEl.getBoundingClientRect();
-  if(r.width <= 0) return;
-  const ratio = Math.min(1, Math.max(0, (pageX - r.left) / r.width));
-  const min = parseFloat(inputEl.min || '0');
-  const max = parseFloat(inputEl.max || '100');
-  const step = parseFloat(inputEl.step || '1') || 1;
-  let value = min + ratio * (max - min);
-  value = Math.round(value / step) * step;
-  inputEl.value = String(value);
-  inputEl.dispatchEvent(new Event('input', { bubbles: true }));
-  inputEl.dispatchEvent(new Event('change', { bubbles: true }));
+  const canvasX = hit.uv.x * VR_CANVAS_W;
+  const canvasY = (1 - hit.uv.y) * VR_CANVAS_H; // uv原点は板の左下、canvasは左上原点のため反転
+  return { point: hit.point, canvasX, canvasY };
 }
 
 function onVrSelectStart(state){
@@ -916,25 +904,59 @@ function onVrSelectStart(state){
     recenterVrPanel(); // パネル外を選択した場合は、パネルを目の前に呼び戻す
     return;
   }
-  const el = document.elementFromPoint(hit.pageX, hit.pageY);
-  if(!el) return;
-  const inputEl = el.closest('input[type="range"]');
-  if(inputEl){
-    state.activeInputEl = inputEl;
-    setSliderValueFromPageX(inputEl, hit.pageX);
-    return;
-  }
-  const clickable = el.closest('button, .file-btn, [role="button"]') || el;
-  if(clickable && typeof clickable.click === 'function') clickable.click();
+  const item = VR_MENU_ITEMS.find((it) => it.rect
+    && hit.canvasX >= it.rect.x && hit.canvasX <= it.rect.x + it.rect.w
+    && hit.canvasY >= it.rect.y && hit.canvasY <= it.rect.y + it.rect.h);
+  if(!item) return;
+  const el = document.getElementById(item.domId);
+  if(el) el.click();
+  drawVrPanel(); // クリック直後の状態変化(ON/OFF等)を即座に反映
 }
 
-function onVrSelectEnd(state){
-  state.activeInputEl = null;
+// --- 左右サムスティックによる操作(タッチジェスチャーの代替) ---
+// 右スティック: 上下→垂直視点移動(視線先高さ) / 左右→回転操作(キャラクター・背景の回転量)
+// 左スティック: 水平視点移動(キャラクター・背景の左右位置)
+// ※VR中はrenderer.xrがヘッドセットの実姿勢からcamera.positionを毎フレーム上書きするため、
+//   カメラそのものを動かしてもVR内では反映されない。そのため「視点移動」は、視聴者から見て
+//   同じ効果が得られるキャラクター・背景側(uprightGroup)の平行移動として実装している。
+const VR_STICK_DEADZONE = 0.15;
+const VR_MOVE_SPEED = 0.6;      // m/秒(スティック全開時)
+const VR_MOVE_LIMIT = 1.0;      // m
+const VR_ROTATE_SPEED = 90;     // 度/秒(スティック全開時)
+let vrMoveX = 0, vrMoveY = 0;
+
+function readStickAxes(inputSource){
+  const gp = inputSource && inputSource.gamepad;
+  if(!gp || !gp.axes || gp.axes.length < 2) return null;
+  // Quest Touchコントローラー等の標準的なxr-standardマッピングでは
+  // axes[0..1]がタッチパッド(未使用時0)、axes[2..3]がサムスティック。
+  const x = gp.axes.length >= 4 ? gp.axes[2] : gp.axes[0];
+  const y = gp.axes.length >= 4 ? gp.axes[3] : gp.axes[1];
+  return { x: Math.abs(x) > VR_STICK_DEADZONE ? x : 0, y: Math.abs(y) > VR_STICK_DEADZONE ? y : 0 };
 }
 
-// 毎フレーム: レティクル位置更新・スライダーのドラッグ継続・パネルテクスチャの定期更新(200ms間隔)
-let vrUiLastCaptureTime = 0;
-function updateVrUi(time){
+function updateVrThumbsticks(dt){
+  if(!renderer.xr.isPresenting) return;
+  vrControllers.forEach((state) => {
+    if(!state.inputSource) return;
+    const axes = readStickAxes(state.inputSource);
+    if(!axes) return;
+    if(state.inputSource.handedness === 'right'){
+      // 上下(axes.y、スティックを奥へ倒すと負値)→視線先高さを上げる
+      vrMoveY = clamp(vrMoveY - axes.y * VR_MOVE_SPEED * dt, -VR_MOVE_LIMIT, VR_MOVE_LIMIT);
+      // 左右→回転量(既存のタッチ横ドラッグと同じparams.modelRotYを操作)
+      const newRotY = clamp(params.modelRotY + axes.x * VR_ROTATE_SPEED * dt, -180, 180);
+      syncSliderUI('modelRotY', newRotY);
+    }else if(state.inputSource.handedness === 'left'){
+      vrMoveX = clamp(vrMoveX + axes.x * VR_MOVE_SPEED * dt, -VR_MOVE_LIMIT, VR_MOVE_LIMIT);
+    }
+  });
+  uprightGroup.position.set(vrMoveX, vrMoveY, 0);
+}
+
+// 毎フレーム: レティクル位置更新・パネルテクスチャの定期更新(300ms間隔)・サムスティック操作
+let vrUiLastDrawTime = 0;
+function updateVrUi(time, delta){
   if(!renderer.xr.isPresenting){
     if(vrUiPanelGroup.visible) vrUiPanelGroup.visible = false;
     vrControllers.forEach((state) => { state.reticle.visible = false; });
@@ -942,21 +964,22 @@ function updateVrUi(time){
   }
   if(vrPanelNeedsPlacement){
     recenterVrPanel();
+    drawVrPanel();
     vrPanelNeedsPlacement = false;
   }
+  updateVrThumbsticks(delta);
   vrControllers.forEach((state) => {
     const hit = raycastVrPanel(state.controller);
     if(hit){
       state.reticle.visible = true;
       state.reticle.position.copy(hit.point);
-      if(state.activeInputEl) setSliderValueFromPageX(state.activeInputEl, hit.pageX);
     }else{
       state.reticle.visible = false;
     }
   });
-  if(!vrUiLastCaptureTime || time - vrUiLastCaptureTime > 200){
-    vrUiLastCaptureTime = time;
-    captureUiToTexture();
+  if(!vrUiLastDrawTime || time - vrUiLastDrawTime > 300){
+    vrUiLastDrawTime = time;
+    drawVrPanel();
   }
 }
 
@@ -4962,7 +4985,7 @@ gestureEl.addEventListener('pointercancel', endGesturePointer);
    ヘッドセットのリフレッシュレートに同期して呼ばれるようになり、立体視描画に必要。 */
 function animate(time){
   const delta = clock.getDelta();
-  updateVrUi(time || performance.now());
+  updateVrUi(time || performance.now(), delta);
   if(mixer) mixer.update(delta);
   if(currentVRM){
     currentVRM.update(delta);
