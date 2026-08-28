@@ -312,6 +312,7 @@
       <button id="btnCam">▶ インカメラ</button>
       <button id="btnOutCam">📷 アウトカメラ</button>
       <button id="btnScreenshot">📸 撮影</button>
+      <button id="btnThumbnail">🖼 サムネイル撮影</button>
       <button id="btnRecord">⏺ 録画</button>
     </div>
   </div>
@@ -787,6 +788,7 @@ const VR_MAIN_MENU = [
   { type: 'action', domId: 'btnCam',           label: '▶ インカメラ',              mirror: true },
   { type: 'action', domId: 'btnOutCam',        label: '📷 アウトカメラ',            mirror: true },
   { type: 'action', domId: 'btnScreenshot',    label: '📸 撮影' },
+  { type: 'action', domId: 'btnThumbnail',     label: '🖼 サムネイル撮影' },
   { type: 'action', domId: 'btnRecord',        label: '⏺ 録画',                    mirror: true },
   { type: 'action', domId: 'btnCalib',         label: '🎯 中央校正' },
   { type: 'action', domId: 'btnGyro',          label: '🧭 ジャイロ有効化',          mirror: true },
@@ -4194,6 +4196,90 @@ document.getElementById('btnScreenshot').addEventListener('click', () => {
   }catch(err){
     // 外部URL由来のテクスチャ(CORS未対応)が混ざっているとcanvasが「汚染」され保存できない場合がある
     log(`スクリーンショット保存エラー: ${err.message || err}(外部素材のCORS制限が原因の場合があります)`, 'err');
+  }
+});
+
+/* ---------------- 🖼 サムネイル撮影(キャラクターの全身がちょうど収まる最小サイズで保存) ----------------
+   現在のVRMモデルのバウンディングボックスをカメラ視点でスクリーン座標に投影し、
+   その全身が収まる最小の矩形だけをキャンバスから切り出して保存する。
+   ファイル名は現在選択中のVRMファイル名(拡張子を.pngに変更したもの)を使用する。 */
+document.getElementById('btnThumbnail').addEventListener('click', () => {
+  try{
+    if(!currentVRM || !currentVRM.scene){
+      log('サムネイル撮影エラー: キャラクターが読み込まれていません', 'err');
+      return;
+    }
+
+    // 直前の描画内容を確実にバッファへ反映してから取得
+    renderer.render(scene, camera);
+
+    // モデル全体(付属品含む)のワールド座標バウンディングボックスを取得
+    currentVRM.scene.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(currentVRM.scene);
+    if(box.isEmpty()){
+      log('サムネイル撮影エラー: モデルの範囲を取得できませんでした', 'err');
+      return;
+    }
+
+    // バウンディングボックスの8頂点をスクリーン座標(キャンバスの実ピクセル)に投影
+    const canvasEl = renderer.domElement;
+    const cw = canvasEl.width;
+    const ch = canvasEl.height;
+    const corners = [
+      new THREE.Vector3(box.min.x, box.min.y, box.min.z),
+      new THREE.Vector3(box.min.x, box.min.y, box.max.z),
+      new THREE.Vector3(box.min.x, box.max.y, box.min.z),
+      new THREE.Vector3(box.min.x, box.max.y, box.max.z),
+      new THREE.Vector3(box.max.x, box.min.y, box.min.z),
+      new THREE.Vector3(box.max.x, box.min.y, box.max.z),
+      new THREE.Vector3(box.max.x, box.max.y, box.min.z),
+      new THREE.Vector3(box.max.x, box.max.y, box.max.z),
+    ];
+
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    corners.forEach(v => {
+      const p = v.clone().project(camera); // NDC(-1〜1)
+      const sx = (p.x * 0.5 + 0.5) * cw;
+      const sy = (1 - (p.y * 0.5 + 0.5)) * ch;
+      minX = Math.min(minX, sx); maxX = Math.max(maxX, sx);
+      minY = Math.min(minY, sy); maxY = Math.max(maxY, sy);
+    });
+
+    // 端が切れないよう、ごく僅かな余白(3%)だけ加えてから画面内にクランプ
+    const marginX = (maxX - minX) * 0.03;
+    const marginY = (maxY - minY) * 0.03;
+    minX = Math.max(0, Math.floor(minX - marginX));
+    minY = Math.max(0, Math.floor(minY - marginY));
+    maxX = Math.min(cw, Math.ceil(maxX + marginX));
+    maxY = Math.min(ch, Math.ceil(maxY + marginY));
+
+    const sw = Math.max(1, maxX - minX);
+    const sh = Math.max(1, maxY - minY);
+
+    const cropCanvas = document.createElement('canvas');
+    cropCanvas.width = sw;
+    cropCanvas.height = sh;
+    const ctx = cropCanvas.getContext('2d');
+    ctx.drawImage(canvasEl, minX, minY, sw, sh, 0, 0, sw, sh);
+
+    const dataUrl = cropCanvas.toDataURL('image/png');
+
+    // 現在のVRMファイル名(拡張子を.pngに変更)をファイル名にする
+    let baseName = 'thumbnail';
+    if(activeCharacterIndex >= 0 && characterClips[activeCharacterIndex]){
+      baseName = characterClips[activeCharacterIndex].name.replace(/\.vrm$/i, '');
+    }
+    const filename = `${baseName}.png`;
+
+    const a = document.createElement('a');
+    a.href = dataUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    log(`サムネイルを保存しました: ${filename} (${sw}x${sh})`, 'ok');
+  }catch(err){
+    log(`サムネイル撮影エラー: ${err.message || err}(外部素材のCORS制限が原因の場合があります)`, 'err');
   }
 });
 
