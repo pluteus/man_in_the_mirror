@@ -384,6 +384,7 @@
       <div class="slider-row"><label>回転量</label><input type="range" id="modelRotY" min="-180" max="180" step="1" value="0"><span id="modelRotYV">0</span>°</div>
       <div class="slider-row"><label>テクスチャ上限</label><input type="range" id="texBudget" min="50" max="500" step="10" value="200"><span id="texBudgetV">200</span>MB</div>
       <div class="slider-row"><label>口の開き最大値</label><input type="range" id="lipSyncMaxMouth" min="0.1" max="1.5" step="0.05" value="1"><span id="lipSyncMaxMouthV">1.00</span></div>
+      <div class="slider-row"><label>音声分離リップシンク</label><button id="vowelLipSyncToggle" class="toggle-btn">OFF</button></div>
     </div>
 
     <div id="settingsTabGyro" class="settings-tab-panel">
@@ -1291,6 +1292,45 @@ function updateVrThumbsticks(dt){
   if(moved) registerVrActivity();
 }
 
+// --- コントローラーの物理ボタン割り当て ---
+// 右コントローラーAボタン: 中央校正(performCenterCalibration)
+// 左コントローラー: 本来の「メニュー」ボタンはOculus/Meta Questのシステムに予約されており
+// (押すとシステムメニューが開く/セッションを抜けるなどOS側の動作になる)、WebXR経由では
+// ゲームパッドの押下として取得できない機種がほとんどのため、代わりに同じ左コントローラーの
+// Yボタンをメニューウィンドウの表示切替に割り当てている。
+// xr-standardマッピングでは buttons[4]=A/Xボタン、buttons[5]=B/Yボタンが一般的。
+let vrBtnAPrevPressed = false;
+let vrBtnMenuSubPrevPressed = false;
+function updateVrGamepadButtons(){
+  if(!renderer.xr.isPresenting) return;
+  vrControllers.forEach((state) => {
+    const gp = state.inputSource && state.inputSource.gamepad;
+    if(!gp || !gp.buttons) return;
+    if(state.inputSource.handedness === 'right'){
+      const pressed = !!(gp.buttons[4] && gp.buttons[4].pressed);
+      if(pressed && !vrBtnAPrevPressed){
+        registerVrActivity();
+        performCenterCalibration();
+      }
+      vrBtnAPrevPressed = pressed;
+    }else if(state.inputSource.handedness === 'left'){
+      const pressed = !!(gp.buttons[5] && gp.buttons[5].pressed);
+      if(pressed && !vrBtnMenuSubPrevPressed){
+        registerVrActivity();
+        if(vrUiHidden){
+          // 無操作で隠れていた直後の最初の押下は、誤操作防止のためメニューボタンの再表示のみに留める
+          vrUiHidden = false;
+        }else{
+          vrMenuOpen = !vrMenuOpen;
+          if(vrMenuOpen){ vrSetView('main'); drawVrPanel(); }
+          drawVrButton(state.hoverButton);
+        }
+      }
+      vrBtnMenuSubPrevPressed = pressed;
+    }
+  });
+}
+
 // 毎フレーム: HUD配置更新・レティクル位置/ホバー判定・パネルテクスチャの更新・サムスティック操作・
 // 無操作タイムアウトによる自動非表示
 let vrUiLastDrawTime = 0;
@@ -1312,6 +1352,7 @@ function updateVrUi(time, delta){
 
   updateVrHudPlacement();
   updateVrThumbsticks(delta);
+  updateVrGamepadButtons();
 
   let anyHover = false;
   let panelHoverChanged = false;
@@ -1450,6 +1491,99 @@ function loadVRMObject(url, label){
       }, (err) => { log(`VRM読込エラー(${label}): ${err.message || err}`, 'err'); reject(err); });
     });
   })();
+}
+
+/* ---------------- モデル読込演出(頂点→ワイヤーフレーム→ソリッド→テクスチャ) ----------------
+   GLTFLoader.parseは一括処理で完了するため実際のダウンロード/パース進捗とは連動しないが、
+   読込完了直後にこの順で見た目を切り替えることで「段階的に表示された」感を演出する。
+   VRMキャラクターと背景GLBの両方で共通利用する汎用関数。 */
+const MODEL_REVEAL_STAGE_MS = 350; // 各段階の表示時間(ミリ秒)。0にすると演出をスキップして即テクスチャ表示にする
+
+// root配下の全メッシュを対象に演出を行う。戻り値は演出を即座に最終状態(テクスチャ表示)へ
+// 進めてキャンセルする関数(呼び出し側で保持し、次の演出開始前やオブジェクト解放前に呼ぶことで、
+// タイマー残留やdispose後のアクセスを防ぐ)。
+function playModelLoadReveal(root, label='読込演出'){
+  if(!root || MODEL_REVEAL_STAGE_MS <= 0) return () => {};
+
+  const entries = [];
+  root.traverse((obj) => {
+    if(obj.isMesh && obj.geometry && obj.geometry.attributes && obj.geometry.attributes.position){
+      entries.push({ mesh: obj, originalMaterial: obj.material });
+    }
+  });
+  if(entries.length === 0) return () => {};
+
+  // 頂点表示用: 元メッシュと同じ親・同じローカル変形のPointsを重ねて一時的に追加する
+  // (SkinnedMeshのボーン変形は反映されずバインドポーズのまま静止するが、短時間の演出用途のため許容)
+  const pointsObjects = entries.map(({ mesh }) => {
+    const pts = new THREE.Points(mesh.geometry, new THREE.PointsMaterial({
+      color: 0x9fd8ff, size: 0.0035, sizeAttenuation: true, depthWrite: false
+    }));
+    pts.position.copy(mesh.position);
+    pts.quaternion.copy(mesh.quaternion);
+    pts.scale.copy(mesh.scale);
+    mesh.parent.add(pts);
+    return pts;
+  });
+  const wireMat = new THREE.MeshBasicMaterial({ color: 0x9fd8ff, wireframe: true });
+  const solidMat = new THREE.MeshStandardMaterial({ color: 0xcfcfcf, roughness: 0.9, metalness: 0 });
+
+  entries.forEach(({ mesh }) => { mesh.visible = false; });
+
+  let finished = false;
+  const timers = [];
+  const removePoints = () => {
+    pointsObjects.forEach((pts) => {
+      if(pts.parent) pts.parent.remove(pts);
+      pts.material.dispose();
+    });
+  };
+  const finish = () => {
+    if(finished) return;
+    finished = true;
+    timers.forEach(clearTimeout);
+    removePoints();
+    entries.forEach(({ mesh, originalMaterial }) => {
+      mesh.visible = true;
+      mesh.material = originalMaterial;
+    });
+    wireMat.dispose();
+    solidMat.dispose();
+  };
+
+  log(`${label}: 頂点表示`);
+  timers.push(setTimeout(() => {
+    if(finished) return;
+    removePoints();
+    entries.forEach(({ mesh }) => { mesh.visible = true; mesh.material = wireMat; });
+    log(`${label}: ワイヤーフレーム表示`);
+  }, MODEL_REVEAL_STAGE_MS));
+
+  timers.push(setTimeout(() => {
+    if(finished) return;
+    entries.forEach(({ mesh }) => { mesh.material = solidMat; });
+    log(`${label}: ソリッド表示`);
+  }, MODEL_REVEAL_STAGE_MS * 2));
+
+  timers.push(setTimeout(() => {
+    if(finished) return;
+    log(`${label}: テクスチャ表示`);
+    finish();
+  }, MODEL_REVEAL_STAGE_MS * 3));
+
+  return finish;
+}
+
+let cancelActiveVrmReveal = null; // 実行中のVRM演出があれば即座に最終状態へ戻す関数
+function playVrmLoadReveal(vrm){
+  if(cancelActiveVrmReveal) cancelActiveVrmReveal(); // 前のキャラクターの演出が残っていれば先に片付ける
+  cancelActiveVrmReveal = playModelLoadReveal(vrm.scene, 'VRM読込演出');
+}
+
+let cancelActiveBgReveal = null; // 実行中の背景演出があれば即座に最終状態へ戻す関数
+function playBackgroundLoadReveal(object){
+  if(cancelActiveBgReveal) cancelActiveBgReveal(); // 前の背景の演出が残っていれば先に片付ける
+  cancelActiveBgReveal = playModelLoadReveal(object, '背景読込演出');
 }
 
 function loadVRMA(url, label){
@@ -1930,6 +2064,7 @@ async function setActiveCharacter(idx){
 
   const needsLoadLog = !nextEntry.object;
   if(needsLoadLog) updateCharacterListUI();
+  if(cancelActiveVrmReveal) cancelActiveVrmReveal(); // 別キャラクターへの切替が始まったので前の演出は即終了させる
 
   let vrm;
   try{
@@ -1947,6 +2082,7 @@ async function setActiveCharacter(idx){
 
   currentVRM = vrm;
   if(!vrm.scene.parent) uprightGroup.add(vrm.scene); // 初回読込時はまだシーンに未追加のため(直立補正グループの下に追加)
+  if(needsLoadLog) playVrmLoadReveal(vrm); // 初回読込のキャラクターのみ、頂点→ワイヤー→ソリッド→テクスチャの順で見た目を演出
   vrm.scene.traverse((obj) => { if(obj.isMesh) obj.castShadow = true; }); // 地面に影を落とす
   if(vrm.lookAt) vrm.lookAt.target = camera; // 視線を常にカメラ(視聴者側)に向ける
   baseModelRotY = vrm.scene.rotation.y; // ユーザーの回転量スライダーはこの基準角に加算する
@@ -2443,6 +2579,7 @@ function ensureBackgroundLoaded(entry){
 // エントリのGLBをシーンから外してdisposeし、メモリを解放する(ファイル名リストへの登録自体は維持)
 function releaseBackground(entry){
   if(!entry || !entry.object) return;
+  if(cancelActiveBgReveal) cancelActiveBgReveal(); // 演出中のタイマーがdispose後のオブジェクトへ触れないよう先に片付ける
   uprightGroup.remove(entry.object);
   disposeObject3D(entry.object);
   entry.object = null;
@@ -2475,7 +2612,10 @@ async function setActiveBackground(idx){
   // 切替先の読込が完了してから直前の背景を解放する(切替失敗時に無背景になるのを防ぐ)
   if(prevEntry && prevEntry !== nextEntry) releaseBackground(prevEntry);
 
-  if(object) object.visible = true; // 「背景なし」の場合はobjectがnullなのでそのまま
+  if(object){
+    object.visible = true; // 「背景なし」の場合はobjectがnullなのでそのまま
+    if(needsLoadLog) playBackgroundLoadReveal(object); // 初回読込の背景のみ、頂点→ワイヤー→ソリッド→テクスチャの順で見た目を演出
+  }
   activeBackgroundIndex = idx;
   updateBackgroundListUI();
   log(`背景を切替: ${nextEntry.name}`, 'ok');
@@ -3156,18 +3296,24 @@ function updateLipSync(){
     }
     const mouthAmount = Math.min(1, volume) * params.lipSyncMaxMouth;
     if(vocalAnalyser && mouthAmount > 0.02){
-      const formants = estimateFormants(vocalAnalyser, sampleRate);
-      // BGMの時だけ、ボーカルらしいピッチの周期性が確認できた区間に限ってフォルマント判定を信用する。
-      // 楽器のアタック音や複数楽器が重なった箇所でF1/F2がたまたま母音っぽくなる誤判定を減らすためのガード
-      // (会話音声はそもそも歌声・会話単体なのでこのチェックは不要=常に信頼度1として扱う)。
-      const confidence = isBgmSource
-        ? computePeriodicityConfidence(getLpcTimeData(vocalAnalyser), sampleRate)
-        : 1;
-      if(formants && confidence >= BGM_VOWEL_CONFIDENCE_MIN){
-        const w = computeVowelWeights(formants.f1, formants.f2);
-        for(const key in target) target[key] = w[key] * mouthAmount;
+      if(!params.vowelLipSync){
+        // 「音声分離リップシンク」OFF: LPCフォルマント解析(負荷が高い)を行わず、
+        // 音量だけで「あ」を動かす従来の軽量な口パクにする
+        target.aa = mouthAmount;
       }else{
-        target.aa = mouthAmount; // フォルマントが安定して取れない、またはボーカルらしくない区間は従来通り「あ」で代用
+        const formants = estimateFormants(vocalAnalyser, sampleRate);
+        // BGMの時だけ、ボーカルらしいピッチの周期性が確認できた区間に限ってフォルマント判定を信用する。
+        // 楽器のアタック音や複数楽器が重なった箇所でF1/F2がたまたま母音っぽくなる誤判定を減らすためのガード
+        // (会話音声はそもそも歌声・会話単体なのでこのチェックは不要=常に信頼度1として扱う)。
+        const confidence = isBgmSource
+          ? computePeriodicityConfidence(getLpcTimeData(vocalAnalyser), sampleRate)
+          : 1;
+        if(formants && confidence >= BGM_VOWEL_CONFIDENCE_MIN){
+          const w = computeVowelWeights(formants.f1, formants.f2);
+          for(const key in target) target[key] = w[key] * mouthAmount;
+        }else{
+          target.aa = mouthAmount; // フォルマントが安定して取れない、またはボーカルらしくない区間は従来通り「あ」で代用
+        }
       }
     }
   }
@@ -4508,7 +4654,7 @@ const params = {
   moveStrengthUD: 1.0, moveSignUD: 0,
   moveStrengthFB: 1.0, moveSignFB: 0,
   offAxis: false, screenZ: 0.4, eyeDistCm: 40, cmRange: 60,
-  texBudgetMB: 200, modelRotY: 0, lipSyncMaxMouth: 1.0
+  texBudgetMB: 200, modelRotY: 0, lipSyncMaxMouth: 1.0, vowelLipSync: 0
 };
 
 /* ---------------- 調整値の保存/復元(localStorage) ---------------- */
@@ -4567,6 +4713,7 @@ function applyParamsToUI(){
   if(typeof applyMoveFixToggleUI === 'function') applyMoveFixToggleUI();
   if(typeof applyMoveSignUDUI === 'function') applyMoveSignUDUI();
   if(typeof applyMoveSignFBUI === 'function') applyMoveSignFBUI();
+  if(typeof applyVowelLipSyncToggleUI === 'function') applyVowelLipSyncToggleUI();
 }
 
 /* ---------------- 画面サイズ校正(オンスクリーン) ---------------- */
@@ -5133,6 +5280,8 @@ bindSlider('eyeDistCm','eyeDistCm', v=>v.toFixed(0));
 bindSlider('cmRange','cmRange', v=>v.toFixed(0));
 bindSlider('texBudget','texBudgetMB', v=>v.toFixed(0));
 bindSlider('lipSyncMaxMouth','lipSyncMaxMouth', v=>v.toFixed(2));
+// OFF時は音量のみで「あ」を動かす軽量な口パクにフォールバックし、フォルマント解析(重い)を行わない
+const applyVowelLipSyncToggleUI = bindToggle('vowelLipSyncToggle','vowelLipSync');
 
 // 保存済みの調整値があれば復元してUIに反映
 if(loadParamsFromStorage()){
