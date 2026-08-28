@@ -2800,6 +2800,12 @@ let bgmAnalyser = null;
 let bgmPlaybackGain = null;  // 🔊再生レベル:「BGM」用のgain(実際にスピーカーへ出る音量)
 let bgmCaptureStream = null; // BGM再生音をGemini入力コンテキストへ橋渡しするためのMediaStream
 let bgmSendGain = null;      // 「スクリーンBGM」トグルON時だけ値を1にして、BGM音声をマイクと一緒にGeminiへ送る(スクリーン画像の送信とは独立)
+// BGMは楽器音を含みそのままではフォルマント(F1/F2)がぼやけやすいため、
+// 人の声のフォルマントが集中する帯域(おおむね300〜3400Hz)だけを通したものを
+// 「フォルマント推定専用」に別系統で用意する(スピーカーに出る音・Geminiへ送る音には一切影響しない、解析専用の分岐)。
+let bgmVocalHighpass = null;
+let bgmVocalLowpass = null;
+let bgmVocalAnalyser = null;
 
 function ensureBgmAnalyser(){
   if(!bgmAnalyser){
@@ -2816,6 +2822,19 @@ function ensureBgmAnalyser(){
       const bgmCaptureDest = bgmAudioCtx.createMediaStreamDestination();
       bgmAnalyser.connect(bgmCaptureDest);
       bgmCaptureStream = bgmCaptureDest.stream;
+      // sourceからの並列分岐として、ボーカル帯域(300〜3400Hz)だけを通したフォルマント推定専用Analyserを用意する。
+      // 上のbgmAnalyser(原音)の経路には一切繋がず、あくまで解析専用の別枝なので再生音・送信音には影響しない。
+      bgmVocalHighpass = bgmAudioCtx.createBiquadFilter();
+      bgmVocalHighpass.type = 'highpass';
+      bgmVocalHighpass.frequency.value = 300; // これより低い帯域(ベース/キック等)を減衰
+      bgmVocalLowpass = bgmAudioCtx.createBiquadFilter();
+      bgmVocalLowpass.type = 'lowpass';
+      bgmVocalLowpass.frequency.value = 3400; // これより高い帯域(シンバル等の高域打楽器)を減衰
+      bgmVocalAnalyser = bgmAudioCtx.createAnalyser();
+      bgmVocalAnalyser.fftSize = 2048;
+      source.connect(bgmVocalHighpass);
+      bgmVocalHighpass.connect(bgmVocalLowpass);
+      bgmVocalLowpass.connect(bgmVocalAnalyser);
       wireBgmIntoGeminiInput(); // 既にGemini接続中であれば、ここで配線する
     }catch(e){ log(`BGMの口パク用音声解析の準備に失敗しました: ${e.message || e}`, 'warn'); }
   }
@@ -2996,6 +3015,33 @@ function computeVowelWeights(f1, f2){
   return weights;
 }
 
+// ---- BGM再生時のみ:フォルマント判定の信頼度ガード(ピッチ周期性チェック) ----
+// BGMはボーカル帯域だけを通しても、ギター/シンセ等の持続音や打楽器のアタックが
+// 残っていると、F1/F2がたまたま母音っぽい値になり誤判定することがある。
+// そこで「人の声らしい、はっきりしたピッチの周期性」があるかを自己相関で確認し、
+// 一定の信頼度に満たない区間ではフォルマント判定を採用しない(単純な口の開閉に留める)。
+const BGM_VOWEL_CONFIDENCE_MIN = 0.15; // 経験則。大きくするほど「怪しい区間」を弾きやすくなる代わりに、歌唱区間でも弾かれやすくなる
+
+function computePeriodicityConfidence(samples, sampleRate){
+  // 人の声の基本周波数(だいたい80〜500Hz)に相当するラグ範囲で自己相関のピークを探す。
+  // ピークが鋭い(=正規化した相関値が高い)ほど、はっきりしたピッチを持つ声らしい音とみなす。
+  const minLag = Math.floor(sampleRate / 500);
+  const maxLag = Math.floor(sampleRate / 80);
+  if(maxLag >= samples.length) return 0;
+  // 全区間×全ラグで自己相関を取ると重いので、比較対象は先頭側の一定区間に絞って軽量化する
+  const compareLen = Math.min(samples.length - maxLag, 1024);
+  let energy = 0;
+  for(let i = 0; i < compareLen; i++) energy += samples[i] * samples[i];
+  if(energy < 1e-6) return 0; // ほぼ無音
+  let bestCorr = 0;
+  for(let lag = minLag; lag <= maxLag; lag++){
+    let corr = 0;
+    for(let i = 0; i < compareLen; i++) corr += samples[i] * samples[i + lag];
+    if(corr > bestCorr) bestCorr = corr;
+  }
+  return Math.max(0, Math.min(1, bestCorr / energy));
+}
+
 const lipSyncVowelSmooth = { aa: 0, ih: 0, ou: 0, ee: 0, oh: 0 };
 
 // ---- ミュート中(AI音声を再生しない時)向け:発話テキストからの母音推定リップシンク ----
@@ -3095,24 +3141,33 @@ function updateLipSync(){
     // ミュート中はAI音声を再生しないため、代わりにトランスクリプト文字から推定した母音キューで動かす
     target = advanceTextLipSyncQueue(performance.now());
   }else{
-    let analyser = null, sampleRate = 24000, volume = 0;
+    let analyser = null, vocalAnalyser = null, sampleRate = 24000, volume = 0, isBgmSource = false;
     if(conversationActive && realtimeAnalyser){
       analyser = realtimeAnalyser;
+      vocalAnalyser = realtimeAnalyser; // AI音声は歌声・会話音声単体なので、そのままフォルマント推定に使える
       sampleRate = realtimeAudioCtx.sampleRate;
       volume = computeRms(analyser) * 6; // 感度は経験則、必要に応じて係数を調整
     }else if(!bgmPlayer.paused && bgmAnalyser){
-      analyser = bgmAnalyser;
+      analyser = bgmAnalyser; // 音量(RMS)は原音のまま使う。帯域を絞ると口の開閉の強さの感覚が変わってしまうため
+      vocalAnalyser = bgmVocalAnalyser || bgmAnalyser; // フォルマント推定にはボーカル帯域(300〜3400Hz)だけを通した信号を使う
       sampleRate = bgmAudioCtx.sampleRate;
       volume = computeRms(analyser) * 6;
+      isBgmSource = true;
     }
     const mouthAmount = Math.min(1, volume) * params.lipSyncMaxMouth;
-    if(analyser && mouthAmount > 0.02){
-      const formants = estimateFormants(analyser, sampleRate);
-      if(formants){
+    if(vocalAnalyser && mouthAmount > 0.02){
+      const formants = estimateFormants(vocalAnalyser, sampleRate);
+      // BGMの時だけ、ボーカルらしいピッチの周期性が確認できた区間に限ってフォルマント判定を信用する。
+      // 楽器のアタック音や複数楽器が重なった箇所でF1/F2がたまたま母音っぽくなる誤判定を減らすためのガード
+      // (会話音声はそもそも歌声・会話単体なのでこのチェックは不要=常に信頼度1として扱う)。
+      const confidence = isBgmSource
+        ? computePeriodicityConfidence(getLpcTimeData(vocalAnalyser), sampleRate)
+        : 1;
+      if(formants && confidence >= BGM_VOWEL_CONFIDENCE_MIN){
         const w = computeVowelWeights(formants.f1, formants.f2);
         for(const key in target) target[key] = w[key] * mouthAmount;
       }else{
-        target.aa = mouthAmount; // フォルマントが安定して取れない場合は従来通り「あ」で代用
+        target.aa = mouthAmount; // フォルマントが安定して取れない、またはボーカルらしくない区間は従来通り「あ」で代用
       }
     }
   }
