@@ -485,7 +485,8 @@
       <div class="motion-controls" style="border-bottom:none; padding-left:0; padding-right:0;">
         <button id="btnSendVideoIn">🤳 インカメラ映像:OFF</button>
         <button id="btnSendVideoOut">📷 アウトカメラ映像:OFF</button>
-        <button id="btnSendVideoScreen">🖥️ スクリーン映像:OFF</button>
+        <button id="btnSendVideoScreen">🖥️ スクリーン画像:OFF</button>
+        <button id="btnSendScreenBgm">🎵 スクリーンBGM:OFF</button>
         <button id="btnLocation">📍 位置情報:OFF</button>
       </div>
     </div>
@@ -1239,6 +1240,7 @@ const VR_STICK_DEADZONE = 0.15;
 const VR_MOVE_SPEED = 0.6;      // m/秒(スティック全開時)
 const VR_MOVE_LIMIT = 1.0;      // m
 const VR_ROTATE_SPEED = 90;     // 度/秒(スティック全開時)
+const VR_STICK_SCROLL_SPEED = 900; // px/秒(スティック全開時)。右レイがメニューウィンドウを指している間の上下スクロール速度
 // VR入室時、ヘッドセットの初期位置がキャラクターに近すぎるため、既定でこの分だけ奥へ離して表示する。
 // 左スティックの上下操作でさらにこの基準から近づく/遠ざかることができる(vrMoveZがその追加分)。
 const VR_DEFAULT_DIST_Z = -1.1; // m(負値=キャラクター側を奥へ離す)
@@ -1264,8 +1266,18 @@ function updateVrThumbsticks(dt){
     if(!axes) return;
     if(axes.x !== 0 || axes.y !== 0) moved = true;
     if(state.inputSource.handedness === 'right'){
-      // 上下(axes.y、スティックを奥へ倒すと負値)→視線先高さを上げる
-      vrMoveY = clamp(vrMoveY - axes.y * VR_MOVE_SPEED * dt, -VR_MOVE_LIMIT, VR_MOVE_LIMIT);
+      // 右レイがメニューウィンドウ(パネル)を指している間は、上下操作を視点移動ではなく
+      // メニューのスクロールに割り当てる(スティックを奥へ倒す=上へスクロール、手前へ倒す=下へスクロール)。
+      const pointingPanel = !!raycastVrPanel(state.controller);
+      if(pointingPanel && vrMaxScroll > 0){
+        if(axes.y !== 0){
+          const newScroll = clamp(vrScrollOffset + axes.y * VR_STICK_SCROLL_SPEED * dt, 0, vrMaxScroll);
+          if(newScroll !== vrScrollOffset){ vrScrollOffset = newScroll; drawVrPanel(); }
+        }
+      }else{
+        // 上下(axes.y、スティックを奥へ倒すと負値)→視線先高さを上げる
+        vrMoveY = clamp(vrMoveY - axes.y * VR_MOVE_SPEED * dt, -VR_MOVE_LIMIT, VR_MOVE_LIMIT);
+      }
       // 左右→回転量(既存のタッチ横ドラッグと同じparams.modelRotYを操作)
       const newRotY = clamp(params.modelRotY + axes.x * VR_ROTATE_SPEED * dt, -180, 180);
       syncSliderUI('modelRotY', newRotY);
@@ -2782,12 +2794,12 @@ function computeRms(analyser){
 }
 
 // BGM単独再生時(会話機能OFF、または未接続時)に「歌っているように」口パクさせるための音量解析
-// あわせて、スクリーン映像ON時にBGM再生音もGeminiへ送れるよう、MediaStreamとして取り出しておく
+// あわせて、「スクリーンBGM」トグルON時にBGM再生音もGeminiへ送れるよう、MediaStreamとして取り出しておく
 let bgmAudioCtx = null;
 let bgmAnalyser = null;
 let bgmPlaybackGain = null;  // 🔊再生レベル:「BGM」用のgain(実際にスピーカーへ出る音量)
 let bgmCaptureStream = null; // BGM再生音をGemini入力コンテキストへ橋渡しするためのMediaStream
-let bgmSendGain = null;      // スクリーン映像ON時だけ値を1にして、BGM音声をマイクと一緒にGeminiへ送る
+let bgmSendGain = null;      // 「スクリーンBGM」トグルON時だけ値を1にして、BGM音声をマイクと一緒にGeminiへ送る(スクリーン画像の送信とは独立)
 
 function ensureBgmAnalyser(){
   if(!bgmAnalyser){
@@ -2847,13 +2859,13 @@ setInterval(resumeBgmAudioIfNeeded, 2000);
 
 // BGMの再生音(bgmCaptureStream)を、Gemini送信用のAudioContext(geminiCaptureCtx)側のScriptProcessorに接続する。
 // MediaStreamはAudioContextをまたいで使えるため、bgmAudioCtx側で作った音声をgeminiCaptureCtx側で読み直す形でミックスする。
-// ゲインはスクリーン映像ON/OFFで0か1に切り替え、ミュート中はonaudioprocess側で送信自体を止める。
+// ゲインは「スクリーンBGM」トグルのON/OFFで0か1に切り替え、ミュート中はonaudioprocess側で送信自体を止める。
 function wireBgmIntoGeminiInput(){
   if(!geminiCaptureCtx || !geminiCaptureProcessor || !bgmCaptureStream || bgmSendGain) return;
   try{
     const bgmSource = geminiCaptureCtx.createMediaStreamSource(bgmCaptureStream);
     bgmSendGain = geminiCaptureCtx.createGain();
-    bgmSendGain.gain.value = sendVideoScreenEnabled ? 1 : 0;
+    bgmSendGain.gain.value = sendScreenBgmEnabled ? 1 : 0;
     bgmSource.connect(bgmSendGain);
     bgmSendGain.connect(geminiCaptureProcessor);
   }catch(e){ log(`BGM音声のGemini送信への接続に失敗しました: ${e.message || e}`, 'warn'); }
@@ -3206,6 +3218,7 @@ const GEMINI_LIVE_MODEL = 'gemini-3.1-flash-live-preview';
 let sendVideoOutEnabled = false;
 let sendVideoInEnabled = false;
 let sendVideoScreenEnabled = false;
+let sendScreenBgmEnabled = false; // スクリーン画像の送信とは独立して、BGM再生音だけをGeminiへ送るかどうか
 let videoSendInterval = null;
 const videoSendCanvas = document.createElement('canvas');
 const videoSendCtx = videoSendCanvas.getContext('2d');
@@ -3698,12 +3711,8 @@ function setupVideoSendToggleButton(btnId, label, isEnabledGetter, isEnabledSett
     const btn = document.getElementById(btnId);
     btn.classList.toggle('on', next);
     btn.textContent = `${label}:${next ? 'ON' : 'OFF'}`;
-    if(btnId === 'btnSendVideoScreen' && bgmSendGain){
-      bgmSendGain.gain.value = next ? 1 : 0; // スクリーン映像ON/OFFに合わせてBGM音声のGemini送信も即座に切替
-    }
     if(next){
       log(`${hint}をGeminiに送信します。会話中は見えているものについて質問できます`, 'ok');
-      if(btnId === 'btnSendVideoScreen') log('BGM再生中の音も一緒に送信します(ミュート中は送信されません)', 'ok');
       if(geminiWs && geminiWs.readyState === WebSocket.OPEN){
         startVideoSend();
         if(btnId === 'btnSendVideoScreen') log('「自分自身の姿」として認識させる指示は次回の再接続から反映されます', 'warn');
@@ -3715,7 +3724,24 @@ function setupVideoSendToggleButton(btnId, label, isEnabledGetter, isEnabledSett
 }
 setupVideoSendToggleButton('btnSendVideoOut', '📷 アウトカメラ映像', () => sendVideoOutEnabled, v => sendVideoOutEnabled = v, 'アウトカメラ映像');
 setupVideoSendToggleButton('btnSendVideoIn', '🤳 インカメラ映像', () => sendVideoInEnabled, v => sendVideoInEnabled = v, 'インカメラ映像');
-setupVideoSendToggleButton('btnSendVideoScreen', '🖥️ スクリーン映像', () => sendVideoScreenEnabled, v => sendVideoScreenEnabled = v, 'スクリーン(モデルと背景)映像');
+setupVideoSendToggleButton('btnSendVideoScreen', '🖥️ スクリーン画像', () => sendVideoScreenEnabled, v => sendVideoScreenEnabled = v, 'スクリーン(モデルと背景)画像');
+
+// 🎵 スクリーンBGM: 上のスクリーン画像トグルとは独立して、BGM再生音だけをGeminiへ送るかどうかを切り替える。
+// 映像の送信自体には影響せず、bgmSendGainの値だけを即座に切り替える(接続中でも即反映)。
+document.getElementById('btnSendScreenBgm').addEventListener('click', () => {
+  sendScreenBgmEnabled = !sendScreenBgmEnabled;
+  const btn = document.getElementById('btnSendScreenBgm');
+  btn.classList.toggle('on', sendScreenBgmEnabled);
+  btn.textContent = `🎵 スクリーンBGM:${sendScreenBgmEnabled ? 'ON' : 'OFF'}`;
+  if(bgmSendGain){
+    bgmSendGain.gain.value = sendScreenBgmEnabled ? 1 : 0;
+  }
+  if(sendScreenBgmEnabled){
+    log('BGM再生中の音をGeminiに送信します(ミュート中は送信されません)', 'ok');
+  }else{
+    log('BGM再生音のGeminiへの送信を停止しました', 'ok');
+  }
+});
 
 /* ---------------- 📍 位置情報のON/OFF ----------------
    ONにするとブラウザの位置情報(緯度経度)を取得し、Geminiとの会話にコンテキストとして渡す。
