@@ -1,19 +1,19 @@
-AnimalKawaii_01_Kuro.vrm,七百屋 [ Nao - Ya ],https://7a04m.booth.pm/items/4936193
-AnimalKawaii_02_Ryoku.vrm,七百屋 [ Nao - Ya ],https://7a04m.booth.pm/items/4936193
-AnimalKawaii_03_Sei.vrm,七百屋 [ Nao - Ya ],https://7a04m.booth.pm/items/4936193
-AnimalKawaii_04_Sumire.vrm,七百屋 [ Nao - Ya ],https://7a04m.booth.pm/items/4936193
+AnimalKawaii_01_Kuro.vrm,七百屋 [ Nao - Ya ],https://7a04m.booth.pm/items/4936193,ぶっきらぼうだけど優しい、低めのトーンで話す感じのボーイッシュ少女
+AnimalKawaii_02_Ryoku.vrm,七百屋 [ Nao - Ya ],https://7a04m.booth.pm/items/4936193,明るくてちょっとやんちゃ、フランクに距離を詰めてくるケモミミ少女の話し方
+#AnimalKawaii_03_Sei.vrm,七百屋 [ Nao - Ya ],https://7a04m.booth.pm/items/4936193
+#AnimalKawaii_04_Sumire.vrm,七百屋 [ Nao - Ya ],https://7a04m.booth.pm/items/4936193
 #4043018172957611916.vrm,あわ,https://hub.vroid.com/characters/1786977751194326803/models/2419470718683337502
-505443538708341331.vrm,鳥卵,https://hub.vroid.com/characters/3258484240368596580/models/3849977228002340058
-2840094700387871768.vrm,たびマル,https://hub.vroid.com/characters/4218181662504667370/models/837894793231081598
-7732437234087404279.vrm,バーネット,https://hub.vroid.com/users/52759865
-5804829143715711442.vrm,バーネット,https://hub.vroid.com/users/52759865
-7800949340856773323.vrm,アニメ塗りマン,https://hub.vroid.com/users/72777205
+505443538708341331.vrm,鳥卵,https://hub.vroid.com/characters/3258484240368596580/models/3849977228002340058,無表情で淡々、でも語尾にちょっと古風さが混じる話し方のキョンシー少女
+2840094700387871768.vrm,たびマル,https://hub.vroid.com/characters/4218181662504667370/models/837894793231081598,元気で人懐っこい、ちょっとドジっ子みたいな軽い口調のケモミミ少女
+7732437234087404279.vrm,バーネット,https://hub.vroid.com/users/52759865,礼儀正しくて落ち着いた、でもちょっとだけ素直じゃないツン寄りの口調の少女
+5804829143715711442.vrm,バーネット,https://hub.vroid.com/users/52759865,素直で明るい、ちょっと元気系の後輩みたいな口調の少女
+7800949340856773323.vrm,アニメ塗りマン,https://hub.vroid.com/users/72777205,ちょっと気が強いけど素直で可愛い、元気寄りの学級委員長口調
 #5876570490179264320.vrm
 8329890252317737768.vrm,VRoid Project,https://hub.vroid.com/users/36144806
 7714289881874798246.vrm
 8496491754682859078.vrm
 #8590256991748008892.vrm
-AliciaSolid.vrm,黒星紅白_雨刻,https://3d.nicovideo.jp/alicia/
+AliciaSolid.vrm,黒星紅白_雨刻,https://3d.nicovideo.jp/alicia/,丁寧だけど少し甘えた、可憐系の話し方
 Liqu.vrm,KARAKURIPOWER,https://kar.booth.pm/
 School-Uniform-Girl_01_A.vrm,七百屋,https://hub.vroid.com/users/53360284
 School-Uniform-Girl_02_B.vrm,七百屋,https://hub.vroid.com/users/53360284
