@@ -694,12 +694,19 @@ async function enterVR(){
     await renderer.xr.setSession(session);
     btnVR.classList.add('on');
     ensureVrPanelMesh();
+    ensureVrButtonMesh();
+    vrMenuOpen = false; // 入室直後はポップアップは閉じた状態、メニューボタンだけを表示する
     drawVrPanel();
-    vrPanelNeedsPlacement = true; // 最初のXRフレームで、その時点の頭の向きを基準にパネルを目の前へ配置する
+    drawVrButton(false);
+    registerVrActivity();
     session.addEventListener('end', () => {
       xrSession = null;
       btnVR.classList.remove('on');
       vrUiPanelGroup.visible = false;
+      vrMenuButtonGroup.visible = false;
+      vrMenuOpen = false;
+      vrUiHidden = false;
+      vrUiLastActivity = 0;
     });
   }catch(e){
     log(`VR表示の開始に失敗しました: ${e.message || e}`, 'err');
@@ -723,7 +730,24 @@ btnVR.addEventListener('click', () => {
    click()するので、動作ロジック自体は完全に既存のものを再利用する。
    操作はコントローラーのレイ(Meta Questのハンドトラッキングによるピンチ操作も同じ
    selectstart/selectendイベントとして扱われるため、そのまま使える)+トリガー(select)で行う。
+
+   ▼ 2026-08修正: フル操作パネルを視界中央に出すとキャラクターに重なって見づらいという指摘のため、
+     常時表示は「左下の小さなメニューボタン」のみとし、それを選択したときだけフルパネル(ポップアップ)
+     を開く方式に変更。ボタン・パネルともに毎フレーム頭の向きに追従させ、視界内では中央を避けて
+     左下寄りに配置することでキャラクターと重ならないようにする。
+     さらに、コントローラーのレイがどのボタンに当たっているかを丸いリング状のマーカーで示しつつ、
+     当たっているボタン自体の色も変える(ホバー表示)。
+     しばらく操作がない場合はボタン・パネルとも自動的に非表示にし、視界の邪魔にならないようにする。
 ------------------------------------------------------------------ */
+
+let vrMenuOpen = false;       // フル操作パネル(ポップアップ)が開いているか
+let vrUiHidden = false;       // 無操作によりメニューボタン/パネルを一時的に隠しているか
+let vrUiLastActivity = 0;     // 最後に「操作」とみなしたタイムスタンプ(performance.now())
+const VR_UI_IDLE_MS = 6000;   // これだけ操作がなければ自動的に隠す(ミリ秒)
+
+function registerVrActivity(){
+  vrUiLastActivity = performance.now();
+}
 
 const VR_CANVAS_W = 900, VR_CANVAS_H = 1360;
 // mirror:trueの項目は対応する実ボタンのtextContent/on状態をそのまま表示に反映する。
@@ -761,7 +785,8 @@ function drawRoundedRect(ctx, x, y, w, h, r){
   ctx.closePath();
 }
 
-// メニュー内容をcanvasに描き直し、各ボタンのヒット矩形(canvasピクセル座標)を更新する
+// メニュー内容をcanvasに描き直し、各ボタンのヒット矩形(canvasピクセル座標)を更新する。
+// レイが当たっている項目(hoverItemIndex)はON状態とは別の色でハイライトする。
 function drawVrPanel(){
   ensureVrUiCanvas();
   const ctx = vrUiCtx;
@@ -780,6 +805,8 @@ function drawVrPanel(){
   ctx.textBaseline = 'middle';
   ctx.fillText('🕹️ VR操作パネル', VR_CANVAS_W / 2, 80);
 
+  const hoverSet = new Set(vrControllers.map((s) => s.hoverItemIndex).filter((i) => i >= 0));
+
   const top = 150, rowH = 118, gap = 16, pad = 40;
   const btnW = VR_CANVAS_W - pad * 2;
   VR_MENU_ITEMS.forEach((item, i) => {
@@ -793,11 +820,12 @@ function drawVrPanel(){
         on = el.classList.contains('on');
       }
     }
-    ctx.fillStyle = on ? '#2f6fd6' : '#1c2531';
+    const hovered = hoverSet.has(i);
+    ctx.fillStyle = hovered ? '#e08a2e' : (on ? '#2f6fd6' : '#1c2531');
     drawRoundedRect(ctx, pad, y, btnW, rowH, 18);
     ctx.fill();
-    ctx.strokeStyle = on ? '#8fc0ff' : '#3a4557';
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = hovered ? '#ffd08a' : (on ? '#8fc0ff' : '#3a4557');
+    ctx.lineWidth = hovered ? 4 : 2;
     drawRoundedRect(ctx, pad, y, btnW, rowH, 18);
     ctx.stroke();
     ctx.fillStyle = '#eef3fb';
@@ -808,12 +836,12 @@ function drawVrPanel(){
   vrUiTexture.needsUpdate = true;
 }
 
-// --- VR空間内のフローティングパネル ---
+// --- VR空間内のフローティングパネル(ポップアップ。btnVRメニューを選択したときだけ表示) ---
 const vrUiPanelGroup = new THREE.Group();
 vrUiPanelGroup.visible = false;
 scene.add(vrUiPanelGroup);
 
-const VR_PANEL_WIDTH = 0.75; // メートル
+const VR_PANEL_WIDTH = 0.42; // メートル(中央のキャラクターに重ならないよう、以前より小さめにしている)
 let vrPanelMesh = null;
 function ensureVrPanelMesh(){
   if(vrPanelMesh) return;
@@ -825,22 +853,92 @@ function ensureVrPanelMesh(){
   vrUiPanelGroup.add(vrPanelMesh);
 }
 
-// パネルを現在の頭の向き(水平方向のみ)の正面・目の前に配置し直す
-function recenterVrPanel(){
-  ensureVrPanelMesh();
-  const camPos = new THREE.Vector3();
-  const camDir = new THREE.Vector3();
-  camera.getWorldPosition(camPos);
-  camera.getWorldDirection(camDir);
-  camDir.y = 0; // 見上げ/見下ろしで角度が付き過ぎるのを防ぐため、水平方向だけを向かせる
-  if(camDir.lengthSq() < 1e-6) camDir.set(0, 0, -1);
-  camDir.normalize();
-  const panelY = camPos.y;
-  vrUiPanelGroup.position.set(camPos.x + camDir.x * 0.75, panelY, camPos.z + camDir.z * 0.75);
-  vrUiPanelGroup.lookAt(camPos.x, panelY, camPos.z);
-  vrUiPanelGroup.visible = true;
+// --- 左下の小さなメニューボタン(常時表示。これを選択するとポップアップの開閉を切り替える) ---
+const VR_BTN_CANVAS = 256;
+let vrBtnCanvas = null, vrBtnCtx = null, vrBtnTexture = null;
+function ensureVrBtnCanvas(){
+  if(vrBtnCanvas) return;
+  vrBtnCanvas = document.createElement('canvas');
+  vrBtnCanvas.width = VR_BTN_CANVAS;
+  vrBtnCanvas.height = VR_BTN_CANVAS;
+  vrBtnCtx = vrBtnCanvas.getContext('2d');
+  vrBtnTexture = new THREE.CanvasTexture(vrBtnCanvas);
+  if('colorSpace' in vrBtnTexture) vrBtnTexture.colorSpace = THREE.SRGBColorSpace;
 }
-let vrPanelNeedsPlacement = false;
+
+let vrBtnLastHover = false;
+function drawVrButton(hover){
+  ensureVrBtnCanvas();
+  const ctx = vrBtnCtx;
+  const s = VR_BTN_CANVAS;
+  ctx.clearRect(0, 0, s, s);
+  ctx.fillStyle = hover ? '#e08a2e' : (vrMenuOpen ? '#2f6fd6' : '#0f141c');
+  drawRoundedRect(ctx, 6, 6, s - 12, s - 12, 32);
+  ctx.fill();
+  ctx.strokeStyle = hover ? '#ffd08a' : '#7fb2ff';
+  ctx.lineWidth = 8;
+  drawRoundedRect(ctx, 6, 6, s - 12, s - 12, 32);
+  ctx.stroke();
+  ctx.fillStyle = '#eef3fb';
+  ctx.font = 'bold 128px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(vrMenuOpen ? '✕' : '☰', s / 2, s / 2 + 8);
+  vrBtnTexture.needsUpdate = true;
+}
+
+const vrMenuButtonGroup = new THREE.Group();
+vrMenuButtonGroup.visible = false;
+scene.add(vrMenuButtonGroup);
+
+const VR_BTN_SIZE = 0.075; // メートル
+let vrBtnMesh = null;
+function ensureVrButtonMesh(){
+  if(vrBtnMesh) return;
+  ensureVrBtnCanvas();
+  const geo = new THREE.PlaneGeometry(VR_BTN_SIZE, VR_BTN_SIZE);
+  const mat = new THREE.MeshBasicMaterial({ map: vrBtnTexture, transparent: true, side: THREE.DoubleSide, depthTest: false });
+  vrBtnMesh = new THREE.Mesh(geo, mat);
+  vrBtnMesh.renderOrder = 998;
+  vrMenuButtonGroup.add(vrBtnMesh);
+}
+
+// メニューボタン・ポップアップパネルの位置を、毎フレーム頭の向きに合わせて更新する。
+// どちらも視界中央(キャラクターがいる場所)を避け、左下寄りに配置する。
+const VR_HUD_DIST = 0.5;        // メートル(カメラからの距離)
+const VR_BTN_OFFSET_X = -0.19;  // ボタン: 左方向オフセット
+const VR_BTN_OFFSET_Y = -0.16;  // ボタン: 下方向オフセット
+const VR_PANEL_OFFSET_X = -0.24;// パネル: 左方向オフセット(ボタンよりさらに広い分だけ余分に左へ)
+const VR_PANEL_OFFSET_Y = 0.0;  // パネル: 上下オフセット
+const _vrHudCamPos = new THREE.Vector3();
+const _vrHudCamDir = new THREE.Vector3();
+const _vrHudRight = new THREE.Vector3();
+const _vrHudWorldUp = new THREE.Vector3(0, 1, 0);
+
+function updateVrHudPlacement(){
+  camera.getWorldPosition(_vrHudCamPos);
+  camera.getWorldDirection(_vrHudCamDir);
+  _vrHudCamDir.y = 0; // 見上げ/見下ろしで角度が付き過ぎるのを防ぐため、水平方向だけを向かせる
+  if(_vrHudCamDir.lengthSq() < 1e-6) _vrHudCamDir.set(0, 0, -1);
+  _vrHudCamDir.normalize();
+  _vrHudRight.crossVectors(_vrHudCamDir, _vrHudWorldUp).normalize();
+
+  const btnPos = _vrHudCamPos.clone()
+    .addScaledVector(_vrHudCamDir, VR_HUD_DIST)
+    .addScaledVector(_vrHudRight, VR_BTN_OFFSET_X);
+  btnPos.y += VR_BTN_OFFSET_Y;
+  vrMenuButtonGroup.position.copy(btnPos);
+  vrMenuButtonGroup.lookAt(_vrHudCamPos.x, btnPos.y, _vrHudCamPos.z);
+
+  if(vrMenuOpen){
+    const panelPos = _vrHudCamPos.clone()
+      .addScaledVector(_vrHudCamDir, VR_HUD_DIST + 0.08)
+      .addScaledVector(_vrHudRight, VR_PANEL_OFFSET_X);
+    panelPos.y += VR_PANEL_OFFSET_Y;
+    vrUiPanelGroup.position.copy(panelPos);
+    vrUiPanelGroup.lookAt(_vrHudCamPos.x, panelPos.y, _vrHudCamPos.z);
+  }
+}
 
 // --- コントローラー / ハンドトラッキングのレイポインター ---
 const vrRayGeometry = new THREE.BufferGeometry().setFromPoints([
@@ -852,8 +950,9 @@ function makeControllerRay(){
   line.name = 'vrRay';
   return line;
 }
-const vrReticleGeo = new THREE.SphereGeometry(0.012, 12, 12);
-const vrReticleMat = new THREE.MeshBasicMaterial({ color: 0x4f9dff, depthTest: false });
+// レイとボタン/パネルの交点を示すマーカー。塗りつぶし円ではなく、はっきり見える丸いリング(輪)にする。
+const vrReticleGeo = new THREE.RingGeometry(0.008, 0.015, 24);
+const vrReticleMat = new THREE.MeshBasicMaterial({ color: 0xffd23f, depthTest: false, side: THREE.DoubleSide });
 function makeReticle(){
   const m = new THREE.Mesh(vrReticleGeo, vrReticleMat);
   m.renderOrder = 1000;
@@ -870,7 +969,7 @@ function setupVrController(index){
   const reticle = makeReticle();
   controller.add(ray);
   scene.add(reticle);
-  const state = { controller, reticle, inputSource: null };
+  const state = { controller, reticle, inputSource: null, hoverItemIndex: -1, hoverButton: false };
   controller.addEventListener('selectstart', () => onVrSelectStart(state));
   controller.addEventListener('connected', (ev) => { state.inputSource = ev.data; ray.visible = true; });
   controller.addEventListener('disconnected', () => { state.inputSource = null; ray.visible = false; reticle.visible = false; });
@@ -880,9 +979,10 @@ function setupVrController(index){
 setupVrController(0);
 setupVrController(1);
 
-// コントローラー(またはピンチ由来)のレイとVRパネルとの交点を求め、対応するcanvasピクセル座標を返す
-function raycastVrPanel(controller){
-  if(!vrPanelMesh || !vrUiPanelGroup.visible) return null;
+// コントローラー(またはピンチ由来)のレイとVRパネル/メニューボタンとの交点を求め、
+// 対応するcanvasピクセル座標を返す
+function raycastVrMesh(controller, mesh){
+  if(!mesh) return null;
   const origin = new THREE.Vector3();
   const quat = new THREE.Quaternion();
   const dir = new THREE.Vector3(0, 0, -1);
@@ -890,20 +990,42 @@ function raycastVrPanel(controller){
   controller.getWorldQuaternion(quat);
   dir.applyQuaternion(quat);
   vrRaycaster.set(origin, dir);
-  const hits = vrRaycaster.intersectObject(vrPanelMesh, false);
-  if(!hits.length || !hits[0].uv) return null;
+  const hits = vrRaycaster.intersectObject(mesh, false);
+  if(!hits.length) return null;
   const hit = hits[0];
-  const canvasX = hit.uv.x * VR_CANVAS_W;
-  const canvasY = (1 - hit.uv.y) * VR_CANVAS_H; // uv原点は板の左下、canvasは左上原点のため反転
-  return { point: hit.point, canvasX, canvasY };
+  const result = { point: hit.point };
+  if(hit.uv){
+    result.canvasX = hit.uv.x * VR_CANVAS_W;
+    result.canvasY = (1 - hit.uv.y) * VR_CANVAS_H; // uv原点は板の左下、canvasは左上原点のため反転
+  }
+  return result;
+}
+function raycastVrPanel(controller){
+  if(!vrUiPanelGroup.visible) return null;
+  return raycastVrMesh(controller, vrPanelMesh);
+}
+function raycastVrButton(controller){
+  if(!vrMenuButtonGroup.visible) return null;
+  return raycastVrMesh(controller, vrBtnMesh);
 }
 
 function onVrSelectStart(state){
-  const hit = raycastVrPanel(state.controller);
-  if(!hit){
-    recenterVrPanel(); // パネル外を選択した場合は、パネルを目の前に呼び戻す
+  registerVrActivity();
+  if(vrUiHidden){
+    // 無操作で隠れていた状態からの最初の選択操作は、誤操作防止のためメニューボタンを
+    // 再表示するだけに留める(その場でどこかを選んだ扱いにはしない)
+    vrUiHidden = false;
     return;
   }
+  const btnHit = raycastVrButton(state.controller);
+  if(btnHit){
+    vrMenuOpen = !vrMenuOpen;
+    if(vrMenuOpen) drawVrPanel();
+    drawVrButton(state.hoverButton);
+    return;
+  }
+  const hit = raycastVrPanel(state.controller);
+  if(!hit || hit.canvasX === undefined) return;
   const item = VR_MENU_ITEMS.find((it) => it.rect
     && hit.canvasX >= it.rect.x && hit.canvasX <= it.rect.x + it.rect.w
     && hit.canvasY >= it.rect.y && hit.canvasY <= it.rect.y + it.rect.h);
@@ -937,10 +1059,12 @@ function readStickAxes(inputSource){
 
 function updateVrThumbsticks(dt){
   if(!renderer.xr.isPresenting) return;
+  let moved = false;
   vrControllers.forEach((state) => {
     if(!state.inputSource) return;
     const axes = readStickAxes(state.inputSource);
     if(!axes) return;
+    if(axes.x !== 0 || axes.y !== 0) moved = true;
     if(state.inputSource.handedness === 'right'){
       // 上下(axes.y、スティックを奥へ倒すと負値)→視線先高さを上げる
       vrMoveY = clamp(vrMoveY - axes.y * VR_MOVE_SPEED * dt, -VR_MOVE_LIMIT, VR_MOVE_LIMIT);
@@ -952,36 +1076,69 @@ function updateVrThumbsticks(dt){
     }
   });
   uprightGroup.position.set(vrMoveX, vrMoveY, 0);
+  if(moved) registerVrActivity();
 }
 
-// 毎フレーム: レティクル位置更新・パネルテクスチャの定期更新(300ms間隔)・サムスティック操作
+// 毎フレーム: HUD配置更新・レティクル位置/ホバー判定・パネルテクスチャの更新・サムスティック操作・
+// 無操作タイムアウトによる自動非表示
 let vrUiLastDrawTime = 0;
 function updateVrUi(time, delta){
   if(!renderer.xr.isPresenting){
     if(vrUiPanelGroup.visible) vrUiPanelGroup.visible = false;
+    if(vrMenuButtonGroup.visible) vrMenuButtonGroup.visible = false;
     vrControllers.forEach((state) => { state.reticle.visible = false; });
     return;
   }
-  if(vrPanelNeedsPlacement){
-    recenterVrPanel();
-    drawVrPanel();
-    vrPanelNeedsPlacement = false;
+
+  if(!vrUiLastActivity) registerVrActivity();
+  const idle = (performance.now() - vrUiLastActivity) > VR_UI_IDLE_MS;
+  if(idle !== vrUiHidden){
+    vrUiHidden = idle;
   }
+  vrMenuButtonGroup.visible = !vrUiHidden;
+  vrUiPanelGroup.visible = vrMenuOpen && !vrUiHidden;
+
+  updateVrHudPlacement();
   updateVrThumbsticks(delta);
+
+  let anyHover = false;
+  let panelHoverChanged = false;
   vrControllers.forEach((state) => {
-    const hit = raycastVrPanel(state.controller);
+    let hit = raycastVrButton(state.controller);
+    const hoveredButton = !!hit;
+    if(!hit) hit = raycastVrPanel(state.controller);
     if(hit){
+      anyHover = true;
       state.reticle.visible = true;
       state.reticle.position.copy(hit.point);
+      state.reticle.lookAt(_vrHudCamPos); // 常にこちらを向かせ、丸いリングとしてはっきり見えるようにする
     }else{
       state.reticle.visible = false;
     }
+    state.hoverButton = hoveredButton;
+    const idx = (hit && !hoveredButton && hit.canvasX !== undefined)
+      ? VR_MENU_ITEMS.findIndex((it) => it.rect
+          && hit.canvasX >= it.rect.x && hit.canvasX <= it.rect.x + it.rect.w
+          && hit.canvasY >= it.rect.y && hit.canvasY <= it.rect.y + it.rect.h)
+      : -1;
+    if(state.hoverItemIndex !== idx){ state.hoverItemIndex = idx; panelHoverChanged = true; }
   });
-  if(!vrUiLastDrawTime || time - vrUiLastDrawTime > 300){
-    vrUiLastDrawTime = time;
+  if(anyHover) registerVrActivity();
+
+  const btnHoverNow = vrControllers.some((s) => s.hoverButton);
+  if(btnHoverNow !== vrBtnLastHover){
+    vrBtnLastHover = btnHoverNow;
+    drawVrButton(btnHoverNow);
+  }
+
+  if(panelHoverChanged && vrUiPanelGroup.visible){
     drawVrPanel();
+  }else if(!vrUiLastDrawTime || time - vrUiLastDrawTime > 300){
+    vrUiLastDrawTime = time;
+    if(vrUiPanelGroup.visible) drawVrPanel();
   }
 }
+
 
 /* ---------------- VRM / VRMA 読み込み ---------------- */
 let currentVRM = null;
