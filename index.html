@@ -182,6 +182,33 @@
 
   #backgroundListItems, #characterListItems{ overflow-y:auto; padding:6px 6px 4px; flex:1; }
   .bg-add-row{ padding:6px 8px; border-top:1px solid var(--border); display:flex; justify-content:flex-end; }
+  /* キャラクターパネル下部:左に全削除、右に追加ボタンを並べる */
+  .char-bottom-row{ padding:6px 8px; border-top:1px solid var(--border); display:flex;
+    justify-content:space-between; align-items:center; gap:8px; }
+
+  /* キャラクター一覧のサムネイル表示(大/中/小)。表示切り替えボタンでリスト表示と切り替える */
+  #characterListItems.char-grid{ display:grid; gap:8px; align-content:start; }
+  #characterListItems.char-grid.size-large{ grid-template-columns:repeat(auto-fill, minmax(100px,1fr)); }
+  #characterListItems.char-grid.size-medium{ grid-template-columns:repeat(auto-fill, minmax(68px,1fr)); }
+  #characterListItems.char-grid.size-small{ grid-template-columns:repeat(auto-fill, minmax(46px,1fr)); }
+  .char-thumb-item{ position:relative; display:flex; flex-direction:column; align-items:center; cursor:pointer; min-width:0; }
+  .char-thumb-box{ position:relative; width:100%; aspect-ratio:1/1; border-radius:8px; overflow:hidden;
+    background:#0d1219; border:1px solid var(--border); display:flex; align-items:center; justify-content:center; }
+  .char-thumb-item.playing .char-thumb-box{ border-color:var(--accent); }
+  /* 画像上端を基準に正方形へクリッピングし、顔が見えるようにする */
+  .char-thumb-box img{ width:100%; height:100%; object-fit:cover; object-position:top center; display:block; }
+  /* 同名pngが無い/読込失敗の場合は、ファイル名を折り返して表示する */
+  .char-thumb-fallback{ display:none; width:100%; height:100%; padding:4px; align-items:center; justify-content:center;
+    text-align:center; font-size:9.5px; line-height:1.25; color:var(--text-dim); overflow:hidden;
+    word-break:break-all; white-space:normal; }
+  .size-small .char-thumb-fallback{ font-size:7.5px; padding:2px; }
+  .char-thumb-del{ position:absolute; top:2px; right:2px; width:18px; height:18px; padding:0; border-radius:50%;
+    font-size:9px; line-height:1; display:flex; align-items:center; justify-content:center; z-index:2; }
+  .size-small .char-thumb-del{ width:15px; height:15px; font-size:8px; top:1px; right:1px; }
+  .char-thumb-label{ width:100%; margin-top:3px; font-size:10px; text-align:center; color:var(--text-dim);
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .char-thumb-item.playing .char-thumb-label{ color:var(--accent); }
+  .size-small .char-thumb-label{ font-size:8px; }
 
   #log{ position:relative; background:var(--panel); border:1px solid var(--border); border-radius:10px;
     backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); overflow:hidden; }
@@ -242,11 +269,12 @@
   <div class="panel-current-file" id="characterCurrentFile">(未選択)</div>
   <div class="panel-actions">
     <button id="btnRandomCharacter" title="キャラクターをランダム切替">🔀 ランダム</button>
-    <button class="panel-clear-btn" id="btnClearCharacterList" title="キャラクターリストを全削除">🗑全削除</button>
+    <button id="btnCharacterViewToggle" title="表示切り替え(ファイル名リスト/サムネイル大/中/小)">📄 リスト</button>
   </div>
   <button class="panel-close-btn" id="btnCloseCharacterList" aria-label="閉じる">×</button>
   <div id="characterListItems"></div>
-  <div class="bg-add-row">
+  <div class="char-bottom-row">
+    <button id="btnClearCharacterList" title="キャラクターリストを全削除">🗑全削除</button>
     <button id="btnAddCharacter">➕ 追加</button>
   </div>
 </div>
@@ -2179,6 +2207,76 @@ document.getElementById('btnRandomCharacter').addEventListener('click', () => {
   setActiveCharacter(idx);
 });
 
+/* キャラクター一覧の表示モード: 'list'(ファイル名リスト) → 'large'/'medium'/'small'(サムネイル) の順に切り替え可能 */
+const CHARACTER_VIEW_MODES = ['list', 'large', 'medium', 'small'];
+const CHARACTER_VIEW_LABELS = { list:'📄 リスト', large:'🖼 大', medium:'🖼 中', small:'🖼 小' };
+let characterViewMode = 'list';
+
+function updateCharacterViewToggleBtn(){
+  const btn = document.getElementById('btnCharacterViewToggle');
+  if(btn) btn.textContent = CHARACTER_VIEW_LABELS[characterViewMode];
+}
+
+document.getElementById('btnCharacterViewToggle').addEventListener('click', () => {
+  const i = CHARACTER_VIEW_MODES.indexOf(characterViewMode);
+  characterViewMode = CHARACTER_VIEW_MODES[(i + 1) % CHARACTER_VIEW_MODES.length];
+  updateCharacterViewToggleBtn();
+  updateCharacterListUI();
+});
+updateCharacterViewToggleBtn();
+
+// entry(vrmファイル情報)に対応する、同名pngサムネイルのURLを組み立てる。
+// ローカル追加(blob URL)のファイルはサーバー上に同名pngが存在しないため対象外とする。
+function characterThumbUrl(entry){
+  if(!entry || !entry.url || entry.url.startsWith('blob:')) return null;
+  return assetPath('vrm', entry.name.replace(/\.vrm$/i, '') + '.png');
+}
+
+function createCharacterThumbItem(entry, idx){
+  const item = document.createElement('div');
+  item.className = 'char-thumb-item' + (idx === activeCharacterIndex ? ' playing' : '');
+  item.addEventListener('click', () => setActiveCharacter(idx));
+
+  const box = document.createElement('div');
+  box.className = 'char-thumb-box';
+
+  const fallback = document.createElement('div');
+  fallback.className = 'char-thumb-fallback';
+  fallback.textContent = entry.name;
+
+  const thumbUrl = characterThumbUrl(entry);
+  if(thumbUrl){
+    const img = document.createElement('img');
+    img.alt = entry.name;
+    img.loading = 'lazy';
+    // 画像上端を基準に正方形へクリッピングされるよう、CSS側(object-position:top)で表示する
+    img.addEventListener('error', () => {
+      img.remove();
+      fallback.style.display = 'flex';
+    }, { once:true });
+    img.src = thumbUrl;
+    box.appendChild(img);
+  }else{
+    // 同名pngを参照できない(ローカル追加ファイル等)場合は、最初からファイル名の折り返し表示にする
+    fallback.style.display = 'flex';
+  }
+  box.appendChild(fallback);
+
+  const delBtn = document.createElement('button');
+  delBtn.className = 'char-thumb-del';
+  delBtn.textContent = '🗑';
+  delBtn.addEventListener('click', (ev) => { ev.stopPropagation(); removeCharacter(idx); });
+  box.appendChild(delBtn);
+
+  const label = document.createElement('div');
+  label.className = 'char-thumb-label';
+  label.textContent = (idx === activeCharacterIndex ? '▶ ' : '') + entry.name;
+
+  item.appendChild(box);
+  item.appendChild(label);
+  return item;
+}
+
 function updateCharacterListUI(){
   const currentLabel = document.getElementById('characterCurrentFile');
   if(currentLabel){
@@ -2189,6 +2287,7 @@ function updateCharacterListUI(){
   const container = document.getElementById('characterListItems');
   if(!container) return;
   container.innerHTML = '';
+  container.className = (characterViewMode === 'list') ? '' : `char-grid size-${characterViewMode}`;
   if(!characterClips.length){
     const empty = document.createElement('div');
     empty.className = 'motion-empty';
@@ -2196,20 +2295,26 @@ function updateCharacterListUI(){
     container.appendChild(empty);
     return;
   }
-  characterClips.forEach((entry, idx) => {
-    const row = document.createElement('div');
-    row.className = 'motion-item' + (idx === activeCharacterIndex ? ' playing' : '');
-    const nameSpan = document.createElement('span');
-    nameSpan.className = 'motion-name';
-    nameSpan.textContent = (idx === activeCharacterIndex ? '▶ ' : '') + entry.name;
-    nameSpan.addEventListener('click', () => setActiveCharacter(idx));
-    const delBtn = document.createElement('button');
-    delBtn.textContent = '🗑';
-    delBtn.addEventListener('click', (ev) => { ev.stopPropagation(); removeCharacter(idx); });
-    row.appendChild(nameSpan);
-    row.appendChild(delBtn);
-    container.appendChild(row);
-  });
+  if(characterViewMode === 'list'){
+    characterClips.forEach((entry, idx) => {
+      const row = document.createElement('div');
+      row.className = 'motion-item' + (idx === activeCharacterIndex ? ' playing' : '');
+      const nameSpan = document.createElement('span');
+      nameSpan.className = 'motion-name';
+      nameSpan.textContent = (idx === activeCharacterIndex ? '▶ ' : '') + entry.name;
+      nameSpan.addEventListener('click', () => setActiveCharacter(idx));
+      const delBtn = document.createElement('button');
+      delBtn.textContent = '🗑';
+      delBtn.addEventListener('click', (ev) => { ev.stopPropagation(); removeCharacter(idx); });
+      row.appendChild(nameSpan);
+      row.appendChild(delBtn);
+      container.appendChild(row);
+    });
+  }else{
+    characterClips.forEach((entry, idx) => {
+      container.appendChild(createCharacterThumbItem(entry, idx));
+    });
+  }
 }
 
 document.getElementById('btnCharacterList').addEventListener('click', () => {
