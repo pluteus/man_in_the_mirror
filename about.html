@@ -176,9 +176,84 @@
     text-align:center; padding:26px 0 50px; color:var(--muted); font-size:12.5px;
   }
 
+  /* ---------- FAQ ---------- */
+  .faq-list{ display:flex; flex-direction:column; gap:12px; }
+  .faq-item{
+    background:var(--panel); border:1px solid var(--panel-line); border-radius:16px;
+    overflow:hidden;
+  }
+  .faq-item summary{
+    list-style:none; cursor:pointer; padding:20px 22px;
+    display:flex; align-items:center; justify-content:space-between; gap:16px;
+    font-size:15px; font-weight:700; color:var(--cream);
+  }
+  .faq-item summary::-webkit-details-marker{ display:none; }
+  .faq-item summary .q-mark{
+    font-family:'JetBrains Mono',monospace; color:var(--pink); font-weight:500; flex-shrink:0;
+  }
+  .faq-item summary .plus{
+    flex-shrink:0; width:26px; height:26px; border-radius:50%;
+    border:1px solid var(--panel-line); display:flex; align-items:center; justify-content:center;
+    color:var(--pink); font-size:16px; transition:transform .25s ease, background .25s ease;
+  }
+  .faq-item[open] summary .plus{ transform:rotate(45deg); background:rgba(226,103,141,0.12); }
+  .faq-item:hover{ border-color:var(--pink-deep); }
+  .faq-a{
+    padding:0 22px 22px 52px; margin:0; font-size:14px; color:var(--muted); line-height:1.9;
+  }
+
+  /* ---------- 素材クレジット ---------- */
+  .credit-box{
+    background:var(--panel); border:1px solid var(--panel-line); border-radius:var(--radius);
+    padding:30px 32px;
+  }
+  .credit-box p{ color:var(--cream-dim); font-size:15px; line-height:1.95; margin:0 0 16px; }
+  .credit-box p:last-child{ margin-bottom:0; }
+  .credit-box .credit-note{
+    display:flex; align-items:flex-start; gap:10px;
+    font-size:13px; color:var(--muted); line-height:1.8;
+    padding-top:16px; margin-top:4px; border-top:1px solid var(--panel-line);
+  }
+  .credit-box .credit-note .icon{ flex-shrink:0; font-size:15px; }
+  .credit-box .credit-note a{ color:var(--pink); border-bottom:1px solid transparent; }
+  .credit-box .credit-note a:hover{ border-bottom-color:var(--pink); }
+
+  /* ---------- 詳しい使い方ガイド ---------- */
+  .guide-list{ display:flex; flex-direction:column; gap:18px; }
+  .guide-item{
+    background:var(--bg-soft); border:1px solid var(--panel-line); border-radius:var(--radius);
+    padding:28px 30px;
+  }
+  .guide-item h3{
+    font-family:'Kosugi Maru',sans-serif; font-weight:400; font-size:19px;
+    color:var(--cream); margin:0 0 10px; display:flex; align-items:center; gap:10px;
+  }
+  .guide-item h3 .em{ font-size:20px; }
+  .guide-intro{ font-size:14.5px; color:var(--muted); line-height:1.85; margin:0 0 18px; }
+  .guide-steps{
+    list-style:none; counter-reset:guide-step; margin:0; padding:0;
+    display:grid; gap:12px;
+  }
+  .guide-steps li{
+    counter-increment:guide-step;
+    display:flex; align-items:baseline; gap:14px;
+    font-size:14px; color:var(--cream-dim); line-height:1.8;
+  }
+  .guide-steps li::before{
+    content:counter(guide-step);
+    flex-shrink:0; width:24px; height:24px; border-radius:50%;
+    background:rgba(226,103,141,0.14); border:1px solid var(--pink-deep); color:var(--pink);
+    font-family:'JetBrains Mono',monospace; font-size:12px; font-weight:700;
+    display:flex; align-items:center; justify-content:center;
+    transform:translateY(2px);
+  }
+
+  .guide-steps a{ color:var(--pink); border-bottom:1px solid transparent; }
+  .guide-steps a:hover{ border-bottom-color:var(--pink); }
+
   @media (prefers-reduced-motion: reduce){
     .device{ animation:none; }
-    .btn-start, .pill, .btn-start .arrow{ transition:none; }
+    .btn-start, .pill, .btn-start .arrow, .faq-item summary .plus{ transition:none; }
   }
 </style>
 </head>
@@ -299,6 +374,250 @@
         <span class="num">03</span>
         <h3>話す</h3>
         <p>「会話」ボタンから接続。カメラ・画面・位置情報・通訳・YouTubeコメントなど、必要なものだけONにして話しかけてみましょう。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="guide">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="eyebrow"><span class="dot"></span>詳しい使い方ガイド</span>
+      <h2>もう一歩踏み込んで使いこなす。</h2>
+      <p>基本の3ステップに慣れてきたら、少し凝った使い方にも挑戦してみてください。それぞれの手順をまとめました。</p>
+    </div>
+
+    <div class="guide-list">
+      <div class="guide-item">
+        <h3><span class="em">🧑</span>お気に入りのキャラクターを読み込む</h3>
+        <p class="guide-intro">標準搭載のキャラクターだけでなく、VRoid Hubで公開されている無料のVRMモデルを追加して着せ替えられます。</p>
+        <ol class="guide-steps">
+          <li>VRoid Hubで気に入ったモデルのページを開き、VRMファイルをダウンロードする。</li>
+          <li>アプリ下部の「キャラクター」メニューから追加ボタンを選び、ダウンロードしたVRMファイルを選択する。</li>
+          <li>読み込みが完了すると一覧に追加され、いつでも切り替えて着せ替えができるようになる。</li>
+        </ol>
+      </div>
+
+      <div class="guide-item">
+        <h3><span class="em">📷</span>現実世界で推しとツーショット撮影する</h3>
+        <p class="guide-intro">アウトカメラとジャイロセンサーを組み合わせると、まるで目の前にキャラクターが立っているかのような写真が撮れます。</p>
+        <ol class="guide-steps">
+          <li>「背景」をオフにして、キャラクターだけを透過表示にする。</li>
+          <li>アウトカメラをオンにする。</li>
+          <li>ジャイロセンサーをオンにし、スマホを動かしながらキャラクターの向きや距離を調整する。</li>
+          <li>好きなアングルが決まったら、「📷 カメラ」ボタンを開き、「📸 撮影」を選んでその瞬間を保存する。</li>
+        </ol>
+      </div>
+
+      <div class="guide-item">
+        <h3><span class="em">🔑</span>初回設定：Gemini APIキーを取得する</h3>
+        <p class="guide-intro">会話・通訳機能は、利用者ご自身のGemini APIキーを使って動作します（BYOK方式）。Google AI Studioで無料で発行でき、この設定は最初の1回だけで済みます。</p>
+        <ol class="guide-steps">
+          <li><a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI StudioのAPIキー発行ページ</a>を開き、Googleアカウントにログインする。</li>
+          <li>「APIキーを作成」を選ぶ。</li>
+          <li>インポートしたプロジェクトがあればそれを選択する。なければ「プロジェクトを作成」から任意のプロジェクト名を入力してプロジェクトを作成する。</li>
+          <li>「キーを作成」を選び、表示されたキーをコピーする。</li>
+          <li>「VRMちゃんと！」に戻り、「🎙️ 会話」パネルの「Gemini APIキー」欄に貼り付ける。</li>
+        </ol>
+      </div>
+
+      <div class="guide-item">
+        <h3><span class="em">💬</span>Gemini Liveでリアルタイム会話をはじめる</h3>
+        <p class="guide-intro">APIキーを設定したら、あとはマイクとカメラを使って、選んだキャラクターの口調で自然に会話ができます。</p>
+        <ol class="guide-steps">
+          <li>画面下部の「🎙️ 会話」ボタンを開き、「🎙️ 接続」を選ぶ。</li>
+          <li>マイクの使用を許可する（初回のみブラウザから確認が表示されます）。</li>
+          <li>インカメラ・アウトカメラ・画面共有・位置情報など、見せたい情報だけを個別にオンにする。</li>
+          <li>話しかけると、選んだキャラクターの口調で返事が返ってくる。</li>
+        </ol>
+      </div>
+
+      <div class="guide-item">
+        <h3><span class="em">🌐</span>その場で同時通訳してもらう</h3>
+        <p class="guide-intro">70以上の言語プリセットから2つ選ぶだけで、会話に自動で相互通訳を追加できます。</p>
+        <ol class="guide-steps">
+          <li>「🎙️ 会話」ボタンを開き、「指示(翻訳)」のトグルをONにする。</li>
+          <li>相互に通訳したい2つの言語を選択する。</li>
+          <li>「🎙️ 接続」を選ぶ。</li>
+          <li>話しかけると、選んだ2言語を相互に通訳しながら受け答えしてくれる。</li>
+        </ol>
+      </div>
+
+      <div class="guide-item">
+        <h3><span class="em">📺</span>配信のライブチャットに反応してもらう</h3>
+        <p class="guide-intro">YouTubeで配信しながら使うと、視聴者のコメントを踏まえてキャラクターが応答してくれます。</p>
+        <ol class="guide-steps">
+          <li>配信中のYouTubeライブのURLをアプリに登録する。</li>
+          <li>YouTube連携をオンにする。</li>
+          <li>視聴者のコメントが取得され、内容を踏まえてキャラクターが会話に混ぜて応答するようになる。</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="tech">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="eyebrow"><span class="dot"></span>技術解説</span>
+      <h2>中身がどうなっているか、少しだけ。</h2>
+      <p>気になる人向けに、見た目の裏側で何をしているかを簡単にまとめました。</p>
+    </div>
+
+    <div class="guide-list">
+      <div class="guide-item">
+        <h3><span class="em">🧩</span>VRM / VRMAとは</h3>
+        <p class="guide-intro">
+          VRMは、3Dアバター（人型モデル）を扱うためのオープンなファイル形式です。異なるツールで作られたモデルでも共通の仕様で読み込めるため、
+          VRoid Studioなどで作られたキャラクターも含め、さまざまな制作者のアバターをそのままアプリ内で着せ替えて使えます。
+          VRMAはVRMモデルに対応したアニメーション（モーション）専用のファイル形式で、同じモーションデータを異なるモデルへ使い回すこともできます。
+        </p>
+      </div>
+
+      <div class="guide-item">
+        <h3><span class="em">🪟</span>覗き込むと立体的に見える仕組み（視差表示 / off-axis）</h3>
+        <p class="guide-intro">
+          インカメラで検出した顔の位置に応じて、キャラクターを映す3D空間のカメラ視点を左右・前後にわずかに動かしています。
+          顔を動かすと見える角度も変わるため、まるで画面の奥にキャラクターが実在しているかのような奥行き感が生まれる仕組みです。
+          この視差の付け方をより厳密な計算に切り替えたものが「本格off-axisモード」で、画面を覗き窓のように扱い、より正確な立体感を再現します。
+        </p>
+      </div>
+
+      <div class="guide-item">
+        <h3><span class="em">🤳</span>顔トラッキング（MediaPipe）</h3>
+        <p class="guide-intro">
+          顔の位置検出には、Googleが提供するオンデバイス機械学習ライブラリ「MediaPipe」の顔ランドマーク検出モデルを使っています。
+          この処理はすべて端末上のブラウザ内で完結しており、カメラ映像を外部サーバーに送って解析しているわけではありません
+          （会話機能で映像をGemini Liveに送る場合は別です）。
+        </p>
+      </div>
+
+      <div class="guide-item">
+        <h3><span class="em">🎙️</span>Gemini Liveとの会話の仕組み</h3>
+        <p class="guide-intro">
+          会話機能は、利用者ご自身のGemini APIキーを使う「BYOK（Bring Your Own Key）」方式です。専用のサーバーは経由せず、
+          ブラウザから直接Googleに短時間だけ有効な一時トークンを発行し、それを使ってGemini LiveとWebSocketで直接つながります
+          （トークン発行がうまくいかない場合のみ、APIキーで直接接続するフォールバック動作をします）。
+          音声のやり取りは生のPCMデータで行われ、受け取った音声の音量からキャラクターの口の動きをリアルタイムに算出しています。
+        </p>
+      </div>
+
+      <div class="guide-item">
+        <h3><span class="em">👄</span>表情豊かなリップシンク</h3>
+        <p class="guide-intro">
+          基本の口パクは、受信した音声の音量（RMS）をもとに動かすシンプルな仕組みです。「音声分離リップシンク」をONにすると、
+          音声の周波数成分（フォルマント）を解析して「あ・い・う・え・お」に近い口の形を推定し、より自然な口の動きに近づけます。
+          この解析はBGM再生時にも使われており、人の声の帯域だけを取り出すことで、BGMに合わせて「歌っているような」口の動きも再現しています。
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="background">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="eyebrow"><span class="dot"></span>開発の背景</span>
+      <h2>なぜ作ったのか。</h2>
+      <p>技術デモではなく、個人の制作動機としての話です。</p>
+    </div>
+
+    <div class="guide-list">
+      <div class="guide-item">
+        <h3><span class="em">🪞</span>GateboxやPortalgraphへの憧れ</h3>
+        <p class="guide-intro">
+          Gateboxのように専用ハードウェアの中にキャラクターが「実在」しているかのような体験や、Portalgraphのように画面を覗き窓に見立てて奥にキャラクターが佇んでいるかのような体験には、以前から強く惹かれていました。
+          ただ、それらは専用の筐体やアプリを前提としたもので、気軽に試せるものではありません。
+          今、手元にあるスマートフォンやタブレット、あるいはMetaQuest2のブラウザだけで、あの感覚にどこまで近づけるのかを、自分の手で確かめてみたくなったのが出発点です。
+        </p>
+      </div>
+
+      <div class="guide-item">
+        <h3><span class="em">📱</span>専用機なしでどこまでできるか、という実験</h3>
+        <p class="guide-intro">
+          特別なセンサーも専用ディスプレイも使わず、一般的なスマホ・タブレットのインカメラと、ブラウザだけで動くMediaPipeの顔トラッキングを使って視差表示（off-axis）を再現できないか。
+          MetaQuest2のブラウザでも同じコードがそのまま動くのか。
+          そうした「制約の中でどこまで近づけるか」を試すこと自体が、このアプリを作る一番の動機でした。
+          VRM/VRMAという開かれた形式を使うことで、既存の様々なキャラクターやモーションをそのまま活かせる点も、この実験を後押ししてくれました。
+        </p>
+      </div>
+
+      <div class="guide-item">
+        <h3><span class="em">🎙️</span>「覗き見る」から「話しかける」へ</h3>
+        <p class="guide-intro">
+          視差表示だけでも「そこに居る」感覚は生まれますが、せっかくなら話しかけられる相手であってほしいと思い、Gemini Liveによるリアルタイム会話や通訳の機能を後から加えました。
+          カメラ映像や位置情報を踏まえて反応してくれることで、単に眺めるだけの存在から、同じ場にいる相手としてのキャラクターに近づけたかった、という思いがあります。
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="faq">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="eyebrow"><span class="dot"></span>よくある質問</span>
+      <h2>使う前に気になること。</h2>
+      <p>カメラや位置情報の扱い、対応環境、料金まわりなど、よく聞かれる質問をまとめました。</p>
+    </div>
+
+    <div class="faq-list">
+      <details class="faq-item">
+        <summary><span><span class="q-mark">Q.</span> カメラ映像や位置情報は保存されますか？</span><span class="plus">+</span></summary>
+        <p class="faq-a">保存されません。顔の位置検出はブラウザ内の処理だけで完結しており、映像そのものを記録することはありません。会話・通訳機能を使っているあいだだけ、カメラ映像・画面表示・（許可した場合の）位置情報をGoogleのGemini Liveに送信して応答生成に利用しますが、当サイト側で保存・記録することはありません。詳しくは<a href="../privacy.html">プライバシーポリシー</a>をご覧ください。</p>
+      </details>
+
+      <details class="faq-item">
+        <summary><span><span class="q-mark">Q.</span> インストールや会員登録は必要ですか？</span><span class="plus">+</span></summary>
+        <p class="faq-a">不要です。index.html をブラウザで開くだけで使えます。アプリのダウンロードやアカウント登録は一切必要ありません。</p>
+      </details>
+
+      <details class="faq-item">
+        <summary><span><span class="q-mark">Q.</span> 対応ブラウザ・端末を教えてください。</span><span class="plus">+</span></summary>
+        <p class="faq-a">WebGLとカメラ利用（getUserMedia）に対応した最新のChromeやSafariなどのモダンブラウザで動作します。PC・タブレットでも表示できますが、インカメラを使った視差表示（off-axis）やジャイロセンサーを使ったAR撮影モードは、その両方を搭載したスマートフォンでの利用を想定しています。</p>
+      </details>
+
+      <details class="faq-item">
+        <summary><span><span class="q-mark">Q.</span> 自分で作ったVRMモデルは使えますか？</span><span class="plus">+</span></summary>
+        <p class="faq-a">使えます。VRoid Hubからダウンロードしたモデルだけでなく、自作したVRM形式のファイルも読み込んで利用できます。</p>
+      </details>
+
+      <details class="faq-item">
+        <summary><span><span class="q-mark">Q.</span> オフラインでも使えますか？</span><span class="plus">+</span></summary>
+        <p class="faq-a">いいえ、インターネット接続が必要です。VRMモデルを表示する3Dエンジンの仕様上、着せ替えやモーション再生といった基本機能も含めてオフラインでは動作しません。会話・通訳・YouTube連携などGemini Liveを使う機能はもちろん、アプリの起動そのものに通信環境が必要です。</p>
+      </details>
+
+      <details class="faq-item">
+        <summary><span><span class="q-mark">Q.</span> 会話・通訳機能に料金はかかりますか？</span><span class="plus">+</span></summary>
+        <p class="faq-a">アプリ自体の利用は無料です。ただし、会話・通訳機能はGoogleのGemini Live（Gemini API）を利用するため通信が発生します。加えて、モーションやBGMを自動再生（ランダム再生）に設定している場合は、それらのデータ読み込みでも通信量がそれなりに発生します。長時間の利用にはWi-Fi環境をおすすめします。</p>
+      </details>
+
+      <details class="faq-item">
+        <summary><span><span class="q-mark">Q.</span> カメラや位置情報を許可しないと使えませんか？</span><span class="plus">+</span></summary>
+        <p class="faq-a">着せ替えやモーション再生、BGM再生などの基本機能はカメラ・位置情報を許可しなくても利用できます。周囲の状況を踏まえた会話や、通訳・AR撮影などを使いたいときにだけ、それぞれの許可が必要になります。</p>
+      </details>
+    </div>
+  </div>
+</section>
+
+<section id="credits">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="eyebrow"><span class="dot"></span>素材について</span>
+      <h2>フリー素材の作者さんたちへ。</h2>
+    </div>
+    <div class="credit-box">
+      <p>
+        VRMちゃんと！は、多くの制作者の方々が無償で公開してくださっているVRMモデル・背景・モーション・BGMを使わせていただいて成り立っています。
+        素敵な素材を無償で公開してくださっている皆さまに、この場を借りて改めて感謝申し上げます。
+      </p>
+      <p>
+        使用している素材については、アプリ内のログ表示にそれぞれの作者名と配布元へのリンクを表示しています。
+        気に入ったキャラクターやモーション、BGMがあれば、そこから制作者様のページをぜひ訪れてみてください。
+      </p>
+      <div class="credit-note">
+        <span class="icon">⚠️</span>
+        <span>各素材は配布元の利用規約を確認のうえ使用していますが、万一規約に反する利用や表記の誤りがありましたら、<a href="https://x.com/pluteus" target="_blank" rel="noopener">X（@pluteus）</a>までご連絡ください。確認のうえ速やかに訂正・対応いたします。</span>
       </div>
     </div>
   </div>
