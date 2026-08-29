@@ -454,10 +454,14 @@
       <div class="slider-row"><label>移動補正</label><button id="moveFixToggle" class="toggle-btn">OFF</button></div>
       <div class="slider-row"><label>├上下 強度</label><button id="moveSignUDToggle" class="sign-btn">+</button><input type="range" id="moveStrengthUD" min="0" max="2" step="0.05" value="1"><span id="moveStrengthUDV">1.00</span></div>
       <div class="slider-row"><label>└前後 強度</label><button id="moveSignFBToggle" class="sign-btn">+</button><input type="range" id="moveStrengthFB" min="0" max="2" step="0.05" value="1"><span id="moveStrengthFBV">1.00</span></div>
+      <div class="slider-row"><label>現在の補正量</label><span id="moveOffsetDebug" style="font-size:11px; color:var(--text-dim);">UD 0.00 / FB 0.00</span></div>
       <div style="font-size:9.5px; color:var(--text-dim); padding:0 2px 4px;">
         ※加速度センサーが有効な状態で、端末を上下に動かすと「視線先高さ」を、前後に動かすと「視点距離」を
         一時的に変化させます(手を止めると自動的に元へ戻ります)。向きが逆に感じる軸は、その行の+/−ボタンで反転してください。
         🧭ジャイロも同時に有効化しておくと、端末が多少傾いても上下・前後の検出精度が上がりおすすめです。
+        ※「現在の補正量」が0付近のまま動かない場合はセンサー側の問題(許可/対応)、
+        値は動くのに見た目の変化が乏しい場合は🧭ジャイロタブの視差(端末の傾きによるカメラ移動)に
+        埋もれている可能性があるので、一度ジャイロをOFFにして単体で試してみてください。
       </div>
     </div>
 
@@ -5294,6 +5298,7 @@ function updateMoveCorrection(dt){
     // OFF/未有効時は残っているオフセットを滑らかに0へ戻す
     moveVelUD *= 0.85; moveVelFB *= 0.85;
     moveOffsetUD *= 0.85; moveOffsetFB *= 0.85;
+    updateMoveOffsetDebug();
     return;
   }
   let ax = accelRaw.x, ay = accelRaw.y, az = accelRaw.z;
@@ -5323,6 +5328,14 @@ function updateMoveCorrection(dt){
   moveVelFB = (moveVelFB + linFB * dt) * velDamping;
   moveOffsetUD = (moveOffsetUD + moveVelUD * dt) * offsetDecay;
   moveOffsetFB = (moveOffsetFB + moveVelFB * dt) * offsetDecay;
+  updateMoveOffsetDebug();
+}
+
+// 加速度タブに現在のmoveOffsetUD/FBの実値を表示し、センサーが反応しているか
+// (0付近のまま動かないか)、動いているのに見た目に出ないのかを切り分けやすくする。
+function updateMoveOffsetDebug(){
+  const el = document.getElementById('moveOffsetDebug');
+  if(el) el.textContent = `UD ${moveOffsetUD.toFixed(3)} / FB ${moveOffsetFB.toFixed(3)}`;
 }
 
 let detectFaceErrorLogged = false; // 毎フレーム同じエラーでログが埋まらないよう、初回のみ表示する
