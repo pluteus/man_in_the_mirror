@@ -3,11 +3,11 @@
 CyberStage_AB.glb,射当ユウキ,https://tar.booth.pm/items/3964661
 CyberStage_C_Screen.glbb,射当ユウキ,https://tar.booth.pm/items/3964661
 CyberStage_D.glbb,射当ユウキ,https://tar.booth.pm/items/3964661
-ワイヤー横.glb,餅丸よう,https://booth.pm/ja/items/3653176
+#ワイヤー横.glb,餅丸よう,https://booth.pm/ja/items/3653176
 冬水楼閣2.1.glb,餅丸よう,https://booth.pm/ja/items/3495155
 akinoyama.glb,餅丸よう,https://booth.pm/ja/items/5299599
 藤の花vrm向け.glb,餅丸よう,https://booth.pm/ja/items/3068740
-supakabu00.glb,餅丸よう,https://booth.pm/ja/items/5422971
+#supakabu00.glb,餅丸よう,https://booth.pm/ja/items/5422971
 #rooftop.glb,餅丸よう,https://booth.pm/ja/items/7158877
 蓮の花1.1.glb,餅丸よう,https://booth.pm/ja/items/4572215
 出力用あじさい簡易.glb,餅丸よう,https://booth.pm/ja/items/7053500
