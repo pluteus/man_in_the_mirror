@@ -453,15 +453,14 @@
       <div class="sub-toggle-row"><button id="btnAccel">🎚️ 加速度センサー有効化</button></div>
       <div class="slider-row"><label>移動補正</label><button id="moveFixToggle" class="toggle-btn">OFF</button></div>
       <div class="slider-row"><label>├上下 強度</label><button id="moveSignUDToggle" class="sign-btn">+</button><input type="range" id="moveStrengthUD" min="0" max="2" step="0.05" value="1"><span id="moveStrengthUDV">1.00</span></div>
-      <div class="slider-row"><label>└前後 強度</label><button id="moveSignFBToggle" class="sign-btn">+</button><input type="range" id="moveStrengthFB" min="0" max="2" step="0.05" value="1"><span id="moveStrengthFBV">1.00</span></div>
-      <div class="slider-row"><label>現在の補正量</label><span id="moveOffsetDebug" style="font-size:11px; color:var(--text-dim);">UD 0.00 / FB 0.00</span></div>
+      <div class="slider-row"><label>├前後 強度</label><button id="moveSignFBToggle" class="sign-btn">+</button><input type="range" id="moveStrengthFB" min="0" max="2" step="0.05" value="1"><span id="moveStrengthFBV">1.00</span></div>
+      <div class="slider-row"><label>└左右 強度</label><button id="moveSignLRToggle" class="sign-btn">+</button><input type="range" id="moveStrengthLR" min="0" max="2" step="0.05" value="1"><span id="moveStrengthLRV">1.00</span></div>
+      <div class="slider-row"><label>現在の補正量</label><span id="moveOffsetDebug" style="font-size:11px; color:var(--text-dim);">UD 0.00 / FB 0.00 / LR 0.00</span></div>
       <div style="font-size:9.5px; color:var(--text-dim); padding:0 2px 4px;">
-        ※加速度センサーが有効な状態で、端末を上下に動かすと「視線先高さ」を、前後に動かすと「視点距離」を
-        一時的に変化させます(手を止めると自動的に元へ戻ります)。向きが逆に感じる軸は、その行の+/−ボタンで反転してください。
-        🧭ジャイロも同時に有効化しておくと、端末が多少傾いても上下・前後の検出精度が上がりおすすめです。
-        ※「現在の補正量」が0付近のまま動かない場合はセンサー側の問題(許可/対応)、
-        値は動くのに見た目の変化が乏しい場合は🧭ジャイロタブの視差(端末の傾きによるカメラ移動)に
-        埋もれている可能性があるので、一度ジャイロをOFFにして単体で試してみてください。
+        ※加速度センサーが有効な状態で、端末を上下に動かすと「視線先高さ」を、前後に動かすと「視点距離」を、
+        左右に動かすと視点の左右位置を変化させます。動かした位置は自動では中央へ戻らないため、
+        戻したい場合は🎯中央校正を押してください。向きが逆に感じる軸は、その行の+/−ボタンで反転してください。
+        🧭ジャイロも同時に有効化しておくと、端末が多少傾いても検出精度が上がりおすすめです。
       </div>
     </div>
 
@@ -4936,6 +4935,7 @@ const params = {
   charCenterLook: 1,
   moveStrengthUD: 1.0, moveSignUD: 0,
   moveStrengthFB: 1.0, moveSignFB: 0,
+  moveStrengthLR: 1.0, moveSignLR: 0,
   offAxis: false, screenZ: 0.4, eyeDistCm: 40, cmRange: 60,
   texBudgetMB: 200, modelRotY: 0, lipSyncMaxMouth: 1.0, vowelLipSync: 0
 };
@@ -4973,6 +4973,7 @@ const SLIDER_BINDINGS = [
   { id:'uprightStrengthLR', key:'uprightStrengthLR' }, { id:'uprightStrengthFB', key:'uprightStrengthFB' },
   { id:'uprightStrengthYaw', key:'uprightStrengthYaw' },
   { id:'moveStrengthUD', key:'moveStrengthUD' }, { id:'moveStrengthFB', key:'moveStrengthFB' },
+  { id:'moveStrengthLR', key:'moveStrengthLR' },
   { id:'screenZ', key:'screenZ' }, { id:'eyeDistCm', key:'eyeDistCm' },
   { id:'cmRange', key:'cmRange' }, { id:'texBudget', key:'texBudgetMB' },
   { id:'lipSyncMaxMouth', key:'lipSyncMaxMouth' }
@@ -4997,6 +4998,7 @@ function applyParamsToUI(){
   if(typeof applyMoveFixToggleUI === 'function') applyMoveFixToggleUI();
   if(typeof applyMoveSignUDUI === 'function') applyMoveSignUDUI();
   if(typeof applyMoveSignFBUI === 'function') applyMoveSignFBUI();
+  if(typeof applyMoveSignLRUI === 'function') applyMoveSignLRUI();
   if(typeof applyVowelLipSyncToggleUI === 'function') applyVowelLipSyncToggleUI();
 }
 
@@ -5218,15 +5220,15 @@ function updateUprightCorrection(){
 // devicemotionのaccelerationIncludingGravityを低域通過フィルタにかけて重力成分(≒端末の姿勢)を推定し、
 // 生値から差し引くことで並進方向の加速度(ハイパスフィルタ後の成分)だけを取り出す。
 // ジャイロが有効な場合は、校正基準からの傾き(beta/gamma)ぶんだけ加速度ベクトルを事前に
-// 逆回転させ、「端末が常に直立している」とみなした上下・前後成分として扱う(ジャイロ併用)。
-// これを速度→位置へ積分して「動いた量」の目安にするが、加速度センサーだけでは誤差が蓄積して
-// 際限なくドリフトしてしまうため、速度・オフセットともに毎フレーム減衰させ、
-// 端末の動きが止まれば自然に基準値へ戻る「バネ」のような挙動にしている。
+// 逆回転させ、「端末が常に直立している」とみなした上下・前後・左右成分として扱う(ジャイロ併用)。
+// これを速度→位置へ積分して「動いた量」の目安にする。速度は毎フレーム減衰させて
+// センサーノイズによる際限のない加速を防ぐが、位置(オフセット)自体は自動では中央へ戻さず、
+// 動かした分だけ視点がそのまま留まる(元に戻したい場合は🎯中央校正でリセットする)。
 let accelEnabled = false;
 const accelRaw = { x: 0, y: 0, z: 0, has: false };
 const accelGravity = { x: 0, y: 0, z: 0 };
-let moveVelUD = 0, moveVelFB = 0;       // 推定並進速度(毎フレーム減衰)
-let moveOffsetUD = 0, moveOffsetFB = 0; // 視線先高さ/視点距離に加算する一時オフセット
+let moveVelUD = 0, moveVelFB = 0, moveVelLR = 0;          // 推定並進速度(毎フレーム減衰)
+let moveOffsetUD = 0, moveOffsetFB = 0, moveOffsetLR = 0; // 視線先高さ/視点距離/左右位置に加算するオフセット(自動では0に戻らない)
 const _tiltAccelVec = new THREE.Vector3(); // 傾き補正用の再利用ベクトル(毎フレームのGCを避ける)
 const _tiltEuler = new THREE.Euler();
 
@@ -5246,7 +5248,7 @@ async function toggleAccel(){
   if(accelEnabled){
     window.removeEventListener('devicemotion', handleMotion);
     accelEnabled = false;
-    moveVelUD = moveVelFB = moveOffsetUD = moveOffsetFB = 0;
+    moveVelUD = moveVelFB = moveVelLR = moveOffsetUD = moveOffsetFB = moveOffsetLR = 0;
     btn.textContent = '🎚️ 加速度センサー有効化';
     btn.classList.remove('on');
     log('加速度センサートラッキング停止');
@@ -5295,9 +5297,9 @@ document.getElementById('btnAccel').addEventListener('click', toggleAccel);
 // 「直立を保ったまま上下させる」動きをより素直に検知できるようにする(ジャイロ無効時は端末ローカル軸のまま)。
 function updateMoveCorrection(dt){
   if(!accelEnabled || !accelRaw.has || !params.moveFix){
-    // OFF/未有効時は残っているオフセットを滑らかに0へ戻す
-    moveVelUD *= 0.85; moveVelFB *= 0.85;
-    moveOffsetUD *= 0.85; moveOffsetFB *= 0.85;
+    // OFF/未有効時は残っているオフセットを滑らかに0へ戻す(機能そのものを切った時のみ)
+    moveVelUD *= 0.85; moveVelFB *= 0.85; moveVelLR *= 0.85;
+    moveOffsetUD *= 0.85; moveOffsetFB *= 0.85; moveOffsetLR *= 0.85;
     updateMoveOffsetDebug();
     return;
   }
@@ -5317,25 +5319,27 @@ function updateMoveCorrection(dt){
   accelGravity.z += (az - accelGravity.z) * gAlpha;
   const linUD = ay - accelGravity.y; // 上下方向の並進加速度(m/s^2、傾き補正後)
   const linFB = az - accelGravity.z; // 前後(画面に垂直)方向の並進加速度(m/s^2、傾き補正後)
+  const linLR = ax - accelGravity.x; // 左右方向の並進加速度(m/s^2、傾き補正後)
 
-  // 減衰を緩め、「動かして、その位置で少し止めておく」操作でもオフセットが
-  // ある程度の時間保持されるようにする(以前は毎フレーム急速に0へ戻っていたため、
-  // ゆっくりした移動だとほぼ効果が現れないまま消えてしまっていた)。
-  const velDamping  = 0.96; // 速度の減衰(蓄積誤差によるドリフトを防ぐ)
-  const offsetDecay = 0.985; // オフセットを基準値へ徐々に戻す(バネ的な復元)
+  // 速度は毎フレーム減衰させ、センサーノイズによる際限のない加速(ドリフトの主因)を防ぐ。
+  // オフセット自体はもう自動で0へ戻さない(動かした位置がそのまま留まる)。
+  // 元の位置に戻したい場合は🎯中央校正ボタンでリセットする。
+  const velDamping = 0.96; // 速度の減衰
 
   moveVelUD = (moveVelUD + linUD * dt) * velDamping;
   moveVelFB = (moveVelFB + linFB * dt) * velDamping;
-  moveOffsetUD = (moveOffsetUD + moveVelUD * dt) * offsetDecay;
-  moveOffsetFB = (moveOffsetFB + moveVelFB * dt) * offsetDecay;
+  moveVelLR = (moveVelLR + linLR * dt) * velDamping;
+  moveOffsetUD += moveVelUD * dt;
+  moveOffsetFB += moveVelFB * dt;
+  moveOffsetLR += moveVelLR * dt;
   updateMoveOffsetDebug();
 }
 
-// 加速度タブに現在のmoveOffsetUD/FBの実値を表示し、センサーが反応しているか
+// 加速度タブに現在のmoveOffsetUD/FB/LRの実値を表示し、センサーが反応しているか
 // (0付近のまま動かないか)、動いているのに見た目に出ないのかを切り分けやすくする。
 function updateMoveOffsetDebug(){
   const el = document.getElementById('moveOffsetDebug');
-  if(el) el.textContent = `UD ${moveOffsetUD.toFixed(3)} / FB ${moveOffsetFB.toFixed(3)}`;
+  if(el) el.textContent = `UD ${moveOffsetUD.toFixed(3)} / FB ${moveOffsetFB.toFixed(3)} / LR ${moveOffsetLR.toFixed(3)}`;
 }
 
 let detectFaceErrorLogged = false; // 毎フレーム同じエラーでログが埋まらないよう、初回のみ表示する
@@ -5424,7 +5428,7 @@ function performCenterCalibration(){
   calib = { x: smoothed.x, y: smoothed.y, width: smoothed.width };
   syncSliderUI('lookY', 1);
   syncSliderUI('modelRotY', 0);
-  moveVelUD = moveVelFB = moveOffsetUD = moveOffsetFB = 0;
+  moveVelUD = moveVelFB = moveVelLR = moveOffsetUD = moveOffsetFB = moveOffsetLR = 0;
   let msg = `中央校正しました (x:${calib.x.toFixed(2)} y:${calib.y.toFixed(2)} w:${calib.width.toFixed(2)}) / 視線先高さ・回転量をリセット`;
   if(gyroEnabled && gyroRaw.has){
     gyroBaseline = { beta: gyroSmoothed.beta, gamma: gyroSmoothed.gamma, alpha: gyroSmoothed.alpha };
@@ -5435,7 +5439,7 @@ function performCenterCalibration(){
 document.getElementById('btnCalib').addEventListener('click', performCenterCalibration);
 
 /* ---------------- カメラ視点更新（覗き窓効果） ---------------- */
-function updateOffAxisFromHead(totalDx, totalDy, depthRatio, lookYOffset, distOffset){
+function updateOffAxisFromHead(totalDx, totalDy, depthRatio, lookYOffset, distOffset, lrOffset){
   // 校正済みの物理画面サイズ(cm→m)でスクリーン矩形をワールド座標に定義
   const Wm = (screenWidthCm/100)/2;
   const Hm = (screenHeightCm/100)/2;
@@ -5445,7 +5449,7 @@ function updateOffAxisFromHead(totalDx, totalDy, depthRatio, lookYOffset, distOf
   const pc = new THREE.Vector3(-Wm, cy + Hm, 0); // 左上
 
   const rangeM = (params.cmRange/100) * params.sxy;
-  const eyeX = totalDx * rangeM;
+  const eyeX = totalDx * rangeM + (lrOffset || 0);
   const eyeY = cy + totalDy * rangeM * 0.85;
   const eyeZ = ((params.eyeDistCm/100) + distOffset) / Math.pow(Math.max(depthRatio, 0.3), params.sz);
   const pe = new THREE.Vector3(eyeX, eyeY, eyeZ);
@@ -5475,14 +5479,16 @@ function updateCameraFromFace(){
     totalDy += -dBeta * gScaleNorm * 0.85;
   }
 
-  // 加速度センサーによる移動補正:上下移動→視線先高さ、前後移動→視点距離への一時オフセット
+  // 加速度センサーによる移動補正:上下移動→視線先高さ、前後移動→視点距離、左右移動→視点の左右位置への一時オフセット
   const udSign = params.moveSignUD ? -1 : 1;
   const fbSign = params.moveSignFB ? -1 : 1;
+  const lrSign = params.moveSignLR ? -1 : 1;
   const moveLookYOffset = moveOffsetUD * udSign * params.moveStrengthUD;
   const moveDistOffset  = moveOffsetFB * fbSign * params.moveStrengthFB;
+  const moveXOffset     = moveOffsetLR * lrSign * params.moveStrengthLR;
 
   if(params.offAxis){
-    updateOffAxisFromHead(totalDx, totalDy, depthRatio, moveLookYOffset, moveDistOffset);
+    updateOffAxisFromHead(totalDx, totalDy, depthRatio, moveLookYOffset, moveDistOffset, moveXOffset);
     document.querySelector('#camPreview .dot').style.left = `${(1-smoothed.x)*100}%`;
     document.querySelector('#camPreview .dot').style.top = `${smoothed.y*100}%`;
     return;
@@ -5490,7 +5496,7 @@ function updateCameraFromFace(){
 
   if(currentVRM){ currentVRM.scene.position.z = 0; }
   const range = 1.6 * params.sxy;
-  const camX = totalDx * range;
+  const camX = totalDx * range + moveXOffset;
   const camY = totalDy * range * 0.85;
   const dist = params.baseDist / Math.pow(Math.max(depthRatio, 0.3), params.sz) + moveDistOffset;
   const lookY = params.lookY + moveLookYOffset;
@@ -5590,6 +5596,8 @@ const applyMoveSignUDUI = bindSignToggle('moveSignUDToggle','moveSignUD');
 bindSlider('moveStrengthUD','moveStrengthUD', v=>v.toFixed(2));
 const applyMoveSignFBUI = bindSignToggle('moveSignFBToggle','moveSignFB');
 bindSlider('moveStrengthFB','moveStrengthFB', v=>v.toFixed(2));
+const applyMoveSignLRUI = bindSignToggle('moveSignLRToggle','moveSignLR');
+bindSlider('moveStrengthLR','moveStrengthLR', v=>v.toFixed(2));
 bindSlider('modelRotY','modelRotY', v=>v.toFixed(0));
 bindSlider('screenZ','screenZ', v=>v.toFixed(2));
 bindSlider('eyeDistCm','eyeDistCm', v=>v.toFixed(0));
