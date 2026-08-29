@@ -256,7 +256,6 @@
 <div id="topbar">
   <button id="btnCharacterList">🧑 キャラクター</button>
   <input type="file" id="characterVrmFile" accept=".vrm" multiple style="display:none">
-  <button id="btnVroidHub">🌐 VRoid Hub</button>
   <input type="file" id="vrmaFile" accept=".vrma" multiple style="display:none">
   <button id="btnMotionList">🎞 モーション</button>
   <input type="file" id="bgmFile" accept="audio/*" multiple style="display:none">
@@ -280,7 +279,10 @@
   <div id="characterListItems"></div>
   <div class="char-bottom-row">
     <button id="btnClearCharacterList" title="キャラクターリストを全削除">🗑全削除</button>
-    <button id="btnAddCharacter">➕ 追加</button>
+    <div style="display:flex; gap:8px;">
+      <button id="btnVroidHub">🌐 VRoid Hub</button>
+      <button id="btnAddCharacter">➕ 追加</button>
+    </div>
   </div>
 </div>
 
@@ -432,6 +434,7 @@
     <div id="settingsTabGyro" class="settings-tab-panel">
       <div class="sub-toggle-row"><button id="btnGyro">🧭 ジャイロ有効化</button></div>
       <div class="slider-row"><label>ジャイロ感度</label><input type="range" id="gsens" min="0" max="3" step="0.05" value="1"><span id="gsensV">1.0</span></div>
+      <div class="slider-row"><label>キャラクター中心注視</label><button id="charCenterLookToggle" class="toggle-btn">ON</button></div>
       <div class="slider-row"><label>├時計回り(ロール) 強度</label><button id="uprightSignLRToggle" class="sign-btn">+</button><input type="range" id="uprightStrengthLR" min="0" max="2" step="0.05" value="1"><span id="uprightStrengthLRV">1.00</span></div>
       <div class="slider-row"><label>├ハイローアングル(ピッチ) 強度</label><button id="uprightSignFBToggle" class="sign-btn">+</button><input type="range" id="uprightStrengthFB" min="0" max="2" step="0.05" value="1"><span id="uprightStrengthFBV">1.00</span></div>
       <div class="slider-row"><label>└首振り(ヨー) 強度</label><button id="uprightSignYawToggle" class="sign-btn">+</button><input type="range" id="uprightStrengthYaw" min="0" max="2" step="0.05" value="1"><span id="uprightStrengthYawV">1.00</span></div>
@@ -441,6 +444,8 @@
         軸ごとに独立した強度で常時打ち消します(校正ボタンを押した時の姿勢を「まっすぐ」の基準にします)。
         ヨーの補正量は一般タブの「回転量」に自動で加算されます(手動でのスライダー操作はそのまま基準値として効きます)。
         向きが逆に感じる軸は、その行の+/−ボタンで反転してください。
+        「キャラクター中心注視」は、端末の傾きが変化している間だけ注視点をキャラクターの頭部へ寄せる機能です。
+        🎚️加速度センサーの「移動補正」と競合するため、加速度センサーを有効化すると自動でOFFになります。
       </div>
     </div>
 
@@ -452,6 +457,7 @@
       <div style="font-size:9.5px; color:var(--text-dim); padding:0 2px 4px;">
         ※加速度センサーが有効な状態で、端末を上下に動かすと「視線先高さ」を、前後に動かすと「視点距離」を
         一時的に変化させます(手を止めると自動的に元へ戻ります)。向きが逆に感じる軸は、その行の+/−ボタンで反転してください。
+        🧭ジャイロも同時に有効化しておくと、端末が多少傾いても上下・前後の検出精度が上がりおすすめです。
       </div>
     </div>
 
@@ -4923,6 +4929,7 @@ const params = {
   uprightStrengthFB: 1.0, uprightSignFB: 0,
   uprightStrengthYaw: 1.0, uprightSignYaw: 0,
   moveFix: 0,
+  charCenterLook: 1,
   moveStrengthUD: 1.0, moveSignUD: 0,
   moveStrengthFB: 1.0, moveSignFB: 0,
   offAxis: false, screenZ: 0.4, eyeDistCm: 40, cmRange: 60,
@@ -4982,6 +4989,7 @@ function applyParamsToUI(){
   if(typeof applyUprightSignLRUI === 'function') applyUprightSignLRUI();
   if(typeof applyUprightSignFBUI === 'function') applyUprightSignFBUI();
   if(typeof applyUprightSignYawUI === 'function') applyUprightSignYawUI();
+  if(typeof applyCharCenterLookToggleUI === 'function') applyCharCenterLookToggleUI();
   if(typeof applyMoveFixToggleUI === 'function') applyMoveFixToggleUI();
   if(typeof applyMoveSignUDUI === 'function') applyMoveSignUDUI();
   if(typeof applyMoveSignFBUI === 'function') applyMoveSignFBUI();
@@ -5205,6 +5213,8 @@ function updateUprightCorrection(){
 /* ---------------- 加速度センサー(端末の並進移動) ---------------- */
 // devicemotionのaccelerationIncludingGravityを低域通過フィルタにかけて重力成分(≒端末の姿勢)を推定し、
 // 生値から差し引くことで並進方向の加速度(ハイパスフィルタ後の成分)だけを取り出す。
+// ジャイロが有効な場合は、校正基準からの傾き(beta/gamma)ぶんだけ加速度ベクトルを事前に
+// 逆回転させ、「端末が常に直立している」とみなした上下・前後成分として扱う(ジャイロ併用)。
 // これを速度→位置へ積分して「動いた量」の目安にするが、加速度センサーだけでは誤差が蓄積して
 // 際限なくドリフトしてしまうため、速度・オフセットともに毎フレーム減衰させ、
 // 端末の動きが止まれば自然に基準値へ戻る「バネ」のような挙動にしている。
@@ -5213,6 +5223,8 @@ const accelRaw = { x: 0, y: 0, z: 0, has: false };
 const accelGravity = { x: 0, y: 0, z: 0 };
 let moveVelUD = 0, moveVelFB = 0;       // 推定並進速度(毎フレーム減衰)
 let moveOffsetUD = 0, moveOffsetFB = 0; // 視線先高さ/視点距離に加算する一時オフセット
+const _tiltAccelVec = new THREE.Vector3(); // 傾き補正用の再利用ベクトル(毎フレームのGCを避ける)
+const _tiltEuler = new THREE.Euler();
 
 function handleMotion(e){
   const a = e.accelerationIncludingGravity;
@@ -5257,12 +5269,26 @@ async function toggleAccel(){
   accelEnabled = true;
   btn.textContent = '🎚️ 加速度センサー停止';
   btn.classList.add('on');
-  log('加速度センサートラッキング開始', 'ok');
+  // 移動補正(加速度センサーによる視線先高さ/視点距離の補正)と
+  // キャラクター中心注視(ジャイロによる注視点追従)は競合するため、
+  // 加速度センサー有効化時は移動補正をON・キャラクター中心注視をOFFにする。
+  params.moveFix = 1;
+  params.charCenterLook = 0;
+  if(typeof applyMoveFixToggleUI === 'function') applyMoveFixToggleUI();
+  if(typeof applyCharCenterLookToggleUI === 'function') applyCharCenterLookToggleUI();
+  saveParamsToStorage();
+  log('加速度センサートラッキング開始(移動補正ON・キャラクター中心注視OFFに切替)', 'ok');
 }
 document.getElementById('btnAccel').addEventListener('click', toggleAccel);
 
 // 端末の上下・前後方向の並進移動を検知し、視線先高さ/視点距離に加える一時的なオフセットを更新する。
 // dt: 直前フレームからの経過秒数
+//
+// ジャイロと加速度センサーを併用: 端末が(校正基準から見て)少し傾いていても、
+// その傾き(ジャイロのbeta/gamma)ぶんだけ加速度ベクトルを逆回転させてから重力成分を除去することで、
+// 「端末が常に直立しているとみなした場合の」上下・前後方向の並進加速度を取り出す。
+// これにより、多少の傾きが重力成分の誤検出(=大きなノイズ・ドリフトの主因)になるのを防ぎ、
+// 「直立を保ったまま上下させる」動きをより素直に検知できるようにする(ジャイロ無効時は端末ローカル軸のまま)。
 function updateMoveCorrection(dt){
   if(!accelEnabled || !accelRaw.has || !params.moveFix){
     // OFF/未有効時は残っているオフセットを滑らかに0へ戻す
@@ -5270,15 +5296,28 @@ function updateMoveCorrection(dt){
     moveOffsetUD *= 0.85; moveOffsetFB *= 0.85;
     return;
   }
-  const gAlpha = 0.06; // 重力(低周波成分)推定の追従係数
-  accelGravity.x += (accelRaw.x - accelGravity.x) * gAlpha;
-  accelGravity.y += (accelRaw.y - accelGravity.y) * gAlpha;
-  accelGravity.z += (accelRaw.z - accelGravity.z) * gAlpha;
-  const linUD = accelRaw.y - accelGravity.y; // 上下方向の並進加速度(m/s^2)
-  const linFB = accelRaw.z - accelGravity.z; // 前後(画面に垂直)方向の並進加速度(m/s^2)
+  let ax = accelRaw.x, ay = accelRaw.y, az = accelRaw.z;
+  if(gyroEnabled && gyroRaw.has){
+    const dBetaRad  = THREE.MathUtils.degToRad(gyroSmoothed.beta  - gyroBaseline.beta);
+    const dGammaRad = THREE.MathUtils.degToRad(gyroSmoothed.gamma - gyroBaseline.gamma);
+    _tiltAccelVec.set(ax, ay, az);
+    _tiltEuler.set(-dBetaRad, 0, -dGammaRad, 'XYZ');
+    _tiltAccelVec.applyEuler(_tiltEuler);
+    ax = _tiltAccelVec.x; ay = _tiltAccelVec.y; az = _tiltAccelVec.z;
+  }
 
-  const velDamping  = 0.90; // 速度の減衰(蓄積誤差によるドリフトを防ぐ)
-  const offsetDecay = 0.94; // オフセットを基準値へ徐々に戻す(バネ的な復元)
+  const gAlpha = 0.06; // 重力(低周波成分)推定の追従係数
+  accelGravity.x += (ax - accelGravity.x) * gAlpha;
+  accelGravity.y += (ay - accelGravity.y) * gAlpha;
+  accelGravity.z += (az - accelGravity.z) * gAlpha;
+  const linUD = ay - accelGravity.y; // 上下方向の並進加速度(m/s^2、傾き補正後)
+  const linFB = az - accelGravity.z; // 前後(画面に垂直)方向の並進加速度(m/s^2、傾き補正後)
+
+  // 減衰を緩め、「動かして、その位置で少し止めておく」操作でもオフセットが
+  // ある程度の時間保持されるようにする(以前は毎フレーム急速に0へ戻っていたため、
+  // ゆっくりした移動だとほぼ効果が現れないまま消えてしまっていた)。
+  const velDamping  = 0.96; // 速度の減衰(蓄積誤差によるドリフトを防ぐ)
+  const offsetDecay = 0.985; // オフセットを基準値へ徐々に戻す(バネ的な復元)
 
   moveVelUD = (moveVelUD + linUD * dt) * velDamping;
   moveVelFB = (moveVelFB + linFB * dt) * velDamping;
@@ -5452,7 +5491,7 @@ function updateCameraFromFace(){
   // センサー値が変動している(=まだ傾きが動いている)間は、注視点をキャラクターの
   // 頭部の実際のワールド座標へなめらかに寄せることで、追従して中央に収まるようにする。
   let targetWeight = 0;
-  if(gyroEnabled && currentVRM && currentVRM.humanoid){
+  if(params.charCenterLook && gyroEnabled && currentVRM && currentVRM.humanoid){
     const activity = computeGyroActivity();
     targetWeight = clamp((activity - 0.15) / (1.5 - 0.15), 0, 1); // 小さなブレは無視する閾値
   }
@@ -5527,6 +5566,7 @@ const applyUprightSignFBUI = bindSignToggle('uprightSignFBToggle','uprightSignFB
 bindSlider('uprightStrengthFB','uprightStrengthFB', v=>v.toFixed(2));
 const applyUprightSignYawUI = bindSignToggle('uprightSignYawToggle','uprightSignYaw');
 bindSlider('uprightStrengthYaw','uprightStrengthYaw', v=>v.toFixed(2));
+const applyCharCenterLookToggleUI = bindToggle('charCenterLookToggle','charCenterLook');
 const applyMoveFixToggleUI = bindToggle('moveFixToggle','moveFix');
 document.getElementById('moveFixToggle').addEventListener('click', () => {
   if(params.moveFix && !accelEnabled){
