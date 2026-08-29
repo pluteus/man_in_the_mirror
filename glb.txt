@@ -1,8 +1,8 @@
 #washitsu01.glb,福猫,https://hukunekodou.booth.pm/
 #washitsu02.glb,福猫,https://hukunekodou.booth.pm/
 CyberStage_AB.glb,射当ユウキ,https://tar.booth.pm/items/3964661
-CyberStage_C_Screen.glbb,射当ユウキ,https://tar.booth.pm/items/3964661
-CyberStage_D.glbb,射当ユウキ,https://tar.booth.pm/items/3964661
+CyberStage_C_Screen.glb,射当ユウキ,https://tar.booth.pm/items/3964661
+CyberStage_D.glb,射当ユウキ,https://tar.booth.pm/items/3964661
 #ワイヤー横.glb,餅丸よう,https://booth.pm/ja/items/3653176
 冬水楼閣2.1.glb,餅丸よう,https://booth.pm/ja/items/3495155
 akinoyama.glb,餅丸よう,https://booth.pm/ja/items/5299599
