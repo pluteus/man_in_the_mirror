@@ -5844,8 +5844,14 @@ let twoFingerPanStartMid = null;
 let twoFingerPanStartOffsetX = 0;
 let twoFingerPanStartOffsetDist = 0;
 
-// 右クリックのコンテキストメニューを抑止(右ドラッグをパン操作として使うため)
-gestureEl.addEventListener('contextmenu', (e) => e.preventDefault());
+// 右クリックのコンテキストメニューを抑止(右ドラッグをパン操作として使うため)。
+// gestureEl自体だけでなく document でも受け止める。フルスクリーン中は、一時的に
+// 表示される操作パネル等がcanvas-containerより手前でイベントを受け取ってしまい、
+// gestureEl側のリスナーだけでは検出・抑止できないことがあるための保険。
+function isOverGesture(e){
+  return document.body.classList.contains('fs-active') || gestureEl.contains(e.target);
+}
+document.addEventListener('contextmenu', (e) => { if(isOverGesture(e)) e.preventDefault(); });
 
 function pointersArray(){ return Array.from(activePointers.values()); }
 function dist2(a, b){ return Math.hypot(a.x - b.x, a.y - b.y); }
@@ -5874,7 +5880,9 @@ function syncSliderUI(id, value){
   input.dispatchEvent(new Event('input'));
 }
 
-gestureEl.addEventListener('pointerdown', (e) => {
+document.addEventListener('pointerdown', (e) => {
+  if(!isOverGesture(e)) return;
+
   if(e.pointerType === 'mouse' && e.button === 2){
     // 右ボタンドラッグ:視点の左右・前後の水平移動(1本指/2本指ジェスチャーとは独立)
     e.preventDefault();
@@ -5913,7 +5921,7 @@ gestureEl.addEventListener('pointerdown', (e) => {
   }
 });
 
-gestureEl.addEventListener('pointermove', (e) => {
+document.addEventListener('pointermove', (e) => {
   if(rightDragActive){
     const dx = e.clientX - rightDragStartX;
     const dy = e.clientY - rightDragStartY;
@@ -6005,8 +6013,8 @@ function endGesturePointer(e){
     dragMoved = false;
   }
 }
-gestureEl.addEventListener('pointerup', endGesturePointer);
-gestureEl.addEventListener('pointercancel', endGesturePointer);
+document.addEventListener('pointerup', endGesturePointer);
+document.addEventListener('pointercancel', endGesturePointer);
 
 /* ---------------- メインループ ----------------
    requestAnimationFrameではなくrenderer.setAnimationLoop()を使う。
