@@ -342,7 +342,6 @@
 
   <div id="camTabCamera" class="cam-tab-panel active">
     <div class="camera-grid">
-      <button id="btnCam">▶ インカメラ</button>
       <button id="btnOutCam">📷 アウトカメラ</button>
       <button id="btnScreenshot">📸 撮影</button>
       <button id="btnThumbnail">🖼 サムネイル撮影</button>
@@ -400,6 +399,7 @@
 
     <div class="settings-tabs">
       <button class="settings-tab-btn active" data-tab="settingsTabGeneral">🔧 一般</button>
+      <button class="settings-tab-btn" data-tab="settingsTabInCam">🤳 インカメラ</button>
       <button class="settings-tab-btn" data-tab="settingsTabGyro">🧭 ジャイロ</button>
       <button class="settings-tab-btn" data-tab="settingsTabAccel">🎚️ 加速度</button>
       <button class="settings-tab-btn" data-tab="settingsTabOffAxis">🪟 off-axis</button>
@@ -407,10 +407,6 @@
     </div>
 
     <div id="settingsTabGeneral" class="settings-tab-panel active">
-      <div class="slider-row"><label>左右感度</label><input type="range" id="sxy" min="0" max="3" step="0.05" value="1"><span id="sxyV">1.0</span></div>
-      <div class="slider-row">
-        <label>奥行き感度</label><input type="range" id="sz" min="0" max="3" step="0.05" value="1"><span id="szV">1.0</span>
-      </div>
       <div class="slider-row"><label>視点距離</label><input type="range" id="baseDist" min="0.5" max="20" step="0.1" value="2.2"><span id="baseDistV">2.2</span></div>
       <div class="slider-row"><label>視線先高さ</label><input type="range" id="lookY" min="0" max="2" step="0.05" value="1.0"><span id="lookYV">1.0</span></div>
       <div class="slider-row"><label>スムージング</label><input type="range" id="smooth" min="0.05" max="0.9" step="0.05" value="0.25"><span id="smoothV">0.25</span></div>
@@ -421,18 +417,28 @@
       <div class="slider-row"><label>音声分離リップシンク</label><button id="vowelLipSyncToggle" class="toggle-btn">OFF</button></div>
     </div>
 
+    <div id="settingsTabInCam" class="settings-tab-panel">
+      <div class="sub-toggle-row"><button id="btnCam">▶ インカメラ</button></div>
+      <div class="slider-row"><label>左右感度</label><input type="range" id="sxy" min="0" max="3" step="0.05" value="1"><span id="sxyV">1.0</span></div>
+      <div class="slider-row">
+        <label>奥行き感度</label><input type="range" id="sz" min="0" max="3" step="0.05" value="1"><span id="szV">1.0</span>
+      </div>
+      <div style="font-size:9.5px; color:var(--text-dim); padding:4px 2px 0;">
+        ※インカメラで顔をトラッキングし、顔の動きに応じてキャラクター(カメラ視点)を左右・前後に動かします。
+        「左右感度」「奥行き感度」はその動きの大きさを調整します。
+      </div>
+    </div>
+
     <div id="settingsTabGyro" class="settings-tab-panel">
       <div class="sub-toggle-row"><button id="btnGyro">🧭 ジャイロ有効化</button></div>
       <div class="slider-row"><label>ジャイロ感度</label><input type="range" id="gsens" min="0" max="3" step="0.05" value="1"><span id="gsensV">1.0</span></div>
-      <div class="slider-row"><label>ジャイロ反転</label><button id="gflipToggle" class="toggle-btn">OFF</button></div>
-      <div class="slider-row"><label>直立補正</label><button id="uprightToggle" class="toggle-btn">OFF</button></div>
       <div class="slider-row"><label>├時計回り(ロール) 強度</label><button id="uprightSignLRToggle" class="sign-btn">+</button><input type="range" id="uprightStrengthLR" min="0" max="2" step="0.05" value="1"><span id="uprightStrengthLRV">1.00</span></div>
       <div class="slider-row"><label>├ハイローアングル(ピッチ) 強度</label><button id="uprightSignFBToggle" class="sign-btn">+</button><input type="range" id="uprightStrengthFB" min="0" max="2" step="0.05" value="1"><span id="uprightStrengthFBV">1.00</span></div>
       <div class="slider-row"><label>└首振り(ヨー) 強度</label><button id="uprightSignYawToggle" class="sign-btn">+</button><input type="range" id="uprightStrengthYaw" min="0" max="2" step="0.05" value="1"><span id="uprightStrengthYawV">1.00</span></div>
       <div style="font-size:9.5px; color:var(--text-dim); padding:0 2px 4px;">
         ※ジャイロセンサーが有効な状態で、端末を傾けてもキャラクターが現実世界に対して直立して見えるよう、
         左右(ロール)・前後(ピッチ)・回転(ヨー。端末を持ったまま体ごと左右に向きを変える動き)のブレを
-        軸ごとに独立した強度で打ち消します(校正ボタンを押した時の姿勢を「まっすぐ」の基準にします)。
+        軸ごとに独立した強度で常時打ち消します(校正ボタンを押した時の姿勢を「まっすぐ」の基準にします)。
         ヨーの補正量は一般タブの「回転量」に自動で加算されます(手動でのスライダー操作はそのまま基準値として効きます)。
         向きが逆に感じる軸は、その行の+/−ボタンで反転してください。
       </div>
@@ -830,7 +836,6 @@ const VR_MAIN_MENU = [
   { type: 'action', domId: 'btnRecord',        label: '⏺ 録画',                    mirror: true },
   { type: 'action', domId: 'btnCalib',         label: '🎯 中央校正' },
   { type: 'action', domId: 'btnGyro',          label: '🧭 ジャイロ有効化',          mirror: true },
-  { type: 'action', domId: 'uprightToggle',    label: '📐 直立補正: OFF', mirror: true, prefix: '📐 直立補正: ' },
   { type: 'action', domId: 'btnAccel',         label: '🎚️ 加速度センサー有効化',   mirror: true },
   { type: 'action', domId: 'btnOffAxis',       label: '🪟 本格off-axis',           mirror: true },
   { type: 'list',   view: 'log',           label: '📋 ログ' },
@@ -4913,7 +4918,7 @@ let calib = { x:0, y:0, width:0.28 };
 
 const params = {
   sxy: 1.0, sz: 1.0, baseDist: 2.2, lookY: 1.0, smooth: 0.25, flip: 0,
-  gsens: 1.0, gflip: 0, uprightFix: 0,
+  gsens: 1.0,
   uprightStrengthLR: 1.0, uprightSignLR: 0,
   uprightStrengthFB: 1.0, uprightSignFB: 0,
   uprightStrengthYaw: 1.0, uprightSignYaw: 0,
@@ -4948,7 +4953,7 @@ function loadParamsFromStorage(){
 }
 
 // id(HTML input要素)とparamsのキーの対応表。texBudgetのみid≠keyなので明示。
-// flip/gflipはトグルボタン化したためここには含めず、applyToggleUI()で個別に同期する。
+// flipはトグルボタン化したためここには含めず、applyToggleUI()で個別に同期する。
 const SLIDER_BINDINGS = [
   { id:'sxy', key:'sxy' }, { id:'sz', key:'sz' },
   { id:'baseDist', key:'baseDist' }, { id:'lookY', key:'lookY' },
@@ -5169,11 +5174,10 @@ function updateUprightCorrection(){
   if(renderer.xr.isPresenting){
     // VRモード中は対象外(ヘッドセットの実姿勢を使うため)
     uprightRotX = 0; uprightRotZ = 0; uprightRotYaw = 0;
-  }else if(!params.uprightFix || !gyroEnabled || !gyroRaw.has){
+  }else if(!gyroEnabled || !gyroRaw.has){
     uprightRotX = 0; uprightRotZ = 0; uprightRotYaw = 0;
   }else{
-    const gFlipSign = params.gflip ? -1 : 1;
-    const dGamma = (gyroSmoothed.gamma - gyroBaseline.gamma) * gFlipSign; // 校正基準からの左右傾きズレ(度)
+    const dGamma = (gyroSmoothed.gamma - gyroBaseline.gamma); // 校正基準からの左右傾きズレ(度)
     const dBeta  = (gyroSmoothed.beta  - gyroBaseline.beta);              // 校正基準からの前後傾きズレ(度)
     const dAlpha = ((gyroSmoothed.alpha - gyroBaseline.alpha + 540) % 360) - 180; // 校正基準からの回転(ヨー)ズレ(度、-180〜180)
     // 端末の傾きと逆方向に傾けて相殺する。軸ごとに強度・符号を独立して指定できる。
@@ -5370,7 +5374,7 @@ function performCenterCalibration(){
   syncSliderUI('modelRotY', 0);
   moveVelUD = moveVelFB = moveOffsetUD = moveOffsetFB = 0;
   let msg = `中央校正しました (x:${calib.x.toFixed(2)} y:${calib.y.toFixed(2)} w:${calib.width.toFixed(2)}) / 視線先高さ・回転量をリセット`;
-  if((gyroEnabled || params.uprightFix) && gyroRaw.has){
+  if(gyroEnabled && gyroRaw.has){
     gyroBaseline = { beta: gyroSmoothed.beta, gamma: gyroSmoothed.gamma, alpha: gyroSmoothed.alpha };
     msg += ` / ジャイロ基準(beta:${gyroBaseline.beta.toFixed(1)} gamma:${gyroBaseline.gamma.toFixed(1)} alpha:${gyroBaseline.alpha.toFixed(1)})`;
   }
@@ -5412,8 +5416,7 @@ function updateCameraFromFace(){
 
   // 端末の傾き(ジャイロ)分を加算
   if(gyroEnabled && gyroRaw.has){
-    const gFlipSign = params.gflip ? -1 : 1;
-    const dGamma = (gyroSmoothed.gamma - gyroBaseline.gamma) * gFlipSign;
+    const dGamma = (gyroSmoothed.gamma - gyroBaseline.gamma);
     const dBeta  = (gyroSmoothed.beta  - gyroBaseline.beta);
     const gScaleNorm = 0.011 * params.gsens;
     totalDx += -dGamma * gScaleNorm;
@@ -5449,7 +5452,7 @@ function updateCameraFromFace(){
   // センサー値が変動している(=まだ傾きが動いている)間は、注視点をキャラクターの
   // 頭部の実際のワールド座標へなめらかに寄せることで、追従して中央に収まるようにする。
   let targetWeight = 0;
-  if(gyroEnabled && params.uprightFix && currentVRM && currentVRM.humanoid){
+  if(gyroEnabled && currentVRM && currentVRM.humanoid){
     const activity = computeGyroActivity();
     targetWeight = clamp((activity - 0.15) / (1.5 - 0.15), 0, 1); // 小さなブレは無視する閾値
   }
@@ -5518,13 +5521,6 @@ bindSlider('lookY','lookY', v=>v.toFixed(2));
 bindSlider('smooth','smooth', v=>v.toFixed(2));
 const applyFlipToggleUI = bindToggle('flipToggle','flip');
 bindSlider('gsens','gsens', v=>v.toFixed(2));
-const applyGflipToggleUI = bindToggle('gflipToggle','gflip');
-const applyUprightToggleUI = bindToggle('uprightToggle','uprightFix');
-document.getElementById('uprightToggle').addEventListener('click', () => {
-  if(params.uprightFix && !gyroEnabled){
-    log('直立補正を使うには「🧭 ジャイロ有効化」も併せてONにしてください', 'warn');
-  }
-});
 const applyUprightSignLRUI = bindSignToggle('uprightSignLRToggle','uprightSignLR');
 bindSlider('uprightStrengthLR','uprightStrengthLR', v=>v.toFixed(2));
 const applyUprightSignFBUI = bindSignToggle('uprightSignFBToggle','uprightSignFB');
@@ -5563,7 +5559,7 @@ document.getElementById('btnLog').addEventListener('click', () => {
   document.getElementById('log').classList.toggle('hidden');
 });
 
-// 設定パネル内のタブ切り替え(🔧一般 / 🧭ジャイロ / 🎚️加速度 / 🪟off-axis / 🎙️会話)
+// 設定パネル内のタブ切り替え(🔧一般 / 🤳インカメラ / 🧭ジャイロ / 🎚️加速度 / 🪟off-axis / 🎙️会話)
 document.querySelectorAll('.settings-tab-btn').forEach((btn) => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('.settings-tab-btn').forEach((b) => b.classList.remove('active'));
