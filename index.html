@@ -4928,7 +4928,7 @@ let calib = { x:0, y:0, width:0.28 };
 const params = {
   sxy: 1.0, sz: 1.0, baseDist: 2.2, lookY: 1.0, smooth: 0.25, flip: 0,
   gsens: 1.0,
-  uprightStrengthLR: 1.0, uprightSignLR: 0,
+  uprightStrengthLR: 1.0, uprightSignLR: 1,
   uprightStrengthFB: 1.0, uprightSignFB: 0,
   uprightStrengthYaw: 1.0, uprightSignYaw: 0,
   moveFix: 0,
@@ -5313,10 +5313,20 @@ function updateMoveCorrection(dt){
     ax = _tiltAccelVec.x; ay = _tiltAccelVec.y; az = _tiltAccelVec.z;
   }
 
+  // 重力(低周波成分)の追従は、端末が実際に静止している(=合成加速度の大きさがほぼ重力の
+  // 大きさ9.8m/s^2のみ)と判定できる時だけ行う。動いている最中にも追従させてしまうと、
+  // 並進運動そのものを「新しい重力方向」として一部吸収してしまい、手を止めた直後に
+  // (吸収しすぎた分の反動で)逆向きの並進加速度が誤検出されてそれが積分され、
+  // オフセットが元の位置へ戻ってしまう(=手を止めるとすぐ元の目線の高さに戻る現象の原因)。
   const gAlpha = 0.06; // 重力(低周波成分)推定の追従係数
-  accelGravity.x += (ax - accelGravity.x) * gAlpha;
-  accelGravity.y += (ay - accelGravity.y) * gAlpha;
-  accelGravity.z += (az - accelGravity.z) * gAlpha;
+  const totalMag = Math.sqrt(ax*ax + ay*ay + az*az);
+  const gravityMag = Math.sqrt(accelGravity.x*accelGravity.x + accelGravity.y*accelGravity.y + accelGravity.z*accelGravity.z) || 9.8;
+  const isNearlyStill = Math.abs(totalMag - gravityMag) < 0.6; // 静止とみなす閾値(m/s^2)
+  if(isNearlyStill){
+    accelGravity.x += (ax - accelGravity.x) * gAlpha;
+    accelGravity.y += (ay - accelGravity.y) * gAlpha;
+    accelGravity.z += (az - accelGravity.z) * gAlpha;
+  }
   const linUD = ay - accelGravity.y; // 上下方向の並進加速度(m/s^2、傾き補正後)
   const linFB = az - accelGravity.z; // 前後(画面に垂直)方向の並進加速度(m/s^2、傾き補正後)
   const linLR = ax - accelGravity.x; // 左右方向の並進加速度(m/s^2、傾き補正後)
