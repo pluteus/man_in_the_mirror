@@ -5299,14 +5299,8 @@ document.getElementById('btnAccel').addEventListener('click', toggleAccel);
 // 「端末が常に直立しているとみなした場合の」上下・前後方向の並進加速度を取り出す。
 // これにより、多少の傾きが重力成分の誤検出(=大きなノイズ・ドリフトの主因)になるのを防ぎ、
 // 「直立を保ったまま上下させる」動きをより素直に検知できるようにする(ジャイロ無効時は端末ローカル軸のまま)。
-function updateMoveCorrection(dt){
-  if(!accelEnabled || !accelRaw.has || !params.moveFix){
-    // OFF/未有効時は残っているオフセットを滑らかに0へ戻す(機能そのものを切った時のみ)
-    moveVelUD *= 0.85; moveVelFB *= 0.85; moveVelLR *= 0.85;
-    moveOffsetUD *= 0.85; moveOffsetFB *= 0.85; moveOffsetLR *= 0.85;
-    updateMoveOffsetDebug();
-    return;
-  }
+function getTiltCorrectedAccel(){
+  if(!accelRaw.has) return null;
   let ax = accelRaw.x, ay = accelRaw.y, az = accelRaw.z;
   if(gyroEnabled && gyroRaw.has){
     const dBetaRad  = THREE.MathUtils.degToRad(gyroSmoothed.beta  - gyroBaseline.beta);
@@ -5316,6 +5310,19 @@ function updateMoveCorrection(dt){
     _tiltAccelVec.applyEuler(_tiltEuler);
     ax = _tiltAccelVec.x; ay = _tiltAccelVec.y; az = _tiltAccelVec.z;
   }
+  return { x: ax, y: ay, z: az };
+}
+
+function updateMoveCorrection(dt){
+  if(!accelEnabled || !accelRaw.has || !params.moveFix){
+    // OFF/未有効時は残っているオフセットを滑らかに0へ戻す(機能そのものを切った時のみ)
+    moveVelUD *= 0.85; moveVelFB *= 0.85; moveVelLR *= 0.85;
+    moveOffsetUD *= 0.85; moveOffsetFB *= 0.85; moveOffsetLR *= 0.85;
+    updateMoveOffsetDebug();
+    return;
+  }
+  const tilted = getTiltCorrectedAccel();
+  const ax = tilted.x, ay = tilted.y, az = tilted.z;
 
   // 重力(低周波成分)の追従は、端末が実際に静止している(=合成加速度の大きさがほぼ重力の
   // 大きさ9.8m/s^2のみ)と判定できる時だけ行う。動いている最中にも追従させてしまうと、
@@ -5444,6 +5451,15 @@ function performCenterCalibration(){
   syncSliderUI('modelRotY', 0);
   moveVelUD = moveVelFB = moveVelLR = moveOffsetUD = moveOffsetFB = moveOffsetLR = 0;
   panOffsetX = panOffsetDist = 0;
+  // 重力(低周波成分)推定を現在の姿勢に即座に再同期する。これをしないと、校正直後に
+  // 推定値の遅れ分だけ並進加速度が誤検出され、リセットした加速度センサー補正量が
+  // すぐにまた動き出してしまうことがある。
+  const tiltedAtCalib = getTiltCorrectedAccel();
+  if(tiltedAtCalib){
+    accelGravity.x = tiltedAtCalib.x;
+    accelGravity.y = tiltedAtCalib.y;
+    accelGravity.z = tiltedAtCalib.z;
+  }
   let msg = `中央校正しました (x:${calib.x.toFixed(2)} y:${calib.y.toFixed(2)} w:${calib.width.toFixed(2)}) / 視線先高さ・回転量をリセット`;
   if(gyroEnabled && gyroRaw.has){
     gyroBaseline = { beta: gyroSmoothed.beta, gamma: gyroSmoothed.gamma, alpha: gyroSmoothed.alpha };
@@ -5499,11 +5515,11 @@ function updateCameraFromFace(){
   const fbSign = params.moveSignFB ? -1 : 1;
   const lrSign = params.moveSignLR ? -1 : 1;
   const moveLookYOffset = moveOffsetUD * udSign * params.moveStrengthUD;
-  const moveDistOffset  = moveOffsetFB * fbSign * params.moveStrengthFB + panOffsetDist;
-  const moveXOffset     = moveOffsetLR * lrSign * params.moveStrengthLR + panOffsetX;
+  const moveDistOffset  = moveOffsetFB * fbSign * params.moveStrengthFB;
+  const moveXOffset     = moveOffsetLR * lrSign * params.moveStrengthLR;
 
   if(params.offAxis){
-    updateOffAxisFromHead(totalDx, totalDy, depthRatio, moveLookYOffset, moveDistOffset, moveXOffset);
+    updateOffAxisFromHead(totalDx, totalDy, depthRatio, moveLookYOffset, moveDistOffset + panOffsetDist, moveXOffset + panOffsetX);
     document.querySelector('#camPreview .dot').style.left = `${(1-smoothed.x)*100}%`;
     document.querySelector('#camPreview .dot').style.top = `${smoothed.y*100}%`;
     return;
@@ -5511,9 +5527,9 @@ function updateCameraFromFace(){
 
   if(currentVRM){ currentVRM.scene.position.z = 0; }
   const range = 1.6 * params.sxy;
-  const camX = totalDx * range + moveXOffset;
+  const camX = totalDx * range + moveXOffset + panOffsetX;
   const camY = totalDy * range * 0.85;
-  const dist = params.baseDist / Math.pow(Math.max(depthRatio, 0.3), params.sz) + moveDistOffset;
+  const dist = params.baseDist / Math.pow(Math.max(depthRatio, 0.3), params.sz) + moveDistOffset + panOffsetDist;
   const lookY = params.lookY + moveLookYOffset;
 
   camera.position.x += (camX - camera.position.x) * 0.35;
@@ -5530,7 +5546,10 @@ function updateCameraFromFace(){
     targetWeight = clamp((activity - 0.15) / (1.5 - 0.15), 0, 1); // 小さなブレは無視する閾値
   }
   gyroLookAtWeight += (targetWeight - gyroLookAtWeight) * 0.15;
-  _camLookTarget.set(0, lookY, 0);
+  // panOffsetX/panOffsetDist(右ドラッグ/2本指スワイプ)は注視点ごと平行移動させることで、
+  // キャラクターを中心にした極座標的な首振り(オービット)ではなく、カメラそのものを
+  // そのまま横/前後にスライドさせる通常の座標系での水平移動にしている。
+  _camLookTarget.set(panOffsetX, lookY, panOffsetDist);
   if(gyroLookAtWeight > 0.001){
     const headBone = currentVRM.humanoid.getNormalizedBoneNode('head');
     if(headBone){
