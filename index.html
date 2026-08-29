@@ -249,7 +249,7 @@
 
 <div id="camPreview"><video id="cam" playsinline muted></video><canvas id="camMosaic"></canvas><div class="dot"></div></div>
 
-<button id="btnHelp" title="ヘルプ">❔</button>
+<a id="btnHelp" class="file-btn" href="./about.html" target="_blank" rel="noopener" title="ヘルプ">❔</a>
 <button id="btnVR" title="VR表示(Meta Questなど)">🥽</button>
 <button id="btnFullscreen" title="フルスクリーン">⛶</button>
 
@@ -5773,10 +5773,7 @@ async function toggleFullscreen(){
 }
 document.getElementById('btnFullscreen').addEventListener('click', toggleFullscreen);
 
-// ❔ヘルプボタン:about.htmlを新しいタブで開く(同一ディレクトリに配置されている前提)
-document.getElementById('btnHelp').addEventListener('click', () => {
-  window.open('./about.html', '_blank', 'noopener');
-});
+// ❔ヘルプボタン: 通常の<a href>リンクとして./about.htmlを新しいタブで開く(同一ディレクトリに配置されている前提)
 
 let controlsHideTimer = null;
 function showControlsTemporarily(){
