@@ -1,3 +1,22 @@
+You_and_Me_2.mp3,しゃろう,https://www.youtube.com/watch?v=MCFX_wkTLq8
+Parade_3.mp3,しゃろう,https://www.youtube.com/watch?v=SIj1jZ2d0bs
+2_23_AM_2.mp3,しゃろう,https://www.youtube.com/watch?v=16Bj6aPi1A8
+10℃_2.mp3,しゃろう,https://www.youtube.com/watch?v=pgjwcEpjhKE
+野良猫は宇宙を目指した_2.mp3,しゃろう,https://www.youtube.com/watch?v=aYKOc3-HOhg
+SUMMER_TRIANGLE_2.mp3,しゃろう,https://www.youtube.com/watch?v=SkQihFHiWt0
+しゅわしゅわハニーレモン350ml_2.mp3,しゃろう,https://www.youtube.com/watch?v=_ckjL0KrmWE
+風切.mp3,ゆうり(Yuli Audio Craft),https://www.youtube.com/watch?v=iLc-WIFgPnw
+追いかけっこキャッハー.mp3,今川彰人オーケストラ,https://www.youtube.com/watch?v=TArfBA0Ywxo
+審判の日.mp3,KK,https://www.youtube.com/watch?v=fXw9mOqWPD4
+ハッピーイレイロ.mp3,こおろぎ（コオロギ）,https://www.youtube.com/watch?v=MQAoTiESxHk
+かえるのピアノ.mp3,こおろぎ（コオロギ）,https://www.youtube.com/watch?v=bogzWYYz91U
+かえるのピアノ_2.mp3,こおろぎ（コオロギ）,https://www.youtube.com/watch?v=bogzWYYz91U
+maou_14_shining_star.mp3,魔王魂(森田交一),https://www.youtube.com/watch?v=Qd01-6xVSHk
+249_long_BPM118.mp3,BGMer,https://www.youtube.com/watch?v=Dbp6urmnsYs
+179_long_BPM88.mp3,BGMer,https://bgmer.net/music/179
+165_long_BPM100.mp3,BGMer,https://bgmer.net/music/165
+Toy_box.mp3,Tinymemory,https://www.youtube.com/watch?v=gyX0aTRRvgM
+Escort.mp3,もっぴーさうんど,https://www.youtube.com/watch?v=J47fp8dcMZU
 マスガキのうた.mp3,pluteus,https://www.youtube.com/watch?v=aLcp-8m5uhE&list=PLP1DDU9qqHWE
 マスガキのうた (1).mp3,pluteus,https://www.youtube.com/watch?v=aLcp-8m5uhE&list=PLP1DDU9qqHWE
 マスガキのうた (2).mp3,pluteus,https://www.youtube.com/watch?v=aLcp-8m5uhE&list=PLP1DDU9qqHWE
@@ -9,5 +28,11 @@
 画面の向こうで、おかえり (1).mp3,pluteus,https://suno.com/s/Z9BHj6GZ6ZKaEcyO
 画面の向こうで、おかえり.mp3,pluteus,https://suno.com/s/t976d6NDOnw1hxK0
 VRMちゃんと話そう (1).mp3,pluteus,https://suno.com/s/uLHekA7I9smdwuSB
+#Piano Store - Jimmy Fontanez_Media Right Productions.mp3,Youtube Audio Library,https://www.youtube.com/audiolibrary
+#If I Had a Chicken - Kevin MacLeod.mp3,Youtube Audio Library,https://www.youtube.com/audiolibrary
+#Les Toreadors from Carmen (by Bizet) - Bizet.mp3,Youtube Audio Library,https://www.youtube.com/audiolibrary
+#Spring In My Step - Silent Partner.mp3,Youtube Audio Library,https://www.youtube.com/audiolibrary
+,Youtube Audio Library,https://www.youtube.com/audiolibrary
+#,Youtube Audio Library,https://www.youtube.com/audiolibrary
 VRMちゃんと話そう.mp3,pluteus,https://suno.com/song/73fa0d64-c2cd-4923-b2ad-7ca29739db6f
 VRMちゃんと話そう_minimaxh3.mp3,pluteus
