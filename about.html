@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>VRMちゃんと！ ― あなただけの3Dキャラクターと話そう</title>
-<meta name="description" content="VRMキャラクターを着せ替え、顔の動きで表情を映し、Geminiとリアルタイムに会話できるブラウザアプリ「VRMちゃんと！」の紹介ページ。">
+<meta name="description" content="VRMキャラクターを着せ替え、顔の動きで表情を映し、位置情報やカメラ・画面の映像を踏まえてGeminiとリアルタイムに会話し、必要なら通訳もこなす。ビューワーの枠を超えたブラウザ完結のVRM AIエージェント「VRMちゃんと！」の紹介ページ。">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Kosugi+Maru&family=Noto+Sans+JP:wght@400;500;700;900&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
@@ -187,12 +187,12 @@
 <header class="hero">
   <div class="wrap hero-grid">
     <div>
-      <span class="eyebrow"><span class="dot"></span>WEBブラウザで動く VRM コンパニオン</span>
+      <span class="eyebrow"><span class="dot"></span>WEBブラウザで動く VRM AIエージェント</span>
       <h1 class="logo">VRM<span class="accent">ちゃんと！</span></h1>
       <p class="tagline">
         お気に入りの3Dキャラクターに着替えさせて、カメラの前で話しかける。
-        表情もモーションもBGMも背景も、ぜんぶ自分好みに。<br>
-        インストール不要、ブラウザを開くだけで会える相棒です。
+        カメラ映像も、画面の様子も、今いる場所も踏まえて、好みの口調で答えてくれ、頼めば同時通訳もこなすAIキャラクターです。<br>
+        インストール不要、開くだけで会えます。
       </p>
       <div class="cta-row">
         <a class="btn-start" href="./index.html">
@@ -203,14 +203,14 @@
 
     <div class="device-stage">
       <div class="device-glow"></div>
-      <span class="float-tag a"><span class="em">🎭</span>顔トラッキングで表情シンクロ</span>
+      <span class="float-tag a"><span class="em">🎭</span>拡張現実AI</span>
       <div class="device">
         <div class="notch"></div>
         <div class="screen">
-          <img src="./screenshot.jpeg" alt="VRMちゃんと！のスクリーンショット。制服姿の3DキャラクターがOKサインのポーズをとっている。">
+          <img src="./screenshot.jpg" alt="VRMちゃんと！のスクリーンショット。制服姿の3DキャラクターがOKサインのポーズをとっている。">
         </div>
       </div>
-      <span class="float-tag b"><span class="em">💬</span>Gemini とリアルタイム会話</span>
+      <span class="float-tag b"><span class="em">🌐</span>会話も通訳も</span>
     </div>
   </div>
 </header>
@@ -219,25 +219,25 @@
   <div class="wrap">
     <div class="section-head">
       <span class="eyebrow"><span class="dot"></span>できること</span>
-      <h2>ボタンひとつで、キャラクターも世界も着せ替え。</h2>
-      <p>アプリ下部のツールバーがそのまま機能の入り口。好きな組み合わせを見つけて、自分だけの相棒に育てていけます。</p>
+      <h2>着せ替えるだけじゃない、周りを見て話せるAIキャラクターに。</h2>
+      <p>アプリ下部のツールバーがそのまま機能の入り口。見た目の着せ替えに加えて、カメラ・画面・位置情報を踏まえた会話や、その場での通訳までこなします。好きな組み合わせを見つけて、自分だけの推しに育てていけます。</p>
     </div>
 
     <div class="dock">
       <div class="pill">
         <span class="icon">🧑</span>
         <h3>キャラクター</h3>
-        <p>好きな VRM モデルをリストから選択。VRoid Hub からキャラクターやモーション等を追加できます。</p>
+        <p>好きな VRM モデルをリストから選択。VRoid Hub からもダウンロードできます。</p>
       </div>
       <div class="pill">
         <span class="icon">🎬</span>
         <h3>モーション</h3>
-        <p>VRMA / Mixamo FBX モーションをランダム or 選択再生。表情豊かに動き続けます。</p>
+        <p>VRMAモーションをランダム or 選択再生。表情豊かに動き続けます。</p>
       </div>
       <div class="pill">
         <span class="icon">🎵</span>
         <h3>BGM</h3>
-        <p>お気に入りの曲をリスト登録し、シーンに合わせて自動再生。</p>
+        <p>お気に入りの曲をリスト登録し、シーンに合わせてランダム再生。</p>
       </div>
       <div class="pill">
         <span class="icon">🖼️</span>
@@ -246,13 +246,33 @@
       </div>
       <div class="pill">
         <span class="icon">💬</span>
-        <h3>会話</h3>
+        <h3>口調を変えて推しと会話</h3>
         <p>Gemini Live とマイクでリアルタイム会話。インカメラ・アウトカメラ・スクリーン映像を個別に見せながら話せます。</p>
       </div>
       <div class="pill">
         <span class="icon">📷</span>
-        <h3>顔トラッキング、ジャイロトラッキング</h3>
-        <p>端末の回転やインカメラに映る顔の位置に合わせてキャラクターが回転し、画面内に存在しているように表示できます。</p>
+        <h3>スマホの中に推しが居る。</h3>
+        <p>端末を机に置いてインカメラをオン。自分の顔の位置を元に、キャラクターが端末内に存在するかの様に表示。</p>
+      </div>
+      <div class="pill">
+        <span class="icon">📷</span>
+        <h3>現実世界で推しとツーショット。</h3>
+        <p>ジャイロセンサーをONにして、背景をオフにして、アウトカメラをオンにして推しと写真が撮れます。</p>
+      </div>
+      <div class="pill">
+        <span class="icon">🌐</span>
+        <h3>通訳</h3>
+        <p>2つの言語を選ぶだけで、会話の指示に相互通訳を自動追加。70以上の言語プリセットから選べます。</p>
+      </div>
+      <div class="pill">
+        <span class="icon">📍</span>
+        <h3>位置情報</h3>
+        <p>現在地をコンテキストとして会話に反映。近くのお店や地域の話題にも答えられます。</p>
+      </div>
+      <div class="pill">
+        <span class="icon">📺</span>
+        <h3>YouTube連携</h3>
+        <p>配信中のライブチャットを取得し、視聴者のコメントを踏まえてキャラクターが反応・応答します。</p>
       </div>
     </div>
   </div>
@@ -268,7 +288,7 @@
       <div class="step">
         <span class="num">01</span>
         <h3>開く</h3>
-        <p>ブラウザで開くだけ。インストールは不要です。</p>
+        <p>index.html をブラウザで開くだけ。インストールは不要です。</p>
       </div>
       <div class="step">
         <span class="num">02</span>
@@ -278,7 +298,7 @@
       <div class="step">
         <span class="num">03</span>
         <h3>話す</h3>
-        <p>「会話」ボタンから接続して、カメラの前で話しかけてみましょう。</p>
+        <p>「会話」ボタンから接続。カメラ・画面・位置情報・通訳・YouTubeコメントなど、必要なものだけONにして話しかけてみましょう。</p>
       </div>
     </div>
   </div>
@@ -295,7 +315,7 @@
 </section>
 
 <footer>
-  <div class="wrap">VRMちゃんと！ ― a personal VRM companion, running entirely in your browser.</div>
+  <div class="wrap">VRMちゃんと！ ― a personal VRM AI agent, running entirely in your browser.</div>
 </footer>
 
 </body>
