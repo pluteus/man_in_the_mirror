@@ -120,6 +120,11 @@
   .slider-row label{ width:76px; flex-shrink:0; }
   .slider-row input[type=range]{ flex:1; accent-color:var(--accent); }
   .slider-row span{ width:34px; text-align:right; color:var(--text); }
+  /* 「指示(翻訳)」行:トグルボタンの右に、言語プリセットを埋め込んだ文を表示する */
+  .translate-sentence{ flex:1 1 100%; width:auto; text-align:left; display:flex; flex-wrap:wrap;
+    align-items:center; gap:2px; font-size:11.5px; color:var(--text); line-height:1.7; margin-top:4px; }
+  .translate-lang-select{ background:var(--bg); border:1px solid var(--border); color:var(--text);
+    border-radius:6px; padding:2px 4px; font-size:11.5px; max-width:118px; }
   .text-input{ flex:1; background:var(--bg); border:1px solid var(--border); color:var(--text);
     border-radius:6px; padding:6px 8px; font-size:11px; min-width:0; }
 
@@ -406,7 +411,7 @@
       <div class="slider-row">
         <label>奥行き感度</label><input type="range" id="sz" min="0" max="3" step="0.05" value="1"><span id="szV">1.0</span>
       </div>
-      <div class="slider-row"><label>視点距離</label><input type="range" id="baseDist" min="0.5" max="5" step="0.1" value="2.2"><span id="baseDistV">2.2</span></div>
+      <div class="slider-row"><label>視点距離</label><input type="range" id="baseDist" min="0.5" max="20" step="0.1" value="2.2"><span id="baseDistV">2.2</span></div>
       <div class="slider-row"><label>視線先高さ</label><input type="range" id="lookY" min="0" max="2" step="0.05" value="1.0"><span id="lookYV">1.0</span></div>
       <div class="slider-row"><label>スムージング</label><input type="range" id="smooth" min="0.05" max="0.9" step="0.05" value="0.25"><span id="smoothV">0.25</span></div>
       <div class="slider-row"><label>ミラー反転</label><button id="flipToggle" class="toggle-btn">OFF</button></div>
@@ -488,8 +493,13 @@
         で無料発行できます。
       </div>
       <div class="slider-row">
-        <label>指示(任意)</label>
+        <label>指示(口調)</label>
         <input type="text" id="realtimeInstructions" class="text-input" placeholder="例: 明るく元気な口調で話してください">
+      </div>
+      <div class="slider-row" style="flex-wrap:wrap; align-items:flex-start;">
+        <label>指示(翻訳)</label>
+        <button id="btnTranslateToggle" title="オンにすると、選択した2言語の相互通訳を行うよう指示に追加します">OFF</button>
+        <span class="translate-sentence">で、<select id="translateLangA" class="translate-lang-select"></select>と<select id="translateLangB" class="translate-lang-select"></select>を相互通訳して。</span>
       </div>
       <div class="motion-controls" style="border-bottom:none; padding-left:0; padding-right:0;">
         <button id="btnRealtimeConnect">🎙️ 接続</button>
@@ -2941,6 +2951,56 @@ linkTextSetting(
   ['realtimeInstructions', 'defaultRealtimeInstructions']
 );
 
+/* ---------------- 指示(翻訳): Gemini Live対応言語プリセット ----------------
+   出典: https://ai.google.dev/gemini-api/docs/live-api/live-translate の対応言語表(70+言語)。
+   会話パネルの「指示(翻訳)」をONにすると、選択した2言語の相互通訳指示を会話 指示に自動で追加する。 */
+const GEMINI_LIVE_LANGUAGES = [
+  'アフリカーンス語','アカン語','アルバニア語','アムハラ語','アラビア語','アルメニア語','アゼルバイジャン語',
+  'バスク語','ベラルーシ語','ベンガル語','ブルガリア語','ミャンマー語(ビルマ語)','カタルーニャ語',
+  '中国語(簡体字)','中国語(繁体字)','クロアチア語','チェコ語','デンマーク語','オランダ語','英語',
+  'エストニア語','フィリピン語(タガログ語)','フィンランド語','フランス語','ガリシア語','ジョージア語',
+  'ドイツ語','ギリシャ語','グジャラート語','ハウサ語','ヘブライ語','ヒンディー語','ハンガリー語',
+  'アイスランド語','インドネシア語','イタリア語','日本語','ジャワ語','カンナダ語','カザフ語','クメール語',
+  'キニヤルワンダ語','韓国語','ラオ語','ラトビア語','リトアニア語','マケドニア語','マレー語',
+  'マラヤーラム語','マラーティー語','モンゴル語','ネパール語','ノルウェー語','ペルシャ語','ポーランド語',
+  'ポルトガル語(ブラジル)','ポルトガル語(ポルトガル)','パンジャブ語','ルーマニア語','ロシア語','セルビア語',
+  'シンド語','シンハラ語','スロバキア語','スロベニア語','スペイン語','スンダ語','スワヒリ語','スウェーデン語',
+  'タミル語','テルグ語','タイ語','トルコ語','ウクライナ語','ウルドゥー語','ウズベク語','ベトナム語','ズールー語'
+];
+
+function populateTranslateLangSelects(){
+  const selA = document.getElementById('translateLangA');
+  const selB = document.getElementById('translateLangB');
+  if(!selA || !selB) return;
+  [selA, selB].forEach(sel => {
+    GEMINI_LIVE_LANGUAGES.forEach(name => {
+      const opt = document.createElement('option');
+      opt.value = name;
+      opt.textContent = name;
+      sel.appendChild(opt.cloneNode(true));
+    });
+  });
+  selA.value = '日本語';
+  selB.value = '英語';
+}
+populateTranslateLangSelects();
+
+let translateEnabled = false; // 「指示(翻訳)」トグル: ONの場合、選択した2言語の相互通訳指示を会話 指示に追加する
+
+// 現在の言語選択から、会話 指示に追加する通訳指示文を組み立てる(パネル上の表示文と同じ文言にする)
+function buildTranslateInstructionText(){
+  const langA = document.getElementById('translateLangA')?.value || '日本語';
+  const langB = document.getElementById('translateLangB')?.value || '英語';
+  return `で、${langA}と${langB}を相互通訳して。`;
+}
+
+document.getElementById('btnTranslateToggle').addEventListener('click', () => {
+  translateEnabled = !translateEnabled;
+  const btn = document.getElementById('btnTranslateToggle');
+  btn.classList.toggle('on', translateEnabled);
+  btn.textContent = translateEnabled ? 'ON' : 'OFF';
+});
+
 let geminiWs = null;
 let geminiCaptureCtx = null;       // マイク取り込み用(16kHz)
 let geminiCaptureProcessor = null;
@@ -3643,6 +3703,9 @@ async function connectRealtime(){
 
   ws.addEventListener('open', () => {
     let instructions = document.getElementById('realtimeInstructions').value.trim();
+    if(translateEnabled){
+      instructions = [instructions, buildTranslateInstructionText()].filter(Boolean).join('\n');
+    }
     if(locationEnabled && currentLocationLabel){
       instructions = [instructions, buildLocationContextText()].filter(Boolean).join('\n');
     }
@@ -5709,7 +5772,7 @@ gestureEl.addEventListener('pointermove', (e) => {
     if(params.offAxis){
       syncSliderUI('eyeDistCm', clamp(pinchStartEyeDist / ratio, 15, 80));
     }else{
-      syncSliderUI('baseDist', clamp(pinchStartBaseDist / ratio, 0.5, 5));
+      syncSliderUI('baseDist', clamp(pinchStartBaseDist / ratio, 0.5, 20));
     }
     return;
   }
@@ -5737,7 +5800,7 @@ gestureEl.addEventListener('wheel', (e) => {
   if(params.offAxis){
     syncSliderUI('eyeDistCm', clamp(params.eyeDistCm / ratio, 15, 80));
   }else{
-    syncSliderUI('baseDist', clamp(params.baseDist / ratio, 0.5, 5));
+    syncSliderUI('baseDist', clamp(params.baseDist / ratio, 0.5, 20));
   }
 }, { passive: false });
 
