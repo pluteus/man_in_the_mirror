@@ -5546,10 +5546,11 @@ function updateCameraFromFace(){
     targetWeight = clamp((activity - 0.15) / (1.5 - 0.15), 0, 1); // 小さなブレは無視する閾値
   }
   gyroLookAtWeight += (targetWeight - gyroLookAtWeight) * 0.15;
-  // panOffsetX/panOffsetDist(右ドラッグ/2本指スワイプ)は注視点ごと平行移動させることで、
-  // キャラクターを中心にした極座標的な首振り(オービット)ではなく、カメラそのものを
-  // そのまま横/前後にスライドさせる通常の座標系での水平移動にしている。
-  _camLookTarget.set(panOffsetX, lookY, panOffsetDist);
+  // panOffsetX/panOffsetDist(右ドラッグ/2本指スワイプ)、moveXOffset/moveDistOffset(加速度センサー
+  // による移動補正)のいずれも、注視点ごと平行移動させることで、キャラクターを中心にした
+  // 極座標的な首振り(オービット)ではなく、カメラそのものを横/前後にスライドさせる
+  // 通常の座標系での水平移動にしている。
+  _camLookTarget.set(moveXOffset + panOffsetX, lookY, moveDistOffset + panOffsetDist);
   if(gyroLookAtWeight > 0.001){
     const headBone = currentVRM.humanoid.getNormalizedBoneNode('head');
     if(headBone){
@@ -5787,6 +5788,10 @@ function showControlsTemporarily(){
 function onFullscreenChange(){
   const active = !!getFsElement();
   document.body.classList.toggle('fs-active', active);
+  // フルスクリーンの開始/終了はブラウザ側でポインター操作を強制終了(pointercancel)させることがあり、
+  // その際にボタン/タッチのリリースを取りこぼしてジェスチャー状態が押しっぱなしのまま残ることがあるため、
+  // 切り替えのタイミングで明示的にリセットしておく。
+  resetGestureState();
   if(active){
     log('フルスクリーン表示にしました(画面タップでボタンを一時表示)', 'ok');
     showControlsTemporarily();
@@ -5826,6 +5831,7 @@ let lastTapPos = null;
 
 // 右ドラッグ(マウス)による視点の水平移動(左右・前後)
 let rightDragActive = false;
+let rightDragPointerId = null;
 let rightDragStartX = 0;
 let rightDragStartY = 0;
 let rightDragStartPanX = 0;
@@ -5845,6 +5851,22 @@ function pointersArray(){ return Array.from(activePointers.values()); }
 function dist2(a, b){ return Math.hypot(a.x - b.x, a.y - b.y); }
 function mid2(a, b){ return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; }
 
+// フルスクリーン切替などでリリースイベントが取りこぼされた時のための保険。
+// 進行中のドラッグ/ピンチ/右ドラッグの状態を強制的に終了させる。
+function resetGestureState(){
+  activePointers.forEach((_, pid) => { try{ gestureEl.releasePointerCapture(pid); }catch(err){} });
+  activePointers.clear();
+  dragActive = false;
+  dragMoved = false;
+  pinchStartDist = null;
+  twoFingerPanStartMid = null;
+  if(rightDragPointerId !== null){
+    try{ gestureEl.releasePointerCapture(rightDragPointerId); }catch(err){}
+  }
+  rightDragActive = false;
+  rightDragPointerId = null;
+}
+
 function syncSliderUI(id, value){
   const input = document.getElementById(id);
   if(!input) return;
@@ -5857,6 +5879,7 @@ gestureEl.addEventListener('pointerdown', (e) => {
     // 右ボタンドラッグ:視点の左右・前後の水平移動(1本指/2本指ジェスチャーとは独立)
     e.preventDefault();
     rightDragActive = true;
+    rightDragPointerId = e.pointerId;
     rightDragStartX = e.clientX;
     rightDragStartY = e.clientY;
     rightDragStartPanX = panOffsetX;
@@ -5866,6 +5889,10 @@ gestureEl.addEventListener('pointerdown', (e) => {
   }
 
   activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  // フルスクリーン切替時など、ボタン/タッチのリリースが本来のトリガー元ではなく
+  // 一時的に表示された操作パネル等に奪われて検出できなくなることがあるため、
+  // ポインターを明示的にキャプチャして必ずこの要素でリリースを受け取れるようにする。
+  try{ gestureEl.setPointerCapture(e.pointerId); }catch(err){}
 
   if(activePointers.size === 1){
     dragActive = true;
@@ -5946,13 +5973,18 @@ gestureEl.addEventListener('wheel', (e) => {
 }, { passive: false });
 
 function endGesturePointer(e){
-  if(e.pointerType === 'mouse' && e.button === 2){
+  if(e.pointerId === rightDragPointerId){
+    // pointercancel時はe.buttonが2以外(多くのブラウザで-1)になり判定できないため、
+    // ボタン種別ではなくpointerIdの一致で右ドラッグの終了を検出する。
     rightDragActive = false;
+    rightDragPointerId = null;
+    try{ gestureEl.releasePointerCapture(e.pointerId); }catch(err){}
     return;
   }
 
   const wasSingle = activePointers.size === 1;
   activePointers.delete(e.pointerId);
+  try{ gestureEl.releasePointerCapture(e.pointerId); }catch(err){}
 
   if(activePointers.size < 2){ pinchStartDist = null; twoFingerPanStartMid = null; }
 
