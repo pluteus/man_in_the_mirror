@@ -5229,6 +5229,10 @@ const accelRaw = { x: 0, y: 0, z: 0, has: false };
 const accelGravity = { x: 0, y: 0, z: 0 };
 let moveVelUD = 0, moveVelFB = 0, moveVelLR = 0;          // 推定並進速度(毎フレーム減衰)
 let moveOffsetUD = 0, moveOffsetFB = 0, moveOffsetLR = 0; // 視線先高さ/視点距離/左右位置に加算するオフセット(自動では0に戻らない)
+
+// 右ドラッグ(マウス)/2本指スワイプによる視点の水平移動(左右・前後、高さは変えない)。
+// 加速度センサーのmoveOffsetLR/FBと同様、自動では0に戻らない(🎯中央校正でリセット)。
+let panOffsetX = 0, panOffsetDist = 0;
 const _tiltAccelVec = new THREE.Vector3(); // 傾き補正用の再利用ベクトル(毎フレームのGCを避ける)
 const _tiltEuler = new THREE.Euler();
 
@@ -5439,6 +5443,7 @@ function performCenterCalibration(){
   syncSliderUI('lookY', 1);
   syncSliderUI('modelRotY', 0);
   moveVelUD = moveVelFB = moveVelLR = moveOffsetUD = moveOffsetFB = moveOffsetLR = 0;
+  panOffsetX = panOffsetDist = 0;
   let msg = `中央校正しました (x:${calib.x.toFixed(2)} y:${calib.y.toFixed(2)} w:${calib.width.toFixed(2)}) / 視線先高さ・回転量をリセット`;
   if(gyroEnabled && gyroRaw.has){
     gyroBaseline = { beta: gyroSmoothed.beta, gamma: gyroSmoothed.gamma, alpha: gyroSmoothed.alpha };
@@ -5494,8 +5499,8 @@ function updateCameraFromFace(){
   const fbSign = params.moveSignFB ? -1 : 1;
   const lrSign = params.moveSignLR ? -1 : 1;
   const moveLookYOffset = moveOffsetUD * udSign * params.moveStrengthUD;
-  const moveDistOffset  = moveOffsetFB * fbSign * params.moveStrengthFB;
-  const moveXOffset     = moveOffsetLR * lrSign * params.moveStrengthLR;
+  const moveDistOffset  = moveOffsetFB * fbSign * params.moveStrengthFB + panOffsetDist;
+  const moveXOffset     = moveOffsetLR * lrSign * params.moveStrengthLR + panOffsetX;
 
   if(params.offAxis){
     updateOffAxisFromHead(totalDx, totalDy, depthRatio, moveLookYOffset, moveDistOffset, moveXOffset);
@@ -5781,6 +5786,7 @@ document.getElementById('canvas-container').addEventListener('pointerdown', () =
 
 /* ---------------- 画面ジェスチャー操作 ---------------- */
 // ダブルタップ:中央校正 / ピンチ:視点距離調整 / 縦スワイプ:視線先高さ調整
+// 右ボタンドラッグ or 2本指スワイプ:視点の水平移動(左右・前後)
 const gestureEl = document.getElementById('canvas-container');
 const activePointers = new Map(); // pointerId -> {x,y}
 const clamp = (v, min, max) => Math.min(max, Math.max(min, v));
@@ -5799,8 +5805,26 @@ let dragMoved = false;
 let lastTapTime = 0;
 let lastTapPos = null;
 
+// 右ドラッグ(マウス)による視点の水平移動(左右・前後)
+let rightDragActive = false;
+let rightDragStartX = 0;
+let rightDragStartY = 0;
+let rightDragStartPanX = 0;
+let rightDragStartPanDist = 0;
+const PAN_RANGE_X = 4.0;    // 画面幅いっぱいのドラッグに対応する左右移動量(m相当)
+const PAN_RANGE_DIST = 4.0; // 画面高さいっぱいのドラッグに対応する前後移動量(m相当)
+
+// 2本指スワイプ(ピンチと同時に判定可能)による視点の水平移動
+let twoFingerPanStartMid = null;
+let twoFingerPanStartOffsetX = 0;
+let twoFingerPanStartOffsetDist = 0;
+
+// 右クリックのコンテキストメニューを抑止(右ドラッグをパン操作として使うため)
+gestureEl.addEventListener('contextmenu', (e) => e.preventDefault());
+
 function pointersArray(){ return Array.from(activePointers.values()); }
 function dist2(a, b){ return Math.hypot(a.x - b.x, a.y - b.y); }
+function mid2(a, b){ return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; }
 
 function syncSliderUI(id, value){
   const input = document.getElementById(id);
@@ -5810,6 +5834,18 @@ function syncSliderUI(id, value){
 }
 
 gestureEl.addEventListener('pointerdown', (e) => {
+  if(e.pointerType === 'mouse' && e.button === 2){
+    // 右ボタンドラッグ:視点の左右・前後の水平移動(1本指/2本指ジェスチャーとは独立)
+    e.preventDefault();
+    rightDragActive = true;
+    rightDragStartX = e.clientX;
+    rightDragStartY = e.clientY;
+    rightDragStartPanX = panOffsetX;
+    rightDragStartPanDist = panOffsetDist;
+    try{ gestureEl.setPointerCapture(e.pointerId); }catch(err){}
+    return;
+  }
+
   activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
   if(activePointers.size === 1){
@@ -5820,15 +5856,26 @@ gestureEl.addEventListener('pointerdown', (e) => {
     dragStartLookY = params.lookY;
     dragStartRotY = params.modelRotY;
   }else if(activePointers.size === 2){
-    dragActive = false; // 2本指になったら1本指ジェスチャー判定は無効化しピンチへ切替
+    dragActive = false; // 2本指になったら1本指ジェスチャー判定は無効化しピンチ/スワイプへ切替
     const pts = pointersArray();
     pinchStartDist = dist2(pts[0], pts[1]);
     pinchStartBaseDist = params.baseDist;
     pinchStartEyeDist = params.eyeDistCm;
+    twoFingerPanStartMid = mid2(pts[0], pts[1]);
+    twoFingerPanStartOffsetX = panOffsetX;
+    twoFingerPanStartOffsetDist = panOffsetDist;
   }
 });
 
 gestureEl.addEventListener('pointermove', (e) => {
+  if(rightDragActive){
+    const dx = e.clientX - rightDragStartX;
+    const dy = e.clientY - rightDragStartY;
+    panOffsetX = rightDragStartPanX + (dx / window.innerWidth) * PAN_RANGE_X;
+    panOffsetDist = rightDragStartPanDist - (dy / window.innerHeight) * PAN_RANGE_DIST;
+    return;
+  }
+
   if(!activePointers.has(e.pointerId)) return;
   activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
@@ -5840,6 +5887,14 @@ gestureEl.addEventListener('pointermove', (e) => {
       syncSliderUI('eyeDistCm', clamp(pinchStartEyeDist / ratio, 15, 80));
     }else{
       syncSliderUI('baseDist', clamp(pinchStartBaseDist / ratio, 0.5, 20));
+    }
+    // ピンチ(拡大縮小)とは独立に、2本指の中点の移動量で視点の左右・前後を水平移動(2本指スワイプ)
+    if(twoFingerPanStartMid){
+      const mid = mid2(pts[0], pts[1]);
+      const dxMid = mid.x - twoFingerPanStartMid.x;
+      const dyMid = mid.y - twoFingerPanStartMid.y;
+      panOffsetX = twoFingerPanStartOffsetX + (dxMid / window.innerWidth) * PAN_RANGE_X;
+      panOffsetDist = twoFingerPanStartOffsetDist - (dyMid / window.innerHeight) * PAN_RANGE_DIST;
     }
     return;
   }
@@ -5872,10 +5927,15 @@ gestureEl.addEventListener('wheel', (e) => {
 }, { passive: false });
 
 function endGesturePointer(e){
+  if(e.pointerType === 'mouse' && e.button === 2){
+    rightDragActive = false;
+    return;
+  }
+
   const wasSingle = activePointers.size === 1;
   activePointers.delete(e.pointerId);
 
-  if(activePointers.size < 2){ pinchStartDist = null; }
+  if(activePointers.size < 2){ pinchStartDist = null; twoFingerPanStartMid = null; }
 
   if(activePointers.size === 0){
     if(wasSingle && !dragMoved){
