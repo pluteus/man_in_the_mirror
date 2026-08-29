@@ -27,11 +27,11 @@ Dance Studio_black_haihuyou.glb,toumorocorn,https://booth.pm/ja/items/3835256,to
 Dance Studio_haihuyou.glb,toumorocorn,https://booth.pm/ja/items/3835256
 Dance Studio_haihuyou_plus mirror.glb,toumorocorn,https://booth.pm/ja/items/3835256
 #cube-fuchi.glb,toumorocorn,https://booth.pm/ja/items/3835256
-light_box.glb,toumorocorn,https://booth.pm/ja/items/3835256
-light_box_blue.glb,toumorocorn,https://booth.pm/ja/items/3835256
-light_box_nomal.glb,toumorocorn,https://booth.pm/ja/items/3835256
-light_box_red.glb,toumorocorn,https://booth.pm/ja/items/3835256
-light_rainbow.glb,toumorocorn,https://booth.pm/ja/items/3835256
+#light_box.glb,toumorocorn,https://booth.pm/ja/items/3835256
+#light_box_blue.glb,toumorocorn,https://booth.pm/ja/items/3835256
+#light_box_nomal.glb,toumorocorn,https://booth.pm/ja/items/3835256
+#light_box_red.glb,toumorocorn,https://booth.pm/ja/items/3835256
+#light_rainbow.glb,toumorocorn,https://booth.pm/ja/items/3835256
 round_ball.glb,toumorocorn,https://booth.pm/ja/items/3835256
 stage-asiba3_mono.glb,toumorocorn,https://booth.pm/ja/items/3835256
 stage-asiba4_mono.glb,toumorocorn,https://booth.pm/ja/items/3835256
