@@ -175,6 +175,14 @@
   footer{
     text-align:center; padding:26px 0 50px; color:var(--muted); font-size:12.5px;
   }
+  footer .footer-links{
+    display:flex; justify-content:center; gap:18px; margin-bottom:14px; flex-wrap:wrap;
+  }
+  footer .footer-links a{
+    color:var(--cream-dim); text-decoration:none; border-bottom:1px solid transparent;
+    transition:color .2s ease, border-color .2s ease;
+  }
+  footer .footer-links a:hover{ color:var(--pink); border-bottom-color:var(--pink); }
 
   /* ---------- FAQ ---------- */
   .faq-list{ display:flex; flex-direction:column; gap:12px; }
@@ -564,7 +572,7 @@
     <div class="faq-list">
       <details class="faq-item">
         <summary><span><span class="q-mark">Q.</span> カメラ映像や位置情報は保存されますか？</span><span class="plus">+</span></summary>
-        <p class="faq-a">保存されません。顔の位置検出はブラウザ内の処理だけで完結しており、映像そのものを記録することはありません。会話・通訳機能を使っているあいだだけ、カメラ映像・画面表示・（許可した場合の）位置情報をGoogleのGemini Liveに送信して応答生成に利用しますが、当サイト側で保存・記録することはありません。詳しくは<a href="../privacy.html">プライバシーポリシー</a>をご覧ください。</p>
+        <p class="faq-a">保存されません。顔の位置検出はブラウザ内の処理だけで完結しており、映像そのものを記録することはありません。会話・通訳機能を使っているあいだだけ、カメラ映像・画面表示・（許可した場合の）位置情報をGoogleのGemini Liveに送信して応答生成に利用しますが、当サイト側で保存・記録することはありません。詳しくは<a href="../privacy.html">プライバシーポリシー</a>や<a href="../terms.html">利用規約</a>をご覧ください。</p>
       </details>
 
       <details class="faq-item">
@@ -595,6 +603,11 @@
       <details class="faq-item">
         <summary><span><span class="q-mark">Q.</span> カメラや位置情報を許可しないと使えませんか？</span><span class="plus">+</span></summary>
         <p class="faq-a">着せ替えやモーション再生、BGM再生などの基本機能はカメラ・位置情報を許可しなくても利用できます。周囲の状況を踏まえた会話や、通訳・AR撮影などを使いたいときにだけ、それぞれの許可が必要になります。</p>
+      </details>
+
+      <details class="faq-item">
+        <summary><span><span class="q-mark">Q.</span> 利用規約はありますか？</span><span class="plus">+</span></summary>
+        <p class="faq-a">あります。APIキーの取り扱いやAI応答内容の免責、VRM素材の権利についてなどをまとめた<a href="../terms.html">利用規約</a>をご確認のうえご利用ください。個人情報の取り扱いについては<a href="../privacy.html">プライバシーポリシー</a>もあわせてご覧ください。</p>
       </details>
     </div>
   </div>
@@ -634,7 +647,14 @@
 </section>
 
 <footer>
-  <div class="wrap">VRMちゃんと！ ― a personal VRM AI agent, running entirely in your browser.</div>
+  <div class="wrap">
+    <div class="footer-links">
+      <a href="./index.html">アプリを起動する</a>
+      <a href="../privacy.html">プライバシーポリシー</a>
+      <a href="../terms.html">利用規約</a>
+    </div>
+    VRMちゃんと！ ― a personal VRM AI agent, running entirely in your browser.
+  </div>
 </footer>
 
 </body>
