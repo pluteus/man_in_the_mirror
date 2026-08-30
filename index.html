@@ -256,6 +256,37 @@
 </head>
 <body>
 
+<script>
+  // グローバルエラー捕捉: 通常のJSエラー・Promise未処理エラーを画面上のログパネルに強制表示する。
+  // 開発者ツールを開けない実機(Quest等のスタンドアロンVRブラウザ)でも原因を確認できるようにするための保険。
+  // モジュールスクリプト本体より前にこの<script>を置くことで、import解決失敗など早期のエラーも拾える。
+  (function(){
+    function showFatalError(text){
+      try{
+        var logEl = document.getElementById('log');
+        var contentEl = document.getElementById('logContent');
+        if(!logEl || !contentEl) return; // 万一この時点でDOMが無ければ何もしない
+        logEl.classList.remove('hidden'); // 通常は非表示のログパネルを強制的に開く
+        var d = document.createElement('div');
+        d.className = 'err';
+        d.textContent = '[起動時エラー] ' + text;
+        contentEl.appendChild(d);
+        contentEl.scrollTop = contentEl.scrollHeight;
+      }catch(e){ /* ログ表示自体が失敗しても何もできないので無視 */ }
+    }
+    window.addEventListener('error', function(e){
+      var detail = e.message || (e.error && (e.error.stack || e.error.message)) || String(e);
+      if(e.filename) detail += ' (' + e.filename + (e.lineno ? ':' + e.lineno : '') + ')';
+      showFatalError(detail);
+    });
+    window.addEventListener('unhandledrejection', function(e){
+      var reason = e.reason;
+      var detail = (reason && (reason.stack || reason.message)) || String(reason);
+      showFatalError('Promise rejection: ' + detail);
+    });
+  })();
+</script>
+
 <video id="outCamBg" playsinline muted autoplay></video>
 <div id="canvas-container"></div>
 
@@ -5892,6 +5923,15 @@ function isOverGesture(e){
 }
 document.addEventListener('contextmenu', (e) => { if(isOverGesture(e)) e.preventDefault(); });
 
+// ボタン/スライダー/リンクなど実際のUI操作対象上でのpointerdownかどうかの判定。
+// fs-active中はisOverGesture()が画面全体を「ジェスチャー領域」とみなすため、これが無いと
+// 一時表示された設定パネルのボタンを押しても以下のpointerdownリスナーがsetPointerCaptureで
+// ポインターをcanvas-container側へ奪ってしまい、ブラウザによってはボタンのclickイベントが
+// 発火しなくなる(押しても反応しない)ことがある。
+function isInteractiveTarget(e){
+  return !!(e.target.closest && e.target.closest('button, input, select, textarea, a, label, .toggle-btn, .sign-btn, .settings-tab-btn, .calibPreset'));
+}
+
 function pointersArray(){ return Array.from(activePointers.values()); }
 function dist2(a, b){ return Math.hypot(a.x - b.x, a.y - b.y); }
 function mid2(a, b){ return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; }
@@ -5921,6 +5961,7 @@ function syncSliderUI(id, value){
 
 document.addEventListener('pointerdown', (e) => {
   if(!isOverGesture(e)) return;
+  if(isInteractiveTarget(e)) return; // ボタン等の操作はジェスチャー判定より優先し、そのまま通常のclickに任せる
 
   if(e.pointerType === 'mouse' && e.button === 2){
     // 右ボタンドラッグ:視点の左右・前後の水平移動(1本指/2本指ジェスチャーとは独立)
