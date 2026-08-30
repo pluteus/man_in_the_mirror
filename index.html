@@ -429,6 +429,11 @@
       <div class="slider-row"><label>テクスチャ上限</label><input type="range" id="texBudget" min="50" max="500" step="10" value="200"><span id="texBudgetV">200</span>MB</div>
       <div class="slider-row"><label>口の開き最大値</label><input type="range" id="lipSyncMaxMouth" min="0.1" max="1.5" step="0.05" value="1"><span id="lipSyncMaxMouthV">1.00</span></div>
       <div class="slider-row"><label>音声分離リップシンク</label><button id="vowelLipSyncToggle" class="toggle-btn">OFF</button></div>
+      <div class="slider-row"><label>パフォーマンスモード</label><button id="perfModeToggle" class="toggle-btn">OFF</button></div>
+      <div style="font-size:9.5px; color:var(--text-dim); padding:4px 2px 0;">
+        ※低スペック端末や発熱・カクつきが気になる場合はONにしてください。解像度(画面倍率)を下げ、影の描画を止め、
+        顔認識(インカメラ)の処理頻度を半分に間引くことで負荷を軽減します(見た目は少し粗くなります)。
+      </div>
     </div>
 
     <div id="settingsTabInCam" class="settings-tab-panel">
@@ -4949,7 +4954,8 @@ const params = {
   moveStrengthFB: 1.0, moveSignFB: 0,
   moveStrengthLR: 1.0, moveSignLR: 0,
   offAxis: false, screenZ: 0.4, eyeDistCm: 40, cmRange: 60,
-  texBudgetMB: 200, modelRotY: 0, lipSyncMaxMouth: 1.0, vowelLipSync: 0
+  texBudgetMB: 200, modelRotY: 0, lipSyncMaxMouth: 1.0, vowelLipSync: 0,
+  perfMode: 0
 };
 
 /* ---------------- 調整値の保存/復元(localStorage) ---------------- */
@@ -5012,6 +5018,8 @@ function applyParamsToUI(){
   if(typeof applyMoveSignFBUI === 'function') applyMoveSignFBUI();
   if(typeof applyMoveSignLRUI === 'function') applyMoveSignLRUI();
   if(typeof applyVowelLipSyncToggleUI === 'function') applyVowelLipSyncToggleUI();
+  if(typeof applyPerfModeToggleUI === 'function') applyPerfModeToggleUI();
+  if(typeof applyPerfMode === 'function') applyPerfMode();
 }
 
 /* ---------------- 画面サイズ校正(オンスクリーン) ---------------- */
@@ -5376,12 +5384,18 @@ function updateMoveOffsetDebug(){
 }
 
 let detectFaceErrorLogged = false; // 毎フレーム同じエラーでログが埋まらないよう、初回のみ表示する
+let perfFrameSkipCounter = 0; // パフォーマンスモード時、顔認識を間引くためのカウンタ
 
 function detectFace(){
   if(!camRunning || !faceLandmarker) return;
   if(video.readyState < 2) return;
   if(video.currentTime === lastVideoTime) return;
   lastVideoTime = video.currentTime;
+
+  if(params.perfMode){
+    perfFrameSkipCounter++;
+    if(perfFrameSkipCounter % 2 !== 0) return; // 2フレームに1回だけ実行し、MediaPipeの処理負荷を約半分に抑える
+  }
 
   try{
     const result = faceLandmarker.detectForVideo(video, performance.now());
@@ -5653,6 +5667,22 @@ bindSlider('texBudget','texBudgetMB', v=>v.toFixed(0));
 bindSlider('lipSyncMaxMouth','lipSyncMaxMouth', v=>v.toFixed(2));
 // OFF時は音量のみで「あ」を動かす軽量な口パクにフォールバックし、フォルマント解析(重い)を行わない
 const applyVowelLipSyncToggleUI = bindToggle('vowelLipSyncToggle','vowelLipSync');
+
+/* ---------------- パフォーマンスモード ----------------
+   低スペック端末・発熱対策向けに、見た目への影響が比較的小さい負荷軽減策をまとめてON/OFFする。
+   ・画面倍率(pixelRatio)を1倍に固定(高精細ディスプレイでの過剰な描画負荷を削減)
+   ・影の描画を停止(renderer.shadowMap.enabledはthree.jsの仕様上いつでも安全にON/OFF可能)
+   ・インカメラ顔認識(MediaPipe)の実行を2フレームに1回に間引く(detectFace内でperfFrameSkipCounterを参照)
+   antialiasはWebGLコンテキスト生成時にしか設定できずレンダラーの再生成が必要(録画/VR中の再生成は危険なため)、
+   このモードでは対象外としている。 */
+function applyPerfMode(){
+  const on = !!params.perfMode;
+  renderer.setPixelRatio(on ? 1 : Math.min(window.devicePixelRatio, 2));
+  renderer.shadowMap.enabled = !on;
+}
+const applyPerfModeToggleUI = bindToggle('perfModeToggle','perfMode');
+document.getElementById('perfModeToggle').addEventListener('click', applyPerfMode);
+applyPerfMode(); // 初期状態(OFF)を明示的に適用
 
 // 保存済みの調整値があれば復元してUIに反映
 if(loadParamsFromStorage()){
