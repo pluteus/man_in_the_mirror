@@ -6,6 +6,16 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>VRMちゃんと！</title>
+
+<!-- PWA -->
+<link rel="manifest" href="./manifest.json">
+<meta name="theme-color" content="#0a0e14">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="VRMちゃんと！">
+<link rel="icon" href="./icons/icon-192.png">
+<link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
 <style>
   :root{
     --bg:#0a0e14; --panel:#131922cc; --border:#263040; --accent:#4f9dff;
@@ -6051,6 +6061,17 @@ function animate(time){
 renderer.setAnimationLoop(animate);
 
 log('起動しました。VRMを選択してカメラを開始してください。');
+</script>
+
+<script>
+  // PWA: Service Worker登録(対応ブラウザのみ、失敗してもアプリ動作には影響しない)
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('./service-worker.js').catch((err) => {
+        console.warn('Service Worker registration failed:', err);
+      });
+    });
+  }
 </script>
 </body>
 </html>
