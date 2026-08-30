@@ -130,6 +130,9 @@
     font-size:18px; line-height:1; display:flex; align-items:center; justify-content:center; }
   #realtimeAttachName{ cursor:pointer; }
   .slider-row label{ width:76px; flex-shrink:0; }
+  /* クリックでON/OFF(取り消し線)を切り替えるラベル。「指示(口調)」「指示(翻訳)」で使用。 */
+  .instr-toggle-label{ cursor:pointer; user-select:none; }
+  .instr-toggle-label.off{ text-decoration:line-through; opacity:0.55; }
   .slider-row input[type=range]{ flex:1; accent-color:var(--accent); }
   .slider-row span{ width:34px; text-align:right; color:var(--text); }
   /* 「指示(翻訳)」行:トグルボタンの右に、言語プリセットを埋め込んだ文を表示する */
@@ -461,9 +464,11 @@
       <div class="slider-row"><label>口の開き最大値</label><input type="range" id="lipSyncMaxMouth" min="0.1" max="1.5" step="0.05" value="1"><span id="lipSyncMaxMouthV">1.00</span></div>
       <div class="slider-row"><label>音声分離リップシンク</label><button id="vowelLipSyncToggle" class="toggle-btn">OFF</button></div>
       <div class="slider-row"><label>パフォーマンスモード</label><button id="perfModeToggle" class="toggle-btn">OFF</button></div>
+      <div class="slider-row"><label>アンチエイリアス</label><button id="antialiasToggle" class="toggle-btn">ON</button></div>
       <div style="font-size:9.5px; color:var(--text-dim); padding:4px 2px 0;">
-        ※低スペック端末や発熱・カクつきが気になる場合はONにしてください。解像度(画面倍率)を下げ、影の描画を止め、
+        ※低スペック端末や発熱・カクつきが気になる場合はパフォーマンスモードをONにしてください。解像度(画面倍率)を下げ、影の描画を止め、
         顔認識(インカメラ)の処理頻度を半分に間引くことで負荷を軽減します(見た目は少し粗くなります)。
+        アンチエイリアスはWebGL初期化時にしか切り替えられない設定のため、変更は次回起動時から反映されます。
       </div>
     </div>
 
@@ -556,12 +561,11 @@
         で無料発行できます。
       </div>
       <div class="slider-row">
-        <label>指示(口調)</label>
+        <label id="toneToggleLabel" class="instr-toggle-label" title="クリックで会話 指示(口調)のON/OFFを切り替え">指示(口調)</label>
         <input type="text" id="realtimeInstructions" class="text-input" placeholder="例: 明るく元気な口調で話してください">
       </div>
       <div class="slider-row" style="flex-wrap:wrap; align-items:flex-start;">
-        <label>指示(翻訳)</label>
-        <button id="btnTranslateToggle" title="オンにすると、選択した2言語の相互通訳を行うよう指示に追加します">OFF</button>
+        <label id="translateToggleLabel" class="instr-toggle-label" title="クリックで選択した2言語の相互通訳指示のON/OFFを切り替え">指示(翻訳)</label>
         <span class="translate-sentence">で、<select id="translateLangA" class="translate-lang-select"></select>と<select id="translateLangB" class="translate-lang-select"></select>を相互通訳して。</span>
       </div>
       <div class="motion-controls" style="border-bottom:none; padding-left:0; padding-right:0;">
@@ -716,7 +720,16 @@ scene.background = new THREE.Color(0x0a0e14);
 const camera = new THREE.PerspectiveCamera(30, window.innerWidth/window.innerHeight, 0.05, 50);
 camera.position.set(0, 1.0, 2.2);
 
-const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true, premultipliedAlpha:false, preserveDrawingBuffer:true });
+// アンチエイリアスはWebGLコンテキスト生成時にしか指定できないため、次回起動時に反映する設定として
+// localStorageに保存し、レンダラー生成時にここで読み込む(未設定時は従来通りON扱い)。
+const ANTIALIAS_STORAGE_KEY = 'vrmFaceTrackingViewer.antialias';
+let antialiasSetting = true;
+try{
+  const savedAntialias = localStorage.getItem(ANTIALIAS_STORAGE_KEY);
+  if(savedAntialias !== null) antialiasSetting = savedAntialias === '1';
+}catch(e){ /* 読めない環境ではデフォルト(ON)のまま */ }
+
+const renderer = new THREE.WebGLRenderer({ antialias:antialiasSetting, alpha:true, premultipliedAlpha:false, preserveDrawingBuffer:true });
 renderer.setClearColor(0x000000, 0); // scene.backgroundが色の時は不透明に描画されるため常時これで問題ない
 renderer.domElement.style.background = 'transparent'; // 一部端末でキャンバスの透過合成が効かない対策
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -3047,7 +3060,7 @@ function populateTranslateLangSelects(){
 }
 populateTranslateLangSelects();
 
-let translateEnabled = false; // 「指示(翻訳)」トグル: ONの場合、選択した2言語の相互通訳指示を会話 指示に追加する
+let translateEnabled = false; // 「指示(翻訳)」トグル(ラベルクリック): ONの場合、選択した2言語の相互通訳指示を会話 指示に追加する
 
 // 現在の言語選択から、会話 指示に追加する通訳指示文を組み立てる(パネル上の表示文と同じ文言にする)
 function buildTranslateInstructionText(){
@@ -3056,12 +3069,34 @@ function buildTranslateInstructionText(){
   return `で、${langA}と${langB}を相互通訳して。`;
 }
 
-document.getElementById('btnTranslateToggle').addEventListener('click', () => {
+// 「指示(翻訳)」ラベル: クリックでON/OFFを切り替え、OFF時はラベルに取り消し線を入れ、
+// 右隣の言語選択欄(.translate-sentence)を非表示にする(デフォルトはOFF)。
+function applyTranslateToggleUI(){
+  const label = document.getElementById('translateToggleLabel');
+  const sentence = document.querySelector('.translate-sentence');
+  if(label) label.classList.toggle('off', !translateEnabled);
+  if(sentence) sentence.style.display = translateEnabled ? '' : 'none';
+}
+document.getElementById('translateToggleLabel').addEventListener('click', () => {
   translateEnabled = !translateEnabled;
-  const btn = document.getElementById('btnTranslateToggle');
-  btn.classList.toggle('on', translateEnabled);
-  btn.textContent = translateEnabled ? 'ON' : 'OFF';
+  applyTranslateToggleUI();
 });
+applyTranslateToggleUI();
+
+// 「指示(口調)」ラベル: クリックでON/OFFを切り替え、OFF時はラベルに取り消し線を入れ、
+// 右隣の入力欄(#realtimeInstructions)を非表示にする(デフォルトはON=既存の挙動を維持)。
+let toneInstructionsEnabled = true;
+function applyToneToggleUI(){
+  const label = document.getElementById('toneToggleLabel');
+  const input = document.getElementById('realtimeInstructions');
+  if(label) label.classList.toggle('off', !toneInstructionsEnabled);
+  if(input) input.style.display = toneInstructionsEnabled ? '' : 'none';
+}
+document.getElementById('toneToggleLabel').addEventListener('click', () => {
+  toneInstructionsEnabled = !toneInstructionsEnabled;
+  applyToneToggleUI();
+});
+applyToneToggleUI();
 
 let geminiWs = null;
 let geminiCaptureCtx = null;       // マイク取り込み用(16kHz)
@@ -3764,7 +3799,7 @@ async function connectRealtime(){
   geminiWs = ws;
 
   ws.addEventListener('open', () => {
-    let instructions = document.getElementById('realtimeInstructions').value.trim();
+    let instructions = toneInstructionsEnabled ? document.getElementById('realtimeInstructions').value.trim() : '';
     if(translateEnabled){
       instructions = [instructions, buildTranslateInstructionText()].filter(Boolean).join('\n');
     }
@@ -5714,6 +5749,23 @@ function applyPerfMode(){
 const applyPerfModeToggleUI = bindToggle('perfModeToggle','perfMode');
 document.getElementById('perfModeToggle').addEventListener('click', applyPerfMode);
 applyPerfMode(); // 初期状態(OFF)を明示的に適用
+
+/* ---------------- アンチエイリアス(次回起動時に反映) ----------------
+   antialiasSetting/ANTIALIAS_STORAGE_KEYはレンダラー生成前(scriptの先頭付近)で既に読み込み済み。
+   WebGLコンテキスト生成後には切り替えられないため、ここではON/OFFの保存のみ行い、
+   実際にレンダラーへ反映されるのは次回のページ読み込み時になる。 */
+function applyAntialiasToggleUI(){
+  const btn = document.getElementById('antialiasToggle');
+  btn.classList.toggle('on', antialiasSetting);
+  btn.textContent = antialiasSetting ? 'ON' : 'OFF';
+}
+document.getElementById('antialiasToggle').addEventListener('click', () => {
+  antialiasSetting = !antialiasSetting;
+  try{ localStorage.setItem(ANTIALIAS_STORAGE_KEY, antialiasSetting ? '1' : '0'); }catch(e){ /* 保存できない環境では次回起動時もデフォルトに戻る */ }
+  applyAntialiasToggleUI();
+  log('アンチエイリアス設定を変更しました(次回起動時から反映されます)', 'ok');
+});
+applyAntialiasToggleUI();
 
 // 保存済みの調整値があれば復元してUIに反映
 if(loadParamsFromStorage()){
