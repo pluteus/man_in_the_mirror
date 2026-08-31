@@ -5284,6 +5284,13 @@ function updateUprightCorrection(){
     uprightRotX = 0; uprightRotZ = 0; uprightRotYaw = 0;
   }else if(!gyroEnabled || !gyroRaw.has){
     uprightRotX = 0; uprightRotZ = 0; uprightRotYaw = 0;
+  }else if(accelEnabled){
+    // ジャイロ+加速度センサー(6DOF的な端末並進移動トラッキング)を併用中は、直立補正が
+    // 「端末を直立のまま下げて足元を見る」といった意図的な並進移動まで、キャラクター・背景ごと
+    // 傾けて打ち消そうとしてしまい、6DOF機能と競合する(足元が見えてもすぐ元に戻る一因になる)ため、
+    // 併用中はここで無効化する。uprightStrengthLR/FB/Yawの設定値自体は変更しないので、
+    // 加速度センサーをOFFに戻せば元の強度のまま直立補正が自動的に再開する。
+    uprightRotX = 0; uprightRotZ = 0; uprightRotYaw = 0;
   }else{
     const dGamma = (gyroSmoothed.gamma - gyroBaseline.gamma); // 校正基準からの左右傾きズレ(度)
     const dBeta  = (gyroSmoothed.beta  - gyroBaseline.beta);              // 校正基準からの前後傾きズレ(度)
@@ -5374,15 +5381,14 @@ async function toggleAccel(){
   accelEnabled = true;
   btn.textContent = '🎚️ 加速度センサー停止';
   btn.classList.add('on');
-  // 移動補正(加速度センサーによる視線先高さ/視点距離の補正)と
-  // キャラクター中心注視(ジャイロによる注視点追従)は競合するため、
-  // 加速度センサー有効化時は移動補正をON・キャラクター中心注視をOFFにする。
+  // 移動補正(加速度センサーによる視線先高さ/視点距離の補正)は加速度センサー有効化時に自動でONにする。
+  // キャラクター中心注視・直立補正は、加速度センサーとジャイロの両方が有効な間だけ
+  // (updateCameraFromFace/updateUprightCorrection側で)動的に適用を止めるようにしているため、
+  // ここで設定値自体を書き換える必要はない(加速度センサーをOFFに戻せば自動的に復帰する)。
   params.moveFix = 1;
-  params.charCenterLook = 0;
   if(typeof applyMoveFixToggleUI === 'function') applyMoveFixToggleUI();
-  if(typeof applyCharCenterLookToggleUI === 'function') applyCharCenterLookToggleUI();
   saveParamsToStorage();
-  log('加速度センサートラッキング開始(移動補正ON・キャラクター中心注視OFFに切替)', 'ok');
+  log('加速度センサートラッキング開始(移動補正ON。ジャイロと併用中は直立補正・キャラクター中心注視を一時的に無効化します)', 'ok');
 }
 document.getElementById('btnAccel').addEventListener('click', toggleAccel);
 
@@ -5695,8 +5701,15 @@ function updateCameraFromFace(){
   // 固定注視点(0, lookY, 0)から見た目上ズレて画面外へはみ出しやすくなる。
   // センサー値が変動している(=まだ傾きが動いている)間は、注視点をキャラクターの
   // 頭部の実際のワールド座標へなめらかに寄せることで、追従して中央に収まるようにする。
+  //
+  // ただし加速度センサーも同時に有効(6DOF的な端末の並進移動トラッキングを併用中)の場合は、
+  // この注視点追従が並進移動による視点のズレを打ち消す方向に働いてしまい、
+  // 「足元を見ようとして端末を下げても、注視点追従がキャラクターの頭部側へ引き戻してしまう」
+  // 形で6DOF機能と競合するため、accelEnabled中はキャラクター中心注視を無効化する
+  // (設定(params.charCenterLook)自体は変更せず、両方ONの間だけ一時的に適用を止める。
+  //  加速度センサーをOFFに戻せば、設定がONのままなら自動的に再度有効になる)。
   let targetWeight = 0;
-  if(params.charCenterLook && gyroEnabled && currentVRM && currentVRM.humanoid){
+  if(params.charCenterLook && gyroEnabled && !accelEnabled && currentVRM && currentVRM.humanoid){
     const activity = computeGyroActivity();
     targetWeight = clamp((activity - 0.15) / (1.5 - 0.15), 0, 1); // 小さなブレは無視する閾値
   }
