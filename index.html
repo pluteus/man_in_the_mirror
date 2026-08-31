@@ -492,13 +492,17 @@
       <div class="slider-row"><label>├ハイローアングル(ピッチ) 強度</label><button id="uprightSignFBToggle" class="sign-btn">+</button><input type="range" id="uprightStrengthFB" min="0" max="2" step="0.05" value="1"><span id="uprightStrengthFBV">1.00</span></div>
       <div class="slider-row"><label>└首振り(ヨー) 強度</label><button id="uprightSignYawToggle" class="sign-btn">+</button><input type="range" id="uprightStrengthYaw" min="0" max="2" step="0.05" value="1"><span id="uprightStrengthYawV">1.00</span></div>
       <div style="font-size:9.5px; color:var(--text-dim); padding:0 2px 4px;">
-        ※ジャイロセンサーが有効な状態で、端末を傾けてもキャラクターが現実世界に対して直立して見えるよう、
-        左右(ロール)・前後(ピッチ)・回転(ヨー。端末を持ったまま体ごと左右に向きを変える動き)のブレを
-        軸ごとに独立した強度で常時打ち消します(校正ボタンを押した時の姿勢を「まっすぐ」の基準にします)。
-        ヨーの補正量は一般タブの「回転量」に自動で加算されます(手動でのスライダー操作はそのまま基準値として効きます)。
-        向きが逆に感じる軸は、その行の+/−ボタンで反転してください。
-        「キャラクター中心注視」は、端末の傾きが変化している間だけ注視点をキャラクターの頭部へ寄せる機能です。
-        🎚️加速度センサーの「移動補正」と競合するため、加速度センサーを有効化すると自動でOFFになります。
+        ※ジャイロセンサー有効時は、🎯中央校正を押した瞬間の端末姿勢を「正面・水平」の基準として、
+        その後の端末の姿勢を基準として保持します。
+        本機能でいう「端末を下げる」は、端末を下へ傾けることではなく、直立したまま垂直方向へ移動することを意味します。
+        この上下移動はカメラ位置の高さとして反映し、視線方向は水平のまま維持します。
+        端末を下げて足元が見える位置で止めても、カメラ高さは自動的にキャラクターの目線へ戻りません。
+        さらにドリフト対策として、カメラ高さはVRMの足元(Y)より下へ行かず、キャラクター身長の2倍を超えて上へ行かないよう制限しています。
+        「回転量」はキャラクターの基準向きを調整するために使用します。
+        軸の向きや強度を調整したい場合は各+/−・強度を使用してください。
+        「キャラクター中心注視」は旧来の補助機能として残していますが、
+        ジャイロの絶対姿勢モードではカメラ姿勢を優先するため、通常はOFFでも動作します。
+        🎚️加速度センサーの「移動補正」とジャイロの姿勢制御は独立して動作します。
       </div>
     </div>
 
@@ -510,10 +514,12 @@
       <div class="slider-row"><label>└左右 強度</label><button id="moveSignLRToggle" class="sign-btn">+</button><input type="range" id="moveStrengthLR" min="0" max="2" step="0.05" value="1"><span id="moveStrengthLRV">1.00</span></div>
       <div class="slider-row"><label>現在の補正量</label><span id="moveOffsetDebug" style="font-size:11px; color:var(--text-dim);">UD 0.00 / FB 0.00 / LR 0.00</span></div>
       <div style="font-size:9.5px; color:var(--text-dim); padding:0 2px 4px;">
-        ※加速度センサーが有効な状態で、端末を上下に動かすと「視線先高さ」を、前後に動かすと「視点距離」を、
-        左右に動かすと視点の左右位置を変化させます。動かした位置は自動では中央へ戻らないため、
-        戻したい場合は🎯中央校正を押してください。向きが逆に感じる軸は、その行の+/−ボタンで反転してください。
-        🧭ジャイロも同時に有効化しておくと、端末が多少傾いても検出精度が上がりおすすめです。
+        ※加速度センサーは端末の並進移動(上下・前後・左右)を補助的に検出します。
+        特に「端末を直立のまま垂直に下げる」動作は、カメラの高さの移動として扱います。
+        ジャイロは端末が直立・水平の基準から大きく傾いていないかを補助し、加速度は位置の補助として動作します。
+        端末を上下に動かした量は「視線先高さ」、前後は「視点距離」、左右は視点の左右位置へ反映されます。
+        動かした位置は自動では中央へ戻らないため、戻したい場合は🎯中央校正を押してください。
+        ただしスマートフォンの加速度だけでは真の6DOF位置測定はできず、長時間ではドリフトが発生します。
       </div>
     </div>
 
@@ -2208,6 +2214,9 @@ async function setActiveCharacter(idx){
   if(prevEntry && prevEntry !== nextEntry) releaseCharacter(prevEntry);
 
   currentVRM = vrm;
+  // VRM読み込み直後に足元と身長からカメラの上下限を決定。
+  updateCameraVerticalLimits();
+
   if(!vrm.scene.parent) uprightGroup.add(vrm.scene); // 初回読込時はまだシーンに未追加のため(直立補正グループの下に追加)
   if(needsLoadLog) playVrmLoadReveal(vrm); // 初回読込のキャラクターのみ、頂点→ワイヤー→ソリッド→テクスチャの順で見た目を演出
   vrm.scene.traverse((obj) => { if(obj.isMesh) obj.castShadow = true; }); // 地面に影を落とす
@@ -5191,6 +5200,150 @@ const gyroRaw = { beta: 0, gamma: 0, alpha: 0, has: false };
 const gyroSmoothed = { beta: 0, gamma: 0, alpha: 0 };
 let gyroBaseline = { beta: 0, gamma: 0, alpha: 0 };
 
+/*
+ * ジャイロを「動いている間だけカメラを動かす」のではなく、
+ * 校正時の端末姿勢を基準にした「絶対姿勢」としてカメラ回転へ反映する。
+ *
+ * これが今回の重要な変更点。
+ * 以前は beta/gamma の差を camX/camY の位置へ加算し、
+ * ジャイロが静止すると charCenterLook の重みも0へ戻っていたため、
+ * 「一瞬だけ足元が見える→すぐ目線へ戻る」という挙動になっていた。
+ *
+ * 現在は
+ *   校正時端末姿勢 = 基準
+ *   現在端末姿勢 - 基準姿勢 = カメラの回転
+ * として扱うので、端末を下げた姿勢で止めても、その視線方向を保持する。
+ */
+let gyroPoseInitialized = false;
+
+/* カメラ上下移動の物理的な安全範囲 */
+let cameraGroundY = 0;
+let characterHeight = 1.7;
+let cameraMinY = 0;
+let cameraMaxY = 3.4;
+let cameraVerticalReferenceY = 1.6;
+
+function captureCameraVerticalReference(){
+  cameraVerticalReferenceY = THREE.MathUtils.clamp(
+    camera.position.y,
+    cameraMinY,
+    cameraMaxY
+  );
+}
+
+
+function updateCameraVerticalLimits(){
+  if(!currentVRM) return;
+
+  // VRMのワールドバウンディングボックスから足元～頭頂を取得。
+  const box = new THREE.Box3().setFromObject(currentVRM.scene);
+  if(!box.isEmpty()){
+    cameraGroundY = box.min.y;
+    const measuredHeight = box.max.y - box.min.y;
+    if(Number.isFinite(measuredHeight) && measuredHeight > 0.1){
+      characterHeight = measuredHeight;
+    }
+  }
+
+  cameraMinY = cameraGroundY;
+  cameraMaxY = cameraGroundY + characterHeight * 2;
+
+  // 既に範囲外なら即座に安全範囲へ戻す。
+  if(Number.isFinite(camera.position.y)){
+    camera.position.y = THREE.MathUtils.clamp(
+      camera.position.y,
+      cameraMinY,
+      cameraMaxY
+    );
+  }
+}
+
+function clampCameraVerticalPosition(){
+  if(!Number.isFinite(camera.position.y)) return;
+
+  const before = camera.position.y;
+  camera.position.y = THREE.MathUtils.clamp(
+    before,
+    cameraMinY,
+    cameraMaxY
+  );
+
+  // 境界へ到達した場合、同方向へ進み続ける速度を消す。
+  if(camera.position.y <= cameraMinY + 1e-5 && moveVelUD < 0){
+    moveVelUD = 0;
+  }
+  if(camera.position.y >= cameraMaxY - 1e-5 && moveVelUD > 0){
+    moveVelUD = 0;
+  }
+}
+
+const _deviceQuat = new THREE.Quaternion();
+const _gyroBaselineQuat = new THREE.Quaternion();
+const _gyroDeltaQuat = new THREE.Quaternion();
+const _gyroReferenceCameraQuat = new THREE.Quaternion();
+const _gyroEuler = new THREE.Euler();
+const _gyroZee = new THREE.Vector3(0, 0, 1);
+const _gyroQ0 = new THREE.Quaternion();
+const _gyroQ1 = new THREE.Quaternion();
+
+/* DeviceOrientationのalpha/beta/gammaをThree.jsのカメラ姿勢へ変換する。
+   端末の画面向き(screen.orientation.angle)も考慮する。 */
+function getDeviceOrientationQuaternion(alpha, beta, gamma){
+  const orientDeg = (screen.orientation && typeof screen.orientation.angle === 'number')
+    ? screen.orientation.angle : 0;
+
+  _gyroEuler.set(
+    THREE.MathUtils.degToRad(beta),
+    THREE.MathUtils.degToRad(alpha),
+    THREE.MathUtils.degToRad(-gamma),
+    'YXZ'
+  );
+  _deviceQuat.setFromEuler(_gyroEuler);
+
+  // 画面の縦/横回転を補正
+  _gyroQ0.setFromAxisAngle(
+    _gyroZee,
+    THREE.MathUtils.degToRad(-orientDeg)
+  );
+  _deviceQuat.multiply(_gyroQ0);
+
+  // DeviceOrientationの端末座標系をThree.jsカメラ座標系へ合わせる。
+  _gyroQ1.setFromAxisAngle(
+    new THREE.Vector3(1, 0, 0),
+    -Math.PI / 2
+  );
+  _deviceQuat.multiply(_gyroQ1);
+
+  return _deviceQuat;
+}
+
+/* 校正時の姿勢を基準に、現在の端末姿勢からカメラ回転を作る。 */
+function updateCameraOrientationFromGyro(){
+  // 端末の上下移動ではカメラを回転させない。
+  // 視線方向は校正時の水平を維持し、上下はcamera.position.yで表現する。
+  return false;
+}
+
+function captureGyroPoseBaseline(){
+  if(!gyroRaw.has) return false;
+
+  const q = getDeviceOrientationQuaternion(
+    gyroSmoothed.alpha,
+    gyroSmoothed.beta,
+    gyroSmoothed.gamma
+  );
+
+  _gyroBaselineQuat.copy(q);
+  _gyroReferenceCameraQuat.copy(camera.quaternion);
+  gyroBaseline = {
+    beta: gyroSmoothed.beta,
+    gamma: gyroSmoothed.gamma,
+    alpha: gyroSmoothed.alpha
+  };
+  gyroPoseInitialized = true;
+  return true;
+}
+
 function handleOrientation(e){
   if(e.beta === null || e.gamma === null) return;
   gyroRaw.beta = e.beta;   // 前後の傾き -180〜180 (縦持ちで約90前後)
@@ -5210,17 +5363,19 @@ async function toggleGyro(){
   if(gyroEnabled){
     window.removeEventListener('deviceorientation', handleOrientation);
     gyroEnabled = false;
+    gyroPoseInitialized = false;
     btn.textContent = '🧭 ジャイロ有効化';
     btn.classList.remove('on');
     log('ジャイロトラッキング停止');
     return;
   }
+
   if(typeof DeviceOrientationEvent === 'undefined'){
     log('この端末はジャイロ(DeviceOrientation)に対応していません', 'warn');
     return;
   }
+
   if(typeof DeviceOrientationEvent.requestPermission === 'function'){
-    // iOS: ユーザー操作の直後でないと許可ダイアログが出ないため、ボタン押下内で呼ぶ
     try{
       const perm = await DeviceOrientationEvent.requestPermission();
       if(perm !== 'granted'){
@@ -5232,11 +5387,33 @@ async function toggleGyro(){
       return;
     }
   }
+
+  // まず現在のカメラを通常の中央注視へ同期しておく。
+  // その方向を「端末を直立して水平に見ている基準」として保存する。
+  camera.matrixAutoUpdate = true;
+  camera.lookAt(
+    moveXOffset + panOffsetX,
+    params.lookY + moveOffsetUD * (params.moveSignUD ? -1 : 1) * params.moveStrengthUD,
+    moveDistOffset + panOffsetDist
+  );
+
+  gyroPoseInitialized = false;
   window.addEventListener('deviceorientation', handleOrientation);
   gyroEnabled = true;
+
+  // 既にセンサー値が届いている端末では、その場で基準を作れる。
+  if(gyroRaw.has){
+    captureGyroPoseBaseline();
+  }
+
   btn.textContent = '🧭 ジャイロ停止';
   btn.classList.add('on');
-  log('ジャイロトラッキング開始', 'ok');
+  log(
+    gyroPoseInitialized
+      ? 'ジャイロトラッキング開始(現在姿勢をカメラ姿勢の基準に設定)'
+      : 'ジャイロトラッキング開始(最初のセンサー値をカメラ姿勢の基準に設定)',
+    'ok'
+  );
 }
 document.getElementById('btnGyro').addEventListener('click', toggleGyro);
 
@@ -5271,35 +5448,19 @@ const _camLookTarget = new THREE.Vector3();
 const _charHeadPos = new THREE.Vector3();
 
 function updateUprightCorrection(){
-  if(renderer.xr.isPresenting){
-    // VRモード中は対象外(ヘッドセットの実姿勢を使うため)
-    uprightRotX = 0; uprightRotZ = 0; uprightRotYaw = 0;
-  }else if(!gyroEnabled || !gyroRaw.has){
-    uprightRotX = 0; uprightRotZ = 0; uprightRotYaw = 0;
-  }else{
-    const dGamma = (gyroSmoothed.gamma - gyroBaseline.gamma); // 校正基準からの左右傾きズレ(度)
-    const dBeta  = (gyroSmoothed.beta  - gyroBaseline.beta);              // 校正基準からの前後傾きズレ(度)
-    const dAlpha = ((gyroSmoothed.alpha - gyroBaseline.alpha + 540) % 360) - 180; // 校正基準からの回転(ヨー)ズレ(度、-180〜180)
-    // 端末の傾きと逆方向に傾けて相殺する。軸ごとに強度・符号を独立して指定できる。
-    // 向きが逆に感じる軸は、対応するuprightSignLR/uprightSignFB/uprightSignYawの±トグルで反転する。
-    const lrSign = params.uprightSignLR ? -1 : 1;
-    const fbSign = params.uprightSignFB ? -1 : 1;
-    const yawSign = params.uprightSignYaw ? -1 : 1;
-    uprightRotZ = -THREE.MathUtils.degToRad(dGamma) * params.uprightStrengthLR * lrSign;
-    uprightRotX = -THREE.MathUtils.degToRad(dBeta)  * params.uprightStrengthFB * fbSign;
-    uprightRotYaw = -THREE.MathUtils.degToRad(dAlpha) * params.uprightStrengthYaw * yawSign;
-  }
-  // キャラクターと背景を両方まとめて格納しているuprightGroup自体を傾けることで、
-  // 「世界の傾き」を共有させる。
-  // (以前は各オブジェクト自身のrotation.x/zに直接この値を入れていたが、
-  //  キャラクターと背景はそれぞれ別のY軸向き(正面の向き。例えばキャラクターは
-  //  baseModelRotYが約180°入っているのに対し背景は0°)を持っているため、
-  //  オイラー角XYZの合成順序の都合でY軸の向きがX/Z補正の符号に干渉し、
-  //  背景だけ傾く向きが逆転してしまっていた。共通の親グループにだけ
-  //  補正を掛け、キャラクター・背景それぞれの正面向き(rotation.y)は
-  //  子オブジェクト側でそのまま独立に保持することでこれを避ける)
-  uprightGroup.rotation.x = uprightRotX;
-  uprightGroup.rotation.z = uprightRotZ;
+  /*
+   * 旧方式では端末のbeta/gammaを使ってVRM側を逆回転させていた。
+   * 今回は端末姿勢をカメラ側へ反映するため、モデルはワールド座標に対して
+   * 常に直立したままにする。これによりアウトカメラ映像上でも「世界に固定された
+   * キャラクター」を見る感覚になる。
+   *
+   * uprightGroupは他の機能との互換性のため残すが、通常のジャイロ表示では回転0。
+   */
+  uprightRotX = 0;
+  uprightRotZ = 0;
+  uprightRotYaw = 0;
+  uprightGroup.rotation.x = 0;
+  uprightGroup.rotation.z = 0;
 }
 
 /* ---------------- 加速度センサー(端末の並進移動) ---------------- */
@@ -5365,15 +5526,15 @@ async function toggleAccel(){
   accelEnabled = true;
   btn.textContent = '🎚️ 加速度センサー停止';
   btn.classList.add('on');
-  // 移動補正(加速度センサーによる視線先高さ/視点距離の補正)と
-  // キャラクター中心注視(ジャイロによる注視点追従)は競合するため、
-  // 加速度センサー有効化時は移動補正をON・キャラクター中心注視をOFFにする。
+  // 加速度センサーは「並進位置」の補助として使い、ジャイロによる
+  // カメラ姿勢制御とは独立して動作させる。
+  // 以前はここでcharCenterLookを強制OFFしていたが、今回のジャイロ方式では
+  // キャラクター中心注視そのものが不要なので、ユーザー設定を勝手に変更しない。
   params.moveFix = 1;
-  params.charCenterLook = 0;
   if(typeof applyMoveFixToggleUI === 'function') applyMoveFixToggleUI();
   if(typeof applyCharCenterLookToggleUI === 'function') applyCharCenterLookToggleUI();
   saveParamsToStorage();
-  log('加速度センサートラッキング開始(移動補正ON・キャラクター中心注視OFFに切替)', 'ok');
+  log('加速度センサートラッキング開始(移動補正ON / ジャイロ姿勢制御とは独立)', 'ok');
 }
 document.getElementById('btnAccel').addEventListener('click', toggleAccel);
 
@@ -5403,7 +5564,8 @@ function updateMoveCorrection(dt){
   if(!accelEnabled || !accelRaw.has || !params.moveFix){
     // OFF/未有効時は残っているオフセットを滑らかに0へ戻す(機能そのものを切った時のみ)
     moveVelUD *= 0.85; moveVelFB *= 0.85; moveVelLR *= 0.85;
-    moveOffsetUD *= 0.85; moveOffsetFB *= 0.85; moveOffsetLR *= 0.85;
+    // 移動補正をOFFにした時だけ位置をリセットする。
+    moveOffsetUD = moveOffsetFB = moveOffsetLR = 0;
     updateMoveOffsetDebug();
     return;
   }
@@ -5554,7 +5716,10 @@ function performCenterCalibration(){
   }
   let msg = `中央校正しました (x:${calib.x.toFixed(2)} y:${calib.y.toFixed(2)} w:${calib.width.toFixed(2)}) / 視線先高さ・回転量をリセット`;
   if(gyroEnabled && gyroRaw.has){
-    gyroBaseline = { beta: gyroSmoothed.beta, gamma: gyroSmoothed.gamma, alpha: gyroSmoothed.alpha };
+    // 校正ボタンを押した瞬間の端末姿勢を「正面・水平」の新しい基準にする。
+    // カメラの現在の向きも同時に基準として保存するので、次に端末を下げたときは
+    // その回転だけがカメラへ加わり、端末を止めても視線方向は戻らない。
+    captureGyroPoseBaseline();
     msg += ` / ジャイロ基準(beta:${gyroBaseline.beta.toFixed(1)} gamma:${gyroBaseline.gamma.toFixed(1)} alpha:${gyroBaseline.alpha.toFixed(1)})`;
   }
   log(msg, 'ok');
@@ -5586,23 +5751,16 @@ function updateOffAxisFromHead(totalDx, totalDy, depthRatio, lookYOffset, distOf
 function updateCameraFromFace(){
   // 校正基準からの差分（画面比率）。カメラ映像は反転していないため符号調整。
   const flipSign = params.flip ? -1 : 1;
-  const dx = (smoothed.x - calib.x) * flipSign;   // 正=顔が右へ動いた
-  const dy = -(smoothed.y - calib.y);             // 正=顔が下へ動いた→カメラは下がりローアングルに
-  const depthRatio = calib.width > 0.01 ? (smoothed.width / calib.width) : 1; // >1で顔が近い(=奥行き変化)
+  const dx = (smoothed.x - calib.x) * flipSign;
+  const dy = -(smoothed.y - calib.y);
+  const depthRatio = calib.width > 0.01 ? (smoothed.width / calib.width) : 1;
 
-  let totalDx = -dx; // 頭が右へ動く→視点は左へ寄る、の符号規約
+  // 顔認識による「位置」の補正だけを残す。
+  // ジャイロはここでtotalDx/totalDyへ足さない。
+  // 端末の姿勢は下のQuaternion処理でカメラの向きへ直接反映する。
+  let totalDx = -dx;
   let totalDy = dy;
 
-  // 端末の傾き(ジャイロ)分を加算
-  if(gyroEnabled && gyroRaw.has){
-    const dGamma = (gyroSmoothed.gamma - gyroBaseline.gamma);
-    const dBeta  = (gyroSmoothed.beta  - gyroBaseline.beta);
-    const gScaleNorm = 0.011 * params.gsens;
-    totalDx += -dGamma * gScaleNorm;
-    totalDy += -dBeta * gScaleNorm * 0.85;
-  }
-
-  // 加速度センサーによる移動補正:上下移動→視線先高さ、前後移動→視点距離、左右移動→視点の左右位置への一時オフセット
   const udSign = params.moveSignUD ? -1 : 1;
   const fbSign = params.moveSignFB ? -1 : 1;
   const lrSign = params.moveSignLR ? -1 : 1;
@@ -5611,50 +5769,84 @@ function updateCameraFromFace(){
   const moveXOffset     = moveOffsetLR * lrSign * params.moveStrengthLR;
 
   if(params.offAxis){
-    updateOffAxisFromHead(totalDx, totalDy, depthRatio, moveLookYOffset, moveDistOffset + panOffsetDist, moveXOffset + panOffsetX);
+    /*
+     * off-axisは投影面そのものの姿勢を使う特殊モードなので、
+     * 既存のoff-axis計算を維持する。
+     * 通常のアウトカメラ表示では下記のpersistent gyro poseを使う。
+     */
+    updateOffAxisFromHead(
+      totalDx,
+      totalDy,
+      depthRatio,
+      moveLookYOffset,
+      moveDistOffset + panOffsetDist,
+      moveXOffset + panOffsetX
+    );
+
     document.querySelector('#camPreview .dot').style.left = `${(1-smoothed.x)*100}%`;
     document.querySelector('#camPreview .dot').style.top = `${smoothed.y*100}%`;
     return;
   }
 
   if(currentVRM){ currentVRM.scene.position.z = 0; }
+
+  camera.matrixAutoUpdate = true;
+
   const range = 1.6 * params.sxy;
   const camX = totalDx * range + moveXOffset + panOffsetX;
   const camY = totalDy * range * 0.85;
-  const dist = params.baseDist / Math.pow(Math.max(depthRatio, 0.3), params.sz) + moveDistOffset + panOffsetDist;
+  const dist = params.baseDist / Math.pow(Math.max(depthRatio, 0.3), params.sz)
+             + moveDistOffset + panOffsetDist;
   const lookY = params.lookY + moveLookYOffset;
 
   camera.position.x += (camX - camera.position.x) * 0.35;
-  camera.position.y += ((lookY + camY) - camera.position.y) * 0.35;
+
+  if(gyroEnabled && accelEnabled && params.moveFix){
+    // ジャイロ+加速度の移動モードでは、現在のカメラ高さを維持し、
+    // 上下移動量はmoveOffsetUDだけで管理する。
+    const targetY = THREE.MathUtils.clamp(
+      cameraVerticalReferenceY +
+        moveOffsetUD * params.moveStrengthUD,
+      cameraMinY,
+      cameraMaxY
+    );
+    camera.position.y += (targetY - camera.position.y) * 0.35;
+  }else{
+    camera.position.y += ((lookY + camY) - camera.position.y) * 0.35;
+  }
+
   camera.position.z += (dist - camera.position.z) * 0.35;
 
-  // ジャイロ+直立補正が有効な間は、uprightGroupの傾き補正でキャラクターの頭部が
-  // 固定注視点(0, lookY, 0)から見た目上ズレて画面外へはみ出しやすくなる。
-  // センサー値が変動している(=まだ傾きが動いている)間は、注視点をキャラクターの
-  // 頭部の実際のワールド座標へなめらかに寄せることで、追従して中央に収まるようにする。
-  let targetWeight = 0;
-  if(params.charCenterLook && gyroEnabled && currentVRM && currentVRM.humanoid){
-    const activity = computeGyroActivity();
-    targetWeight = clamp((activity - 0.15) / (1.5 - 0.15), 0, 1); // 小さなブレは無視する閾値
-  }
-  gyroLookAtWeight += (targetWeight - gyroLookAtWeight) * 0.15;
-  // panOffsetX/panOffsetDist(右ドラッグ/2本指スワイプ)、moveXOffset/moveDistOffset(加速度センサー
-  // による移動補正)のいずれも、注視点ごと平行移動させることで、キャラクターを中心にした
-  // 極座標的な首振り(オービット)ではなく、カメラそのものを横/前後にスライドさせる
-  // 通常の座標系での水平移動にしている。
-  _camLookTarget.set(moveXOffset + panOffsetX, lookY, moveDistOffset + panOffsetDist);
-  if(gyroLookAtWeight > 0.001){
-    const headBone = currentVRM.humanoid.getNormalizedBoneNode('head');
-    if(headBone){
-      headBone.getWorldPosition(_charHeadPos);
-      _camLookTarget.lerp(_charHeadPos, gyroLookAtWeight);
-    }
-  }
-  camera.lookAt(_camLookTarget);
+  // 顔認識側の補正があっても、カメラ高さはVRMの地面～身長×2の範囲内に限定。
+  clampCameraVerticalPosition();
 
-  document.querySelector('#camPreview .dot').style.left = `${(1-smoothed.x)*100}%`;
-  document.querySelector('#camPreview .dot').style.top = `${smoothed.y*100}%`;
-}
+  // 顔認識側の補正があっても、カメラ高さはVRMの地面～身長×2の範囲内に限定。
+  clampCameraVerticalPosition();
+
+  /*
+   * ここでは端末を「下に傾ける」のではなく、
+   * 「直立のまま垂直に下げる」動作を想定する。
+   *
+   * したがってジャイロのピッチをカメラ回転へ入れない。
+   * ジャイロは端末姿勢の基準確認に使い、視線方向は校正時の水平を維持する。
+   *
+   * 端末を下げた量は、加速度センサーから求めたmoveOffsetUDによって
+   * camera.position.yへ反映される。端末を止めてもposition.yは保持する。
+   */
+  if(gyroEnabled && gyroRaw.has){
+    if(!gyroPoseInitialized){
+      captureGyroPoseBaseline();
+    }
+    camera.quaternion.copy(_gyroReferenceCameraQuat);
+    camera.quaternion.normalize();
+  }else{
+    _camLookTarget.set(
+      moveXOffset + panOffsetX,
+      lookY,
+      moveDistOffset + panOffsetDist
+    );
+    camera.lookAt(_camLookTarget);
+  }
 
 /* ---------------- UIバインド ---------------- */
 function bindSlider(id, key, fmt = v=>v){
@@ -6177,7 +6369,8 @@ function animate(time){
   updateGyroSmoothing();
   updateUprightCorrection();
   updateMoveCorrection(delta);
-  updateCameraFromFace();
+  updateCameraVerticalLimits();
+    updateCameraFromFace();
   drawMosaicPreview();
   renderer.render(scene, camera);
 }
