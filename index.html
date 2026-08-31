@@ -5338,16 +5338,6 @@ function applyStationaryDriftCorrection(dt, accelerationError){
   clampCameraMovementPosition();
 }
 
-let cameraVerticalReferenceY = 1.6;
-
-function captureCameraMovementReference(){
-  cameraVerticalReferenceY = THREE.MathUtils.clamp(
-    camera.position.y,
-    cameraMinY,
-    cameraMaxY
-  );
-}
-
 
 function updateCameraMovementLimits(){
   if(!currentVRM) return;
