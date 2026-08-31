@@ -493,13 +493,8 @@
       <div class="slider-row"><label>└首振り(ヨー) 強度</label><button id="uprightSignYawToggle" class="sign-btn">+</button><input type="range" id="uprightStrengthYaw" min="0" max="2" step="0.05" value="1"><span id="uprightStrengthYawV">1.00</span></div>
       <div style="font-size:9.5px; color:var(--text-dim); padding:0 2px 4px;">
         ※ジャイロセンサー有効時は、🎯中央校正を押した瞬間の端末姿勢を「正面・水平」の基準として、
-        その後の端末の姿勢を基準として保持します。
-        本機能でいう「端末を下げる」は、端末を下へ傾けることではなく、直立したまま垂直方向へ移動することを意味します。
-        この上下移動はカメラ位置の高さとして反映し、視線方向は水平のまま維持します。
-        端末を下げて足元が見える位置で止めても、カメラ高さは自動的にキャラクターの目線へ戻りません。
-        ドリフト対策として、上下(Y)はVRM足元～足元+身長×2、左右(X)・前後(Z)はキャラクター中心から±身長×2に制限します。
-        端末が一定時間静止すると、残留速度と位置ドリフトを少しずつ基準位置へ自動補正します。
-        さらにドリフト対策として、カメラ高さはVRMの足元(Y)より下へ行かず、キャラクター身長の2倍を超えて上へ行かないよう制限しています。
+        その後の端末の回転(ロール/ピッチ/ヨー)をカメラの向きへ直接反映します。
+        端末を下げて足元を見た状態で止めても、視線は自動的にキャラクターの目へ戻りません。
         「回転量」はキャラクターの基準向きを調整するために使用します。
         軸の向きや強度を調整したい場合は各+/−・強度を使用してください。
         「キャラクター中心注視」は旧来の補助機能として残していますが、
@@ -517,10 +512,9 @@
       <div class="slider-row"><label>現在の補正量</label><span id="moveOffsetDebug" style="font-size:11px; color:var(--text-dim);">UD 0.00 / FB 0.00 / LR 0.00</span></div>
       <div style="font-size:9.5px; color:var(--text-dim); padding:0 2px 4px;">
         ※加速度センサーは端末の並進移動(上下・前後・左右)を補助的に検出します。
-        特に「端末を直立のまま垂直に下げる」動作は、カメラの高さの移動として扱います。
-        ジャイロは端末が直立・水平の基準から大きく傾いていないかを補助し、加速度は位置の補助として動作します。
+        ジャイロは端末の回転、加速度は位置の補助として独立して動作します。
         端末を上下に動かした量は「視線先高さ」、前後は「視点距離」、左右は視点の左右位置へ反映されます。
-        動かした位置は自動では中央へ戻らないため、戻したい場合は🎯中央校正を押してください。
+        動かした位置は基本的に保持します。長時間静止した場合のみ、上下方向の微小なドリフトを非常にゆっくり自動補正します。
         ただしスマートフォンの加速度だけでは真の6DOF位置測定はできず、長時間ではドリフトが発生します。
       </div>
     </div>
@@ -2216,9 +2210,6 @@ async function setActiveCharacter(idx){
   if(prevEntry && prevEntry !== nextEntry) releaseCharacter(prevEntry);
 
   currentVRM = vrm;
-  // VRM読み込み直後に足元と身長からカメラの上下限を決定。
-  updateCameraMovementLimits();
-
   if(!vrm.scene.parent) uprightGroup.add(vrm.scene); // 初回読込時はまだシーンに未追加のため(直立補正グループの下に追加)
   if(needsLoadLog) playVrmLoadReveal(vrm); // 初回読込のキャラクターのみ、頂点→ワイヤー→ソリッド→テクスチャの順で見た目を演出
   vrm.scene.traverse((obj) => { if(obj.isMesh) obj.castShadow = true; }); // 地面に影を落とす
@@ -5217,173 +5208,6 @@ let gyroBaseline = { beta: 0, gamma: 0, alpha: 0 };
  * として扱うので、端末を下げた姿勢で止めても、その視線方向を保持する。
  */
 let gyroPoseInitialized = false;
-
-/* カメラ上下移動の物理的な安全範囲 */
-let cameraGroundY = 0;
-let characterHeight = 1.7;
-let cameraMinY = 0;
-let cameraMaxY = 3.4;
-let characterCenter = new THREE.Vector3(0, 0.85, 0);
-let cameraMaxHorizontalOffset = 3.4;
-let cameraMaxDepthOffset = 3.4;
-
-let cameraVerticalReferenceY = 1.6;
-let cameraHorizontalReferenceX = 0;
-let cameraDepthReferenceZ = 0;
-
-let stationaryTime = 0;
-let stationaryConfidence = 0;
-const stationarySpeedThreshold = 0.045;
-const stationaryAccelThreshold = 0.18;
-const stationaryRequiredTime = 0.75;
-const driftCorrectionRate = 0.08;
-
-function updateCameraMovementLimits(){
-  if(!currentVRM) return;
-  const box = new THREE.Box3().setFromObject(currentVRM.scene);
-  if(box.isEmpty()) return;
-
-  cameraGroundY = box.min.y;
-  const measuredHeight = box.max.y - box.min.y;
-  if(Number.isFinite(measuredHeight) && measuredHeight > 0.1){
-    characterHeight = measuredHeight;
-  }
-
-  characterCenter.set(
-    (box.min.x + box.max.x) * 0.5,
-    cameraGroundY + characterHeight * 0.5,
-    (box.min.z + box.max.z) * 0.5
-  );
-
-  cameraMinY = cameraGroundY;
-  cameraMaxY = cameraGroundY + characterHeight * 2;
-  cameraMaxHorizontalOffset = characterHeight * 2;
-  cameraMaxDepthOffset = characterHeight * 2;
-
-  clampCameraMovementPosition();
-}
-
-function clampCameraMovementPosition(){
-  if(!Number.isFinite(camera.position.x) ||
-     !Number.isFinite(camera.position.y) ||
-     !Number.isFinite(camera.position.z)) return;
-
-  camera.position.y = THREE.MathUtils.clamp(camera.position.y, cameraMinY, cameraMaxY);
-  camera.position.x = THREE.MathUtils.clamp(
-    camera.position.x,
-    characterCenter.x - cameraMaxHorizontalOffset,
-    characterCenter.x + cameraMaxHorizontalOffset
-  );
-  camera.position.z = THREE.MathUtils.clamp(
-    camera.position.z,
-    characterCenter.z - cameraMaxDepthOffset,
-    characterCenter.z + cameraMaxDepthOffset
-  );
-
-  if(camera.position.y <= cameraMinY + 1e-5 && moveVelUD < 0) moveVelUD = 0;
-  if(camera.position.y >= cameraMaxY - 1e-5 && moveVelUD > 0) moveVelUD = 0;
-  if(camera.position.x <= characterCenter.x - cameraMaxHorizontalOffset + 1e-5 && moveVelLR < 0) moveVelLR = 0;
-  if(camera.position.x >= characterCenter.x + cameraMaxHorizontalOffset - 1e-5 && moveVelLR > 0) moveVelLR = 0;
-  if(camera.position.z <= characterCenter.z - cameraMaxDepthOffset + 1e-5 && moveVelFB < 0) moveVelFB = 0;
-  if(camera.position.z >= characterCenter.z + cameraMaxDepthOffset - 1e-5 && moveVelFB > 0) moveVelFB = 0;
-}
-
-function captureCameraMovementReference(){
-  cameraVerticalReferenceY = THREE.MathUtils.clamp(camera.position.y, cameraMinY, cameraMaxY);
-  cameraHorizontalReferenceX = THREE.MathUtils.clamp(
-    camera.position.x,
-    characterCenter.x - cameraMaxHorizontalOffset,
-    characterCenter.x + cameraMaxHorizontalOffset
-  );
-  cameraDepthReferenceZ = THREE.MathUtils.clamp(
-    camera.position.z,
-    characterCenter.z - cameraMaxDepthOffset,
-    characterCenter.z + cameraMaxDepthOffset
-  );
-}
-
-function applyStationaryDriftCorrection(dt, accelerationError){
-  if(!accelEnabled || !params.moveFix){
-    stationaryTime = 0;
-    stationaryConfidence = 0;
-    return;
-  }
-
-  const speed = Math.abs(moveVelUD) + Math.abs(moveVelFB) + Math.abs(moveVelLR);
-  const still = accelerationError < stationaryAccelThreshold &&
-                speed < stationarySpeedThreshold;
-
-  if(still) stationaryTime += dt;
-  else stationaryTime = Math.max(0, stationaryTime - dt * 2.5);
-
-  stationaryConfidence = THREE.MathUtils.clamp(
-    stationaryTime / stationaryRequiredTime, 0, 1
-  );
-
-  if(stationaryTime < stationaryRequiredTime) return;
-
-  const velocityDamp = Math.pow(0.015, dt);
-  moveVelUD *= velocityDamp;
-  moveVelFB *= velocityDamp;
-  moveVelLR *= velocityDamp;
-
-  // 停止中の微小ドリフトだけをゆっくり基準位置へ戻す。
-  const gain = driftCorrectionRate * stationaryConfidence;
-  const correction = 1 - Math.pow(1 - gain, dt);
-
-  moveOffsetUD += (cameraVerticalReferenceY - camera.position.y) * correction;
-  moveOffsetLR += (cameraHorizontalReferenceX - camera.position.x) * correction;
-  moveOffsetFB += (cameraDepthReferenceZ - camera.position.z) * correction;
-
-  clampCameraMovementPosition();
-}
-
-
-function updateCameraMovementLimits(){
-  if(!currentVRM) return;
-
-  // VRMのワールドバウンディングボックスから足元～頭頂を取得。
-  const box = new THREE.Box3().setFromObject(currentVRM.scene);
-  if(!box.isEmpty()){
-    cameraGroundY = box.min.y;
-    const measuredHeight = box.max.y - box.min.y;
-    if(Number.isFinite(measuredHeight) && measuredHeight > 0.1){
-      characterHeight = measuredHeight;
-    }
-  }
-
-  cameraMinY = cameraGroundY;
-  cameraMaxY = cameraGroundY + characterHeight * 2;
-
-  // 既に範囲外なら即座に安全範囲へ戻す。
-  if(Number.isFinite(camera.position.y)){
-    camera.position.y = THREE.MathUtils.clamp(
-      camera.position.y,
-      cameraMinY,
-      cameraMaxY
-    );
-  }
-}
-
-function clampCameraMovementPosition(){
-  if(!Number.isFinite(camera.position.y)) return;
-
-  const before = camera.position.y;
-  camera.position.y = THREE.MathUtils.clamp(
-    before,
-    cameraMinY,
-    cameraMaxY
-  );
-
-  // 境界へ到達した場合、同方向へ進み続ける速度を消す。
-  if(camera.position.y <= cameraMinY + 1e-5 && moveVelUD < 0){
-    moveVelUD = 0;
-  }
-  if(camera.position.y >= cameraMaxY - 1e-5 && moveVelUD > 0){
-    moveVelUD = 0;
-  }
-}
-
 const _deviceQuat = new THREE.Quaternion();
 const _gyroBaselineQuat = new THREE.Quaternion();
 const _gyroDeltaQuat = new THREE.Quaternion();
@@ -5426,9 +5250,27 @@ function getDeviceOrientationQuaternion(alpha, beta, gamma){
 
 /* 校正時の姿勢を基準に、現在の端末姿勢からカメラ回転を作る。 */
 function updateCameraOrientationFromGyro(){
-  // 端末の上下移動ではカメラを回転させない。
-  // 視線方向は校正時の水平を維持し、上下はcamera.position.yで表現する。
-  return false;
+  if(renderer.xr.isPresenting || !gyroEnabled || !gyroRaw.has || !gyroPoseInitialized){
+    return false;
+  }
+
+  const currentQuat = getDeviceOrientationQuaternion(
+    gyroSmoothed.alpha,
+    gyroSmoothed.beta,
+    gyroSmoothed.gamma
+  );
+
+  // delta = 現在姿勢 * 基準姿勢^-1
+  _gyroDeltaQuat.copy(currentQuat).multiply(
+    _gyroBaselineQuat.clone().invert()
+  );
+
+  // 校正時に見ていた方向を基準に、端末の姿勢変化だけを適用する。
+  camera.quaternion.copy(_gyroDeltaQuat).multiply(_gyroReferenceCameraQuat);
+  camera.quaternion.normalize();
+  camera.matrixAutoUpdate = true;
+  camera.updateMatrixWorld(true);
+  return true;
 }
 
 function captureGyroPoseBaseline(){
@@ -5584,6 +5426,49 @@ const accelGravity = { x: 0, y: 0, z: 0 };
 let moveVelUD = 0, moveVelFB = 0, moveVelLR = 0;          // 推定並進速度(毎フレーム減衰)
 let moveOffsetUD = 0, moveOffsetFB = 0, moveOffsetLR = 0; // 視線先高さ/視点距離/左右位置に加算するオフセット(自動では0に戻らない)
 
+// 3軸の暴走防止。VRMの実寸を基準にカメラ位置を制限する。
+let cameraLimitGroundY = 0;
+let cameraLimitHeight = 1.7;
+let cameraLimitCenterX = 0;
+let cameraLimitCenterZ = 0;
+let cameraLimitReady = false;
+
+// 静止時の上下ドリフト補正
+let stationaryMoveTime = 0;
+const STATIONARY_ACCEL_THRESHOLD = 0.18;
+const STATIONARY_VELOCITY_THRESHOLD = 0.045;
+const STATIONARY_REQUIRED_SEC = 0.8;
+const STATIONARY_VERTICAL_CORRECTION = 0.00035;
+
+function updateCameraPositionLimits(){
+  if(!currentVRM || !currentVRM.scene) return;
+  const box = new THREE.Box3().setFromObject(currentVRM.scene);
+  if(box.isEmpty()) return;
+  const h = box.max.y - box.min.y;
+  if(!Number.isFinite(h) || h <= 0.1) return;
+  cameraLimitGroundY = box.min.y;
+  cameraLimitHeight = h;
+  cameraLimitCenterX = (box.min.x + box.max.x) * 0.5;
+  cameraLimitCenterZ = (box.min.z + box.max.z) * 0.5;
+  cameraLimitReady = true;
+}
+
+function clampCameraPositionToCharacter(){
+  if(!cameraLimitReady) updateCameraPositionLimits();
+  if(!cameraLimitReady) return;
+  const range = cameraLimitHeight * 2;
+  camera.position.y = THREE.MathUtils.clamp(camera.position.y, cameraLimitGroundY, cameraLimitGroundY + range);
+  camera.position.x = THREE.MathUtils.clamp(camera.position.x, cameraLimitCenterX - range, cameraLimitCenterX + range);
+  camera.position.z = THREE.MathUtils.clamp(camera.position.z, cameraLimitCenterZ - range, cameraLimitCenterZ + range);
+  if(camera.position.y <= cameraLimitGroundY + 1e-5 && moveVelUD < 0) moveVelUD = 0;
+  if(camera.position.y >= cameraLimitGroundY + range - 1e-5 && moveVelUD > 0) moveVelUD = 0;
+  if(camera.position.x <= cameraLimitCenterX - range + 1e-5 && moveVelLR < 0) moveVelLR = 0;
+  if(camera.position.x >= cameraLimitCenterX + range - 1e-5 && moveVelLR > 0) moveVelLR = 0;
+  if(camera.position.z <= cameraLimitCenterZ - range + 1e-5 && moveVelFB < 0) moveVelFB = 0;
+  if(camera.position.z >= cameraLimitCenterZ + range - 1e-5 && moveVelFB > 0) moveVelFB = 0;
+}
+
+
 // 右ドラッグ(マウス)/2本指スワイプによる視点の水平移動(左右・前後、高さは変えない)。
 // 加速度センサーのmoveOffsetLR/FBと同様、自動では0に戻らない(🎯中央校正でリセット)。
 let panOffsetX = 0, panOffsetDist = 0;
@@ -5607,10 +5492,6 @@ async function toggleAccel(){
     window.removeEventListener('devicemotion', handleMotion);
     accelEnabled = false;
     moveVelUD = moveVelFB = moveVelLR = moveOffsetUD = moveOffsetFB = moveOffsetLR = 0;
-    updateCameraMovementLimits();
-    captureCameraMovementReference();
-    stationaryTime = 0;
-    stationaryConfidence = 0;
     btn.textContent = '🎚️ 加速度センサー有効化';
     btn.classList.remove('on');
     log('加速度センサートラッキング停止');
@@ -5673,47 +5554,46 @@ function getTiltCorrectedAccel(){
 
 function updateMoveCorrection(dt){
   if(!accelEnabled || !accelRaw.has || !params.moveFix){
-    // OFF/未有効時は残っているオフセットを滑らかに0へ戻す(機能そのものを切った時のみ)
     moveVelUD *= 0.85; moveVelFB *= 0.85; moveVelLR *= 0.85;
-    // 移動補正をOFFにした時だけ位置をリセットする。
-    moveOffsetUD = moveOffsetFB = moveOffsetLR = 0;
+    moveOffsetUD *= 0.85; moveOffsetFB *= 0.85; moveOffsetLR *= 0.85;
+    stationaryMoveTime = 0;
     updateMoveOffsetDebug();
     return;
   }
-  const tilted = getTiltCorrectedAccel();
-  const ax = tilted.x, ay = tilted.y, az = tilted.z;
-
-  // 重力(低周波成分)の追従は、端末が実際に静止している(=合成加速度の大きさがほぼ重力の
-  // 大きさ9.8m/s^2のみ)と判定できる時だけ行う。動いている最中にも追従させてしまうと、
-  // 並進運動そのものを「新しい重力方向」として一部吸収してしまい、手を止めた直後に
-  // (吸収しすぎた分の反動で)逆向きの並進加速度が誤検出されてそれが積分され、
-  // オフセットが元の位置へ戻ってしまう(=手を止めるとすぐ元の目線の高さに戻る現象の原因)。
-  const gAlpha = 0.06; // 重力(低周波成分)推定の追従係数
-  const totalMag = Math.sqrt(ax*ax + ay*ay + az*az);
-  const gravityMag = Math.sqrt(accelGravity.x*accelGravity.x + accelGravity.y*accelGravity.y + accelGravity.z*accelGravity.z) || 9.8;
-  const isNearlyStill = Math.abs(totalMag - gravityMag) < 0.6; // 静止とみなす閾値(m/s^2)
-  if(isNearlyStill){
-    accelGravity.x += (ax - accelGravity.x) * gAlpha;
-    accelGravity.y += (ay - accelGravity.y) * gAlpha;
-    accelGravity.z += (az - accelGravity.z) * gAlpha;
+  const tilted=getTiltCorrectedAccel();
+  if(!tilted) return;
+  const ax=tilted.x, ay=tilted.y, az=tilted.z;
+  const gAlpha=0.06;
+  const totalMag=Math.sqrt(ax*ax+ay*ay+az*az);
+  const gravityMag=Math.sqrt(accelGravity.x*accelGravity.x+accelGravity.y*accelGravity.y+accelGravity.z*accelGravity.z)||9.8;
+  if(Math.abs(totalMag-gravityMag)<0.6){
+    accelGravity.x += (ax-accelGravity.x)*gAlpha;
+    accelGravity.y += (ay-accelGravity.y)*gAlpha;
+    accelGravity.z += (az-accelGravity.z)*gAlpha;
   }
-  const linUD = ay - accelGravity.y; // 上下方向の並進加速度(m/s^2、傾き補正後)
-  const linFB = az - accelGravity.z; // 前後(画面に垂直)方向の並進加速度(m/s^2、傾き補正後)
-  const linLR = ax - accelGravity.x; // 左右方向の並進加速度(m/s^2、傾き補正後)
+  const linUD=ay-accelGravity.y;
+  const linFB=az-accelGravity.z;
+  const linLR=ax-accelGravity.x;
+  const velDamping=0.96;
+  moveVelUD=(moveVelUD+linUD*dt)*velDamping;
+  moveVelFB=(moveVelFB+linFB*dt)*velDamping;
+  moveVelLR=(moveVelLR+linLR*dt)*velDamping;
+  moveOffsetUD += moveVelUD*dt;
+  moveOffsetFB += moveVelFB*dt;
+  moveOffsetLR += moveVelLR*dt;
 
-  // 速度は毎フレーム減衰させ、センサーノイズによる際限のない加速(ドリフトの主因)を防ぐ。
-  // オフセット自体はもう自動で0へ戻さない(動かした位置がそのまま留まる)。
-  // 元の位置に戻したい場合は🎯中央校正ボタンでリセットする。
-  const velDamping = 0.96; // 速度の減衰
-
-  moveVelUD = (moveVelUD + linUD * dt) * velDamping;
-  moveVelFB = (moveVelFB + linFB * dt) * velDamping;
-  moveVelLR = (moveVelLR + linLR * dt) * velDamping;
-  moveOffsetUD += moveVelUD * dt;
-  moveOffsetFB += moveVelFB * dt;
-  moveOffsetLR += moveVelLR * dt;
+  const speed=Math.abs(moveVelUD)+Math.abs(moveVelFB)+Math.abs(moveVelLR);
+  const stationary=Math.abs(totalMag-gravityMag)<STATIONARY_ACCEL_THRESHOLD && speed<STATIONARY_VELOCITY_THRESHOLD;
+  if(stationary) stationaryMoveTime += dt;
+  else stationaryMoveTime=Math.max(0,stationaryMoveTime-dt*2);
+  if(stationaryMoveTime>=STATIONARY_REQUIRED_SEC){
+    const d=1-Math.pow(1-STATIONARY_VERTICAL_CORRECTION,Math.min(dt,0.1));
+    moveOffsetUD += -moveOffsetUD*d;
+    moveVelUD *= Math.pow(0.20,Math.min(dt,0.1));
+  }
   updateMoveOffsetDebug();
 }
+
 
 // 加速度タブに現在のmoveOffsetUD/FB/LRの実値を表示し、センサーが反応しているか
 // (0付近のまま動かないか)、動いているのに見た目に出ないのかを切り分けやすくする。
@@ -5815,7 +5695,9 @@ function performCenterCalibration(){
   syncSliderUI('lookY', 1);
   syncSliderUI('modelRotY', 0);
   moveVelUD = moveVelFB = moveVelLR = moveOffsetUD = moveOffsetFB = moveOffsetLR = 0;
+  stationaryMoveTime = 0;
   panOffsetX = panOffsetDist = 0;
+  updateCameraPositionLimits();
   // 重力(低周波成分)推定を現在の姿勢に即座に再同期する。これをしないと、校正直後に
   // 推定値の遅れ分だけ並進加速度が誤検出され、リセットした加速度センサー補正量が
   // すぐにまた動き出してしまうことがある。
@@ -5910,56 +5792,42 @@ function updateCameraFromFace(){
              + moveDistOffset + panOffsetDist;
   const lookY = params.lookY + moveLookYOffset;
 
-  camera.position.x += (camX - camera.position.x) * 0.35;
-
-  if(gyroEnabled && accelEnabled && params.moveFix){
-    const targetY = THREE.MathUtils.clamp(
-      cameraVerticalReferenceY + moveOffsetUD * params.moveStrengthUD,
-      cameraMinY, cameraMaxY
-    );
-    const targetX = THREE.MathUtils.clamp(
-      cameraHorizontalReferenceX + moveOffsetLR * params.moveStrengthLR,
-      characterCenter.x - cameraMaxHorizontalOffset,
-      characterCenter.x + cameraMaxHorizontalOffset
-    );
-    const targetZ = THREE.MathUtils.clamp(
-      cameraDepthReferenceZ + moveOffsetFB * params.moveStrengthFB,
-      characterCenter.z - cameraMaxDepthOffset,
-      characterCenter.z + cameraMaxDepthOffset
-    );
-
-    camera.position.x += (targetX - camera.position.x) * 0.35;
-    camera.position.y += (targetY - camera.position.y) * 0.35;
-    camera.position.z += (targetZ - camera.position.z) * 0.35;
-  }else{
-    camera.position.y += ((lookY + camY) - camera.position.y) * 0.35;
+  updateCameraPositionLimits();
+  let targetCamX = camX;
+  let targetCamY = lookY + camY;
+  let targetCamZ = dist;
+  if(cameraLimitReady){
+    const range = cameraLimitHeight * 2;
+    targetCamX = THREE.MathUtils.clamp(targetCamX, cameraLimitCenterX - range, cameraLimitCenterX + range);
+    targetCamY = THREE.MathUtils.clamp(targetCamY, cameraLimitGroundY, cameraLimitGroundY + range);
+    targetCamZ = THREE.MathUtils.clamp(targetCamZ, cameraLimitCenterZ - range, cameraLimitCenterZ + range);
   }
-
-  camera.position.z += (dist - camera.position.z) * 0.35;
-
-  // 顔認識側の補正があっても、カメラ高さはVRMの地面～身長×2の範囲内に限定。
-  clampCameraMovementPosition();
-
-  // 顔認識側の補正があっても、カメラ高さはVRMの地面～身長×2の範囲内に限定。
-  clampCameraMovementPosition();
+  camera.position.x += (targetCamX - camera.position.x) * 0.35;
+  camera.position.y += (targetCamY - camera.position.y) * 0.35;
+  camera.position.z += (targetCamZ - camera.position.z) * 0.35;
+  clampCameraPositionToCharacter();
 
   /*
-   * ここでは端末を「下に傾ける」のではなく、
-   * 「直立のまま垂直に下げる」動作を想定する。
+   * ジャイロON時:
+   *   「校正時の端末姿勢」をカメラの基準姿勢として、
+   *   現在の端末姿勢との差分Quaternionをそのままカメラへ適用する。
    *
-   * したがってジャイロのピッチをカメラ回転へ入れない。
-   * ジャイロは端末姿勢の基準確認に使い、視線方向は校正時の水平を維持する。
-   *
-   * 端末を下げた量は、加速度センサーから求めたmoveOffsetUDによって
-   * camera.position.yへ反映される。端末を止めてもposition.yは保持する。
+   * ここでは camera.lookAt() を呼ばないのが重要。
+   * lookAt()を毎フレーム呼ぶと、端末を下げて静止した瞬間でも
+   * カメラが固定のlookYへ再び向いてしまい、足元から目線へ戻る。
    */
+  let gyroApplied = false;
+
   if(gyroEnabled && gyroRaw.has){
     if(!gyroPoseInitialized){
+      // センサーの最初の値を受信した時点のカメラ姿勢を基準として固定。
       captureGyroPoseBaseline();
     }
-    camera.quaternion.copy(_gyroReferenceCameraQuat);
-    camera.quaternion.normalize();
-  }else{
+    gyroApplied = updateCameraOrientationFromGyro();
+  }
+
+  if(!gyroApplied){
+    // ジャイロOFF時は従来通り、固定注視点を見る。
     _camLookTarget.set(
       moveXOffset + panOffsetX,
       lookY,
@@ -5967,6 +5835,10 @@ function updateCameraFromFace(){
     );
     camera.lookAt(_camLookTarget);
   }
+
+  document.querySelector('#camPreview .dot').style.left = `${(1-smoothed.x)*100}%`;
+  document.querySelector('#camPreview .dot').style.top = `${smoothed.y*100}%`;
+}
 
 /* ---------------- UIバインド ---------------- */
 function bindSlider(id, key, fmt = v=>v){
@@ -6489,8 +6361,7 @@ function animate(time){
   updateGyroSmoothing();
   updateUprightCorrection();
   updateMoveCorrection(delta);
-  updateCameraMovementLimits();
-    updateCameraFromFace();
+  updateCameraFromFace();
   drawMosaicPreview();
   renderer.render(scene, camera);
 }
