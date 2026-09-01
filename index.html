@@ -506,6 +506,7 @@
       <div class="sub-toggle-row"><button id="btnAccel">🎚️ 加速度センサー有効化</button></div>
       <div class="slider-row"><label>移動補正</label><button id="moveFixToggle" class="toggle-btn">OFF</button></div>
       <div class="sub-toggle-row"><button id="btnVideoFlow">🎥 映像トラッキング(上下左右)</button></div>
+      <div class="sub-toggle-row"><button id="btnFrontDepth">🤳 映像トラッキング(前後)</button></div>
       <div class="slider-row"><label>├上下 強度</label><button id="moveSignUDToggle" class="sign-btn">+</button><input type="range" id="moveStrengthUD" min="0" max="2" step="0.05" value="1"><span id="moveStrengthUDV">1.00</span></div>
       <div class="slider-row"><label>├前後 強度</label><button id="moveSignFBToggle" class="sign-btn">+</button><input type="range" id="moveStrengthFB" min="0" max="2" step="0.05" value="1"><span id="moveStrengthFBV">1.00</span></div>
       <div class="slider-row"><label>└左右 強度</label><button id="moveSignLRToggle" class="sign-btn">+</button><input type="range" id="moveStrengthLR" min="0" max="2" step="0.05" value="1"><span id="moveStrengthLRV">1.00</span></div>
@@ -515,10 +516,16 @@
         左右に動かすと視点の左右位置を変化させます。動かした位置は自動では中央へ戻らないため、
         戻したい場合は🎯中央校正を押してください。向きが逆に感じる軸は、その行の+/−ボタンで反転してください。
         🧭ジャイロも同時に有効化しておくと、端末が多少傾いても検出精度が上がりおすすめです。<br>
-        ※🎥映像トラッキングは、📷アウトカメラの映像から見た目の動きを直接読み取って上下左右のみを推定する方式です
-        (奥行き=前後は推定できないため対象外)。加速度センサーの二重積分より原理的にドリフトしにくい代わりに、
-        無地の壁など特徴の乏しい映像では反応しにくくなります。ONにするには先に📷アウトカメラをONにしてください。
-        有効な間は上下・左右について加速度センサー側の推定より優先されます(強度・向き設定は共通で使われます)。
+        ※🎥映像トラッキング(上下左右)は、📷アウトカメラの映像から見た目の動きを直接読み取って上下左右のみを
+        推定する方式です。加速度センサーの二重積分より原理的にドリフトしにくい代わりに、無地の壁など
+        特徴の乏しい映像では反応しにくくなります。ONにするには先に📷アウトカメラをONにしてください。
+        ジャイロが有効な場合、端末の傾き(回転)による見た目の動きは自動的に差し引かれ、純粋な並進移動分だけを
+        検出しようとします。有効な間は上下・左右について加速度センサー側の推定より優先されます
+        (強度・向き設定は共通で使われます)。<br>
+        ※🤳映像トラッキング(前後)は、🤳インカメラに写る顔の大きさの変化から視点距離を推定する方式です。
+        速度の積分を経ないため原理的にドリフトしません(端末の傾きだけでは顔との距離は変わらないため、
+        回転の影響も受けにくい方式です)。ONにするにはインカメラでの顔検出が動作している必要があります。
+        有効な間は前後について加速度センサー側の推定より優先されます。
       </div>
     </div>
 
@@ -4359,6 +4366,13 @@ document.getElementById('btnCam').addEventListener('click', async () => {
     camRunning = false;
     btn.textContent = '▶ インカメラ';
     btn.classList.remove('on');
+    if(frontDepthEnabled){
+      // 前後映像トラッキングはインカメラの顔検出に依存しているため、インカメラ停止時は連動して停止する
+      frontDepthEnabled = false;
+      const fdBtn = document.getElementById('btnFrontDepth');
+      if(fdBtn){ fdBtn.textContent = '🤳 映像トラッキング(前後)'; fdBtn.classList.remove('on'); }
+      log('インカメラ停止に伴い映像トラッキング(前後)も停止しました');
+    }
     log('カメラ停止');
     return;
   }
@@ -4425,6 +4439,11 @@ document.getElementById('btnOutCam').addEventListener('click', async () => {
       camRunning = false;
       camBtn.textContent = '▶ インカメラ';
       camBtn.classList.remove('on');
+      if(frontDepthEnabled){
+        frontDepthEnabled = false;
+        const fdBtn = document.getElementById('btnFrontDepth');
+        if(fdBtn){ fdBtn.textContent = '🤳 映像トラッキング(前後)'; fdBtn.classList.remove('on'); }
+      }
       log('端末の制約上、前面/背面カメラは同時起動できないためインカメラを停止しました', 'warn');
     }
 
@@ -5297,12 +5316,12 @@ function updateUprightCorrection(){
     uprightRotX = 0; uprightRotZ = 0; uprightRotYaw = 0;
   }else if(!gyroEnabled || !gyroRaw.has){
     uprightRotX = 0; uprightRotZ = 0; uprightRotYaw = 0;
-  }else if(accelEnabled || videoFlowEnabled){
+  }else if(accelEnabled || videoFlowEnabled || frontDepthEnabled){
     // ジャイロ+加速度センサー/映像トラッキング(6DOF的な端末並進移動トラッキング)を併用中は、
     // 直立補正が「端末を直立のまま下げて足元を見る」といった意図的な並進移動まで、キャラクター・
     // 背景ごと傾けて打ち消そうとしてしまい、6DOF機能と競合する(足元が見えてもすぐ元に戻る一因に
     // なる)ため、併用中はここで無効化する。uprightStrengthLR/FB/Yawの設定値自体は変更しないので、
-    // 両方をOFFに戻せば元の強度のまま直立補正が自動的に再開する。
+    // すべてOFFに戻せば元の強度のまま直立補正が自動的に再開する。
     uprightRotX = 0; uprightRotZ = 0; uprightRotYaw = 0;
   }else{
     const dGamma = (gyroSmoothed.gamma - gyroBaseline.gamma); // 校正基準からの左右傾きズレ(度)
@@ -5432,16 +5451,18 @@ let stillDuration = 0; // 静止とみなされ続けている経過秒数(こ�
 function updateMoveCorrection(dt){
   // 上下(UD)・左右(LR)は、映像トラッキング(アウトカメラのオプティカルフロー)が有効な場合は
   // そちらに主導権を譲り、加速度センサー側では更新しない(同じ変数を両方が書き換えると競合するため)。
-  // 前後(FB/視点距離)は映像トラッキングでは扱わないため、常に加速度センサー側が担当する。
+  // 前後(FB/視点距離)も同様に、映像トラッキング(インカメラの顔の大きさ変化)が有効な場合は
+  // そちらに主導権を譲る(updateFrontCamDepthが直接moveOffsetFBを計算するため、ここでは更新しない)。
   const accelActive = accelEnabled && accelRaw.has && params.moveFix;
   const videoFlowActive = videoFlowEnabled && !!outCamStream;
+  const frontDepthActive = frontDepthEnabled && camRunning;
 
   // 有効なソースが無い軸だけ、なだらかに0へ戻す(機能そのものを切った時の後片付け)。
   if(!accelActive && !videoFlowActive){
     moveVelUD *= 0.85; moveOffsetUD *= 0.85;
     moveVelLR *= 0.85; moveOffsetLR *= 0.85;
   }
-  if(!accelActive){
+  if(!accelActive && !frontDepthActive){
     moveVelFB *= 0.85; moveOffsetFB *= 0.85;
   }
 
@@ -5493,8 +5514,12 @@ function updateMoveCorrection(dt){
     }else{
       moveVelUD = 0; moveVelLR = 0; // 映像トラッキング側に主導権があるので速度は持ち越さない
     }
-    moveVelFB = (moveVelFB + linFB * dt) * velDamping;
-    moveOffsetFB += moveVelFB * dt;
+    if(!frontDepthActive){
+      moveVelFB = (moveVelFB + linFB * dt) * velDamping;
+      moveOffsetFB += moveVelFB * dt;
+    }else{
+      moveVelFB = 0; // インカメラ側(前後映像トラッキング)に主導権があるので速度は持ち越さない
+    }
   }else{
     stillDuration = 0; // 加速度センサー非アクティブ中は静止判定に意味がないためリセットしておく
   }
@@ -5551,25 +5576,41 @@ function updateMoveOffsetDebug(){
    この方式はアウトカメラ映像のフレーム間の「見た目上の移動量」を直接測るため、積分を経ない
    (=誤差が二重に積み上がらない)分、原理的にドリフトに強い。ただし単眼カメラの2D画像だけでは
    奥行き(前後方向の移動)は推定できないため、対応するのは上下・左右の2軸のみで、
-   前後(視点距離)は引き続き加速度センサー側が担当する。
+   前後(視点距離)はインカメラの顔の大きさ変化(updateFrontCamDepth)で別途推定する。
+
+   端末が「移動」したのか「傾いた(回転した)」だけなのかの切り分け:
+   単眼カメラの映像だけでは、遠くの景色に対する回転と並進はよく似た画像の動きを生むため区別が難しい。
+   そこでジャイロの回転量(alpha=ヨー/beta=ピッチ)から「回転だけで説明できるはずの映像の動き」を
+   予測し、実際に観測された動きとの差(残差)だけを並進由来とみなして採用する。
+   さらに、インカメラの顔位置についても同様にジャイロ予測との残差を求め、そちらでも同時に
+   動きが裏付けられた場合のみ全面的に信用し、インカメラ側で動きが見えない場合は
+   (回転の誤差やアウトカメラ単体の誤検出の可能性を考慮して)採用量を抑える。
 
    仕組み(簡易ブロックマッチング):
    1. アウトカメラ映像を小さいグレースケール画像(64x48)に縮小して毎フレーム保存
-   2. 直前フレームとの間で、小さな探索範囲(±6px)内の平行移動(dx,dy)を総当たりで試し、
-      差分の絶対値の合計(SAD)が最小になる(=最もよく一致する)ずれを「フレーム間の映像の動き」とする
-   3. 映像内の景色が動いて見えた向きと逆向きにカメラ(端末)が動いたとみなし、符号を反転して
-      moveOffsetUD/moveOffsetLRへ直接加算する(速度の概念を挟まず、都度の移動量をそのまま積算する
-      点が光学マウスに近い方式)
-   4. 最良ずれのSADと「動いていないとみなした場合(ずれ0)」のSADの差が小さい(=無地の壁など
-      特徴の乏しい映像で不確かな)場合は、誤検出を避けるためその回のフレームは無視する
+   2. ジャイロの回転量から予測される映像シフト量を中心に、小さな探索範囲(±6px)内の
+      平行移動(dx,dy)を総当たりで試し、差分の絶対値の合計(SAD)が最小になる
+      (=最もよく一致する)ずれを「フレーム間の映像の動き」とする
+   3. 予測シフトとの差(残差)を並進由来の動きとみなし、逆向きにmoveOffsetUD/moveOffsetLRへ
+      直接加算する(速度の概念を挟まず、都度の移動量をそのまま積算する点が光学マウスに近い方式)
+   4. 最良ずれのSADと「予測通り(回転だけ)だった場合」のSADの差が小さければ、無地の壁など
+      特徴の乏しい映像で不確かと判断し、誤検出を避けるためその回のフレームは無視する
+   5. インカメラの顔位置の動きでも裏付けが取れない場合は、採用量を抑える
 */
 let videoFlowEnabled = false;
 const FLOW_W = 64, FLOW_H = 48; // 縮小後の解析解像度(小さいほど高速だが精度は粗くなる)
-const FLOW_SEARCH = 6; // 探索範囲(px、縮小後の解析解像度基準)
+const FLOW_SEARCH = 6; // 探索範囲(px、縮小後の解析解像度基準、予測シフトを中心とした相対範囲)
 const flowCanvas = document.createElement('canvas');
 flowCanvas.width = FLOW_W; flowCanvas.height = FLOW_H;
 const flowCtx = flowCanvas.getContext('2d', { willReadFrequently: true });
 let flowPrevGray = null; // 直前フレームのグレースケール値(Uint8ClampedArray, 長さFLOW_W*FLOW_H)
+let flowPrevGyro = null; // 直前フレーム時点のジャイロ角度{alpha, beta}(回転予測の基準)
+let flowPrevFacePos = null; // 直前フレーム時点のインカメラ顔位置{x, y}(裏付け判定用)
+
+// 背面/前面カメラそれぞれの視野角の目安(端末により多少異なるが、大まかな比率が合っていれば
+// 回転由来の映像シフト予測として十分機能する。ずれが大きく感じる場合は下記の値を調整する)
+const BACK_CAM_HFOV_DEG = 60, BACK_CAM_VFOV_DEG = 45;
+const FRONT_CAM_HFOV_DEG = 50, FRONT_CAM_VFOV_DEG = 39;
 
 function grabFlowGray(){
   flowCtx.drawImage(outCamVideo, 0, 0, FLOW_W, FLOW_H);
@@ -5600,39 +5641,97 @@ function flowSadAt(prev, curr, dx, dy){
 
 function updateVideoFlow(dt){
   if(!videoFlowEnabled || !outCamStream || outCamVideo.readyState < 2){
-    flowPrevGray = null; // 無効時は次回有効化時に1フレーム目からやり直す
+    flowPrevGray = null; flowPrevGyro = null; flowPrevFacePos = null; // 次回有効化時に1フレーム目からやり直す
     return;
   }
   const currGray = grabFlowGray();
+  const currGyro = (gyroEnabled && gyroRaw.has) ? { alpha: gyroSmoothed.alpha, beta: gyroSmoothed.beta } : null;
+  const currFacePos = camRunning ? { x: raw.x, y: raw.y } : null;
   if(!flowPrevGray){
-    flowPrevGray = currGray;
+    flowPrevGray = currGray; flowPrevGyro = currGyro; flowPrevFacePos = currFacePos;
     return; // 最初のフレームは比較対象がないため何もしない
   }
 
-  // ±FLOW_SEARCH pxの範囲を総当たりし、最もよく一致する(差分が最小の)ずれを探す
-  let bestDx = 0, bestDy = 0, bestSad = Infinity;
-  for(let dy = -FLOW_SEARCH; dy <= FLOW_SEARCH; dy++){
-    for(let dx = -FLOW_SEARCH; dx <= FLOW_SEARCH; dx++){
+  // ジャイロの回転量から、回転だけで説明できるはずの映像シフト量(予測値)を求める。
+  // ジャイロが無効/未取得の間は予測0(=従来通りのゼロ点中心の探索)にフォールバックする。
+  let predDx = 0, predDy = 0;
+  if(currGyro && flowPrevGyro){
+    const dAlpha = ((currGyro.alpha - flowPrevGyro.alpha + 540) % 360) - 180; // ヨー変化(度, -180〜180)
+    const dBeta  = currGyro.beta - flowPrevGyro.beta;                        // ピッチ変化(度)
+    predDx = (dAlpha / BACK_CAM_HFOV_DEG) * FLOW_W;
+    predDy = -(dBeta / BACK_CAM_VFOV_DEG) * FLOW_H;
+  }
+  const predDxR = Math.round(predDx), predDyR = Math.round(predDy);
+
+  // 予測シフトを中心に±FLOW_SEARCH pxの範囲を総当たりし、最もよく一致する(差分が最小の)ずれを探す
+  let bestDx = predDxR, bestDy = predDyR, bestSad = Infinity;
+  for(let dy = predDyR - FLOW_SEARCH; dy <= predDyR + FLOW_SEARCH; dy++){
+    for(let dx = predDxR - FLOW_SEARCH; dx <= predDxR + FLOW_SEARCH; dx++){
       const sad = flowSadAt(flowPrevGray, currGray, dx, dy);
       if(sad < bestSad){ bestSad = sad; bestDx = dx; bestDy = dy; }
     }
   }
-  const zeroSad = flowSadAt(flowPrevGray, currGray, 0, 0);
+  // 「予測通り(回転だけ)だった場合」のSADを基準にする(ゼロ点ではなく予測点との比較にすることで、
+  // 回転だけで動きが全て説明できる場合はそもそも並進とみなさないようにする)
+  const predictedOnlySad = flowSadAt(flowPrevGray, currGray, predDxR, predDyR);
+
   flowPrevGray = currGray;
+  const prevGyroForCompare = flowPrevGyro; // 裏付け計算用に再代入前の値を退避しておく
+  if(currGyro) flowPrevGyro = currGyro;
+  const prevFacePosForCompare = flowPrevFacePos;
+  if(currFacePos) flowPrevFacePos = currFacePos;
 
   // 無地の壁など特徴に乏しい映像では、どのずれで比較してもSADがほとんど変わらず
-  // 最良ずれが偶然選ばれているだけのことがある。ずれ0との改善幅が小さければ
+  // 最良ずれが偶然選ばれているだけのことがある。予測との改善幅が小さければ
   // 信頼できないと判断し、誤検出によるドリフトを避けるためこのフレームは無視する。
-  const improvement = zeroSad - bestSad;
+  const improvement = predictedOnlySad - bestSad;
   if(improvement < 1.2) return;
 
-  // 映像内の景色が(bestDx, bestDy)だけ動いて見えた場合、カメラ(端末)自体は逆向きに
+  // 予測(回転由来)との差(残差)だけを並進由来の動きとみなす
+  const residualDx = bestDx - predDxR;
+  const residualDy = bestDy - predDyR;
+
+  // インカメラの顔位置でも同様に、ジャイロ予測との残差を求めて裏付けとする。
+  // (端末が本当に並進移動していれば、アウトカメラの背景だけでなくインカメラに写る顔の
+  //  相対位置にも同じ並進由来のズレが現れるはず、という考え方)
+  let corroborationScale = 1;
+  if(camRunning && currFacePos && prevFacePosForCompare && currGyro && prevGyroForCompare){
+    const dAlpha = ((currGyro.alpha - prevGyroForCompare.alpha + 540) % 360) - 180;
+    const dBeta  = currGyro.beta - prevGyroForCompare.beta;
+    const predFrontDx = (dAlpha / FRONT_CAM_HFOV_DEG) * FLOW_W;
+    const predFrontDy = -(dBeta / FRONT_CAM_VFOV_DEG) * FLOW_H;
+    const actualFrontDx = (currFacePos.x - prevFacePosForCompare.x) * FLOW_W;
+    const actualFrontDy = (currFacePos.y - prevFacePosForCompare.y) * FLOW_H;
+    const frontResidualMag = Math.hypot(actualFrontDx - predFrontDx, actualFrontDy - predFrontDy);
+    const FRONT_CORROBORATION_THRESHOLD = 0.4; // これ未満なら「インカメラ側では動きが見えない」とみなす
+    corroborationScale = frontResidualMag >= FRONT_CORROBORATION_THRESHOLD ? 1 : 0.3; // 裏付けが無ければ抑える(0にはしない)
+  }
+
+  // 映像内の景色が(residualDx, residualDy)だけ動いて見えた場合、カメラ(端末)自体は逆向きに
   // 動いたとみなす。感度(1px相当の実移動量)は環境の被写体との距離に依存し正確な
   // 単位変換はできないため、既存の「左右 強度」「上下 強度」スライダーで見た目に
   // 合わせて調整してもらう前提の、あくまで相対的な量として扱う。
   const FLOW_SENSITIVITY = 0.03; // 1px(縮小後解像度基準)あたりの仮想的な移動量
-  moveOffsetUD += bestDy * FLOW_SENSITIVITY; // 映像が下にずれた(bestDy>0)=端末が上に動いた
-  moveOffsetLR += -bestDx * FLOW_SENSITIVITY; // 映像が右にずれた(bestDx>0)=端末が左に動いた
+  moveOffsetUD += residualDy * FLOW_SENSITIVITY * corroborationScale; // 映像が下にずれた=端末が上に動いた
+  moveOffsetLR += -residualDx * FLOW_SENSITIVITY * corroborationScale; // 映像が右にずれた=端末が左に動いた
+}
+
+/* ---------------- 映像トラッキング(インカメラの顔の大きさ変化による前後推定) ----------------
+   顔の大きさ(校正時の顔幅との比)は、既存の頭部トラッキング(視点距離のパララックス効果)でも
+   使っている値と同じもの。これは「今の顔の大きさ」から都度直接計算する相対値であり、
+   加速度センサーのような速度の積分を経ないため、原理的にドリフトしない
+   (校正基準に対するズレが無くなれば自動的に0へ戻る)。
+   また、端末の回転(傾き)だけでは顔とレンズの実際の距離は変わらないため、
+   この指標はもともと回転の影響を受けにくい(=ジャイロによる補正を必要としない)。 */
+let frontDepthEnabled = false;
+
+function updateFrontCamDepth(){
+  if(!frontDepthEnabled) return; // 無効時は何もしない(加速度センサー側がFBを担当する)
+  if(!camRunning || calib.width <= 0.01 || smoothed.width <= 0.0001) return; // 信頼できない間は直前の値を保持
+
+  const depthRatio = smoothed.width / calib.width; // >1で顔が近い
+  const FRONTDEPTH_SENSITIVITY = 1.0; // 対数距離比→視点距離オフセットへの変換係数
+  moveOffsetFB = -Math.log(Math.max(depthRatio, 0.2)) * FRONTDEPTH_SENSITIVITY;
 }
 
 let detectFaceErrorLogged = false; // 毎フレーム同じエラーでログが埋まらないよう、初回のみ表示する
@@ -5776,6 +5875,9 @@ function updateCameraFromFace(){
   const dx = (smoothed.x - calib.x) * flipSign;   // 正=顔が右へ動いた
   const dy = -(smoothed.y - calib.y);             // 正=顔が下へ動いた→カメラは下がりローアングルに
   const depthRatio = calib.width > 0.01 ? (smoothed.width / calib.width) : 1; // >1で顔が近い(=奥行き変化)
+  // 前後(視点距離)の映像トラッキングが有効な間は、その効果はmoveOffsetFB経由で別途反映されるため、
+  // ここでの通常の頭部パララックス(depthRatioによるdistの伸縮)は無効化し、二重に反映されないようにする。
+  const depthRatioForDist = frontDepthEnabled ? 1 : depthRatio;
 
   let totalDx = -dx; // 頭が右へ動く→視点は左へ寄る、の符号規約
   let totalDy = dy;
@@ -5789,7 +5891,7 @@ function updateCameraFromFace(){
     totalDy += -dBeta * gScaleNorm * 0.85;
   }
 
-  // 加速度センサーによる移動補正:上下移動→視線先高さ、前後移動→視点距離、左右移動→視点の左右位置への一時オフセット
+  // 加速度センサー/映像トラッキングによる移動補正:上下移動→視線先高さ、前後移動→視点距離、左右移動→視点の左右位置への一時オフセット
   const udSign = params.moveSignUD ? -1 : 1;
   const fbSign = params.moveSignFB ? -1 : 1;
   const lrSign = params.moveSignLR ? -1 : 1;
@@ -5798,7 +5900,7 @@ function updateCameraFromFace(){
   const moveXOffset     = moveOffsetLR * lrSign * params.moveStrengthLR;
 
   if(params.offAxis){
-    updateOffAxisFromHead(totalDx, totalDy, depthRatio, moveLookYOffset, moveDistOffset + panOffsetDist, moveXOffset + panOffsetX);
+    updateOffAxisFromHead(totalDx, totalDy, depthRatioForDist, moveLookYOffset, moveDistOffset + panOffsetDist, moveXOffset + panOffsetX);
     document.querySelector('#camPreview .dot').style.left = `${(1-smoothed.x)*100}%`;
     document.querySelector('#camPreview .dot').style.top = `${smoothed.y*100}%`;
     return;
@@ -5808,7 +5910,7 @@ function updateCameraFromFace(){
   const range = 1.6 * params.sxy;
   const camX = totalDx * range + moveXOffset + panOffsetX;
   const camY = totalDy * range * 0.85;
-  const dist = params.baseDist / Math.pow(Math.max(depthRatio, 0.3), params.sz) + moveDistOffset + panOffsetDist;
+  const dist = params.baseDist / Math.pow(Math.max(depthRatioForDist, 0.3), params.sz) + moveDistOffset + panOffsetDist;
   const lookY = params.lookY + moveLookYOffset;
 
   camera.position.x += (camX - camera.position.x) * 0.35;
@@ -5827,7 +5929,7 @@ function updateCameraFromFace(){
   // (設定(params.charCenterLook)自体は変更せず、両方ONの間だけ一時的に適用を止める。
   //  加速度センサー・映像トラッキングを両方OFFに戻せば、設定がONのままなら自動的に再度有効になる)。
   let targetWeight = 0;
-  if(params.charCenterLook && gyroEnabled && !accelEnabled && !videoFlowEnabled && currentVRM && currentVRM.humanoid){
+  if(params.charCenterLook && gyroEnabled && !accelEnabled && !videoFlowEnabled && !frontDepthEnabled && currentVRM && currentVRM.humanoid){
     const activity = computeGyroActivity();
     targetWeight = clamp((activity - 0.15) / (1.5 - 0.15), 0, 1); // 小さなブレは無視する閾値
   }
@@ -5933,6 +6035,25 @@ document.getElementById('btnVideoFlow').addEventListener('click', () => {
   btn.textContent = '🎥 映像トラッキング停止';
   btn.classList.add('on');
   log('映像トラッキング開始(上下左右は加速度センサーよりこちらが優先されます)', 'ok');
+});
+
+document.getElementById('btnFrontDepth').addEventListener('click', () => {
+  const btn = document.getElementById('btnFrontDepth');
+  if(frontDepthEnabled){
+    frontDepthEnabled = false;
+    btn.textContent = '🤳 映像トラッキング(前後)';
+    btn.classList.remove('on');
+    log('映像トラッキング(前後)を停止しました');
+    return;
+  }
+  if(!camRunning){
+    log('映像トラッキング(前後)を使うには先に「▶ インカメラ」を有効にしてください', 'warn');
+    return;
+  }
+  frontDepthEnabled = true;
+  btn.textContent = '🤳 映像トラッキング(前後)停止';
+  btn.classList.add('on');
+  log('映像トラッキング(前後)開始(視点距離は加速度センサーよりこちらが優先されます)', 'ok');
 });
 const applyMoveSignUDUI = bindSignToggle('moveSignUDToggle','moveSignUD');
 bindSlider('moveStrengthUD','moveStrengthUD', v=>v.toFixed(2));
@@ -6392,6 +6513,7 @@ function animate(time){
   updateGyroSmoothing();
   updateUprightCorrection();
   updateVideoFlow(delta);
+  updateFrontCamDepth();
   updateMoveCorrection(delta);
   updateCameraFromFace();
   drawMosaicPreview();
