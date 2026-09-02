@@ -136,8 +136,8 @@
   .slider-row input[type=range]{ flex:1; accent-color:var(--accent); }
   .slider-row span{ width:34px; text-align:right; color:var(--text); }
   /* 「指示(翻訳)」行:トグルボタンの右に、言語プリセットを埋め込んだ文を表示する */
-  .translate-sentence{ flex:1 1 100%; width:auto; text-align:left; display:flex; flex-wrap:wrap;
-    align-items:center; gap:2px; font-size:11.5px; color:var(--text); line-height:1.7; margin-top:4px; }
+  .translate-sentence{ flex:1; min-width:0; text-align:left; display:flex; flex-wrap:wrap;
+    align-items:center; gap:2px; font-size:11.5px; color:var(--text); line-height:1.7; }
   .translate-lang-select{ background:var(--bg); border:1px solid var(--border); color:var(--text);
     border-radius:6px; padding:2px 4px; font-size:11.5px; max-width:118px; }
   .text-input{ flex:1; background:var(--bg); border:1px solid var(--border); color:var(--text);
@@ -578,7 +578,7 @@
       </div>
       <div class="slider-row" style="flex-wrap:wrap; align-items:flex-start;">
         <label id="translateToggleLabel" class="instr-toggle-label" title="クリックで選択した2言語の相互通訳指示のON/OFFを切り替え">指示(翻訳)</label>
-        <span class="translate-sentence">で、<select id="translateLangA" class="translate-lang-select"></select>と<select id="translateLangB" class="translate-lang-select"></select>を相互通訳して。</span>
+        <span class="translate-sentence">「<select id="translateLangA" class="translate-lang-select"></select>」と「<select id="translateLangB" class="translate-lang-select"></select>」を相互通訳して。その際は通訳に徹して自身の考えを話さないで下さい。</span>
       </div>
       <div class="motion-controls" style="border-bottom:none; padding-left:0; padding-right:0;">
         <button id="btnRealtimeConnect">🎙️ 接続</button>
@@ -3086,7 +3086,7 @@ let translateEnabled = false; // 「指示(翻訳)」トグル(ラベルクリ�
 function buildTranslateInstructionText(){
   const langA = document.getElementById('translateLangA')?.value || '日本語';
   const langB = document.getElementById('translateLangB')?.value || '英語';
-  return `で、${langA}と${langB}を相互通訳して。`;
+  return `「${langA}」と「${langB}」を相互通訳して。その際は通訳に徹して自身の考えを話さないで下さい。`;
 }
 
 // 「指示(翻訳)」ラベル: クリックでON/OFFを切り替え、OFF時はラベルに取り消し線を入れ、
@@ -3807,6 +3807,8 @@ async function connectRealtime(){
 
   try{
     realtimeMicStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    // 接続前にあらかじめ選択されたミュート状態を、取得直後のマイクトラックへ反映する
+    realtimeMicStream.getAudioTracks().forEach(t => { t.enabled = !realtimeMuted; });
     ensureMicMonitor(realtimeMicStream); // 🔊再生レベルの「マイク入力」スライダーで自己モニター音量を調整可能に
   }catch(err){
     log(`マイク取得エラー: ${err.message || err}`, 'err');
@@ -3947,9 +3949,12 @@ document.getElementById('btnRealtimeConnect').addEventListener('click', () => {
 });
 
 document.getElementById('btnRealtimeMute').addEventListener('click', () => {
-  if(!realtimeMicStream) return;
   realtimeMuted = !realtimeMuted;
-  realtimeMicStream.getAudioTracks().forEach(t => { t.enabled = !realtimeMuted; });
+  // 接続前でもミュートを選択できるようにする(マイク未取得時はrealtimeMutedのフラグだけ更新しておき、
+  // 接続時のgetUserMedia直後にこの値をトラックへ反映する。接続中ならここで即座に反映する)
+  if(realtimeMicStream){
+    realtimeMicStream.getAudioTracks().forEach(t => { t.enabled = !realtimeMuted; });
+  }
   const btn = document.getElementById('btnRealtimeMute');
   btn.classList.toggle('on', realtimeMuted);
   btn.textContent = realtimeMuted ? '🔇 ミュート中' : '🔇 ミュート';
@@ -3957,6 +3962,8 @@ document.getElementById('btnRealtimeMute').addEventListener('click', () => {
   if(realtimeMuted){
     stopPlayback(); // 再生中の音声も即座に停止し、以後はトランスクリプト表示のみにする(電車内などでの使用を想定)
     log('ミュート中は音声を再生せず、トランスクリプト表示のみになります');
+  }else if(!realtimeMicStream){
+    log('ミュートを選択解除しました(次回接続時からマイクが有効になります)');
   }
 });
 
