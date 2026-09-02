@@ -509,15 +509,17 @@
       <div class="slider-row"><label>└左右 強度</label><button id="moveSignLRToggle" class="sign-btn">+</button><input type="range" id="moveStrengthLR" min="0" max="2" step="0.05" value="1"><span id="moveStrengthLRV">1.00</span></div>
       <div class="slider-row"><label>├映像判定閾値</label><input type="range" id="videoFlowDeadzone" min="0" max="2" step="0.05" value="0.5"><span id="videoFlowDeadzoneV">0.50</span></div>
       <div style="font-size:9.5px; color:var(--text-dim); padding:0 2px 4px; max-height:80px; overflow-y:auto;">
-        ※🎥映像トラッキングをONにすると🤳インカメラと📷アウトカメラを自動で有効化し、
+        ※🎥映像トラッキングをONにすると🧭ジャイロ・🤳インカメラ・📷アウトカメラを自動で有効化し、
         📷アウトカメラの映像から上下左右の移動を、🤳インカメラの顔の大きさ変化から前後(視点距離)の移動を推定します
         (端末によっては前面/背面カメラを同時起動できず、一方が停止することがあります)。
         動かした位置は自動では中央へ戻らないため、戻したい場合は🎯中央校正を押してください。
-        向きが逆に感じる軸は、その行の+/−ボタンで反転してください。
-        🧭ジャイロも同時に有効化しておくと、端末が多少傾いても検出精度が上がりおすすめです。<br>
+        向きが逆に感じる軸は、その行の+/−ボタンで反転してください。<br>
+        ※端末をロール回転させるなどジャイロの変化が大きい間は、映像だけでは回転と並進の区別が難しく
+        誤った水平移動として検出されやすいため、その間は🧭ジャイロ側の直立補正を優先し、前後・左右の
+        映像トラッキング補正は一時的に休止します(値は直前のまま保持され、回転が収まると再開します)。<br>
         ※上下左右は、アウトカメラ映像のフレーム間の見た目の動きを直接読み取る方式です。速度の積分を経ないため
         原理的にドリフトしにくい代わりに、無地の壁など特徴の乏しい映像では反応しにくくなります。
-        ジャイロが有効な場合、端末の傾き(回転)による見た目の動きは自動的に差し引かれ、純粋な並進移動分だけを
+        ジャイロの回転量(ヨー・ピッチ)による見た目の動きは自動的に差し引かれ、純粋な並進移動分だけを
         検出しようとします。さらに、前後カメラの映像が同じ方向に動いた場合のみ並進移動として採用します
         (逆方向なら回転とみなし採用量を大きく減らします)。「├映像判定閾値」は、この判定や手ブレ除去に使う
         最小の映像シフト量の目安です。小さくすると小さな動きにも反応しやすくなりますが手ブレも拾いやすくなり、
@@ -5310,6 +5312,15 @@ function computeGyroActivity(){
   const dA = Math.abs(((gyroRaw.alpha - gyroSmoothed.alpha + 540) % 360) - 180);
   return Math.max(dG, dB, dA);
 }
+// 映像トラッキング(前後・左右)の補正を一時停止すべきかどうかの判定に使う閾値。
+// ロール回転など端末の姿勢が急に変化している間は、映像だけから並進/回転を切り分ける精度が落ち、
+// 実際には回転しただけなのに前後・左右へ動いたと誤検出しやすい(例: ロール回転で水平移動と誤認)。
+// そのためジャイロの変化が大きい間はジャイロ側の直立補正を優先し、映像トラッキング側の
+// 前後・左右補正は行わない(値を更新せず直前の値を保持する)。
+const GYRO_ROTATION_SUPPRESS_THRESHOLD = 1.0;
+function isGyroRotatingFast(){
+  return computeGyroActivity() > GYRO_ROTATION_SUPPRESS_THRESHOLD;
+}
 let gyroLookAtWeight = 0; // 0=固定注視点、1=キャラクター頭部を完全に追跡(なめらかに遷移させる)
 const _camLookTarget = new THREE.Vector3();
 const _charHeadPos = new THREE.Vector3();
@@ -5737,7 +5748,11 @@ function updateVideoFlow(dt){
   // 合わせて調整してもらう前提の、あくまで相対的な量として扱う。
   const FLOW_SENSITIVITY = 0.03; // 1px(縮小後解像度基準)あたりの仮想的な移動量
   moveOffsetUD += residualDy * FLOW_SENSITIVITY * confDy; // 映像が下にずれた=端末が上に動いた
-  moveOffsetLR += residualDx * FLOW_SENSITIVITY * confDx; // 映像が右にずれた=端末が右に動いた(左右反転を修正)
+  if(!isGyroRotatingFast()){
+    moveOffsetLR += -residualDx * FLOW_SENSITIVITY * confDx; // 映像が右にずれた=端末が左に動いた
+  }
+  // ジャイロが大きく変化中(ロール回転など)は、上記のisGyroRotatingFast()判定によって
+  // 左右補正の更新のみ休止する(直前の値を保持し、ジャイロ側の直立補正に委ねる)。
 }
 
 /* ---------------- 映像トラッキング(インカメラの顔の大きさ変化による前後推定) ----------------
@@ -5752,6 +5767,7 @@ let frontDepthEnabled = false;
 function updateFrontCamDepth(){
   if(!frontDepthEnabled) return; // 無効時は何もしない(加速度センサー側がFBを担当する)
   if(!camRunning || calib.width <= 0.01 || smoothed.width <= 0.0001) return; // 信頼できない間は直前の値を保持
+  if(isGyroRotatingFast()) return; // ジャイロが大きく変化中は前後の映像トラッキング補正を休止し、直前の値を保持する
 
   const depthRatio = smoothed.width / calib.width; // >1で顔が近い
   const FRONTDEPTH_SENSITIVITY = 1.0; // 対数距離比→視点距離オフセットへの変換係数
@@ -6059,9 +6075,11 @@ document.getElementById('btnVideoFlow').addEventListener('click', async () => {
     return;
   }
 
-  // ONにすると、上下左右(アウトカメラ)・前後(インカメラ)それぞれに必要なカメラを自動で有効化する
+  // ONにすると、ジャイロ(回転由来の見た目の動きの相殺・前後カメラの符号判定に必要)と、
+  // 上下左右(アウトカメラ)・前後(インカメラ)それぞれに必要なカメラを自動で有効化する
   btn.disabled = true;
   btn.textContent = '🎥 起動中...';
+  if(!gyroEnabled) await toggleGyro();
   if(!outCamStream) await startOutCam();
   if(!camRunning) await startInCam();
   btn.disabled = false;
