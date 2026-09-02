@@ -3806,7 +3806,17 @@ async function connectRealtime(){
   }
 
   try{
-    realtimeMicStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    // echoCancellation/noiseSuppression/autoGainControlは、内蔵スピーカーからの音を内蔵マイクが
+    // 拾ってしまう「音響エコー」を打ち消すための処理だが、Bluetoothイヤホン使用時は音声出力が
+    // イヤホン側に閉じているため本来不要な処理であり、出力ルートとマイクの参照信号がずれることで
+    // 逆にマイク入力そのものが無音/極小音量に抑制されてしまう既知の不具合がある
+    // (AI応答はイヤホンから聞こえるのに人の発話だけ認識されない、という今回の症状に一致)。
+    // このアプリは取得したマイク音声をローカル再生していない(下のsilentGainで音量0にして完全に
+    // ミュートしている)ため、内蔵スピーカー使用時にAI応答の声を自分のマイクが拾って再送してしまう
+    // 心配もなく、これらの処理をOFFにしても大きな副作用は無いはずである。
+    realtimeMicStream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+    });
     // 接続前にあらかじめ選択されたミュート状態を、取得直後のマイクトラックへ反映する
     realtimeMicStream.getAudioTracks().forEach(t => { t.enabled = !realtimeMuted; });
     ensureMicMonitor(realtimeMicStream); // 🔊再生レベルの「マイク入力」スライダーで自己モニター音量を調整可能に
