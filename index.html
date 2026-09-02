@@ -3784,6 +3784,42 @@ async function mintEphemeralToken(apiKey){
   return data.name;
 }
 
+// Bluetoothイヤホンのマイクを、端末内蔵マイクより優先して選択する試み。
+// ラベルに「Bluetooth」等それらしい語を含む入力デバイスがあれば、そのdeviceIdを指定して取得し直す。
+// (デバイスのlabelは権限を得た後でないと取得できないため、まず一旦既定のマイクで取得してから
+//  一覧を確認する2段階構成にしている。iOS Safari等、マイクのデバイス選択自体に対応していない
+//  環境や、ラベルにそれらしい語を含まない機種では検出できず、その場合はOS側の入力ルーティングに
+//  委ねるしかない点に注意)
+async function getPreferredMicStream(){
+  const baseConstraints = { echoCancellation: false, noiseSuppression: false, autoGainControl: false };
+  let stream = await navigator.mediaDevices.getUserMedia({ audio: baseConstraints });
+  try{
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const audioInputs = devices.filter(d => d.kind === 'audioinput');
+    const btKeywords = /bluetooth|headset|hands-?free|earbud|airpods|イヤホン|ヘッドセット/i;
+    const btDevice = audioInputs.find(d => btKeywords.test(d.label));
+    const currentDeviceId = stream.getAudioTracks()[0]?.getSettings().deviceId;
+    if(btDevice && btDevice.deviceId && btDevice.deviceId !== currentDeviceId){
+      try{
+        const btStream = await navigator.mediaDevices.getUserMedia({
+          audio: { ...baseConstraints, deviceId: { exact: btDevice.deviceId } }
+        });
+        stream.getTracks().forEach(t => t.stop()); // 既定マイクの方は不要になったので解放する
+        stream = btStream;
+        log(`Bluetoothマイクを検出したため優先して使用します: ${btDevice.label}`, 'ok');
+      }catch(err){
+        log(`Bluetoothマイクへの切り替えに失敗したため、既定のマイクを使用します: ${err.message || err}`, 'warn');
+      }
+    }else if(audioInputs.length > 1){
+      log('Bluetoothらしき入力デバイスが見つからなかったため、既定のマイクを使用します(端末側でイヤホンのマイクが選択されているかご確認ください)');
+    }
+  }catch(err){
+    // enumerateDevices自体が失敗しても致命的ではないので、既定のストリームのまま続行する
+    log(`マイク一覧の取得に失敗しました(既定のマイクを使用します): ${err.message || err}`, 'warn');
+  }
+  return stream;
+}
+
 async function connectRealtime(){
   const apiKey = realtimeApiKeyEl.value.trim();
   if(!apiKey){
@@ -3809,14 +3845,12 @@ async function connectRealtime(){
     // echoCancellation/noiseSuppression/autoGainControlは、内蔵スピーカーからの音を内蔵マイクが
     // 拾ってしまう「音響エコー」を打ち消すための処理だが、Bluetoothイヤホン使用時は音声出力が
     // イヤホン側に閉じているため本来不要な処理であり、出力ルートとマイクの参照信号がずれることで
-    // 逆にマイク入力そのものが無音/極小音量に抑制されてしまう既知の不具合がある
-    // (AI応答はイヤホンから聞こえるのに人の発話だけ認識されない、という今回の症状に一致)。
+    // 逆にマイク入力そのものが無音/極小音量に抑制されてしまう既知の不具合がある。
     // このアプリは取得したマイク音声をローカル再生していない(下のsilentGainで音量0にして完全に
     // ミュートしている)ため、内蔵スピーカー使用時にAI応答の声を自分のマイクが拾って再送してしまう
     // 心配もなく、これらの処理をOFFにしても大きな副作用は無いはずである。
-    realtimeMicStream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
-    });
+    // さらにgetPreferredMicStream()で、可能であればBluetoothイヤホン側のマイクを優先して選択する。
+    realtimeMicStream = await getPreferredMicStream();
     // 接続前にあらかじめ選択されたミュート状態を、取得直後のマイクトラックへ反映する
     realtimeMicStream.getAudioTracks().forEach(t => { t.enabled = !realtimeMuted; });
     ensureMicMonitor(realtimeMicStream); // 🔊再生レベルの「マイク入力」スライダーで自己モニター音量を調整可能に
