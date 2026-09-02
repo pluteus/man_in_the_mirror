@@ -449,7 +449,7 @@
       <button class="settings-tab-btn active" data-tab="settingsTabGeneral">🔧 一般</button>
       <button class="settings-tab-btn" data-tab="settingsTabInCam">🤳 インカメラ</button>
       <button class="settings-tab-btn" data-tab="settingsTabGyro">🧭 ジャイロ</button>
-      <button class="settings-tab-btn" data-tab="settingsTabAccel">🎚️ 加速度</button>
+      <button class="settings-tab-btn" data-tab="settingsTabAccel">🎥 映像トラッキング</button>
       <button class="settings-tab-btn" data-tab="settingsTabOffAxis">🪟 off-axis</button>
       <button class="settings-tab-btn" data-tab="settingsTabTalk">🎙️ 会話</button>
     </div>
@@ -498,39 +498,32 @@
         ヨーの補正量は一般タブの「回転量」に自動で加算されます(手動でのスライダー操作はそのまま基準値として効きます)。
         向きが逆に感じる軸は、その行の+/−ボタンで反転してください。
         「キャラクター中心注視」は、端末の傾きが変化している間だけ注視点をキャラクターの頭部へ寄せる機能です。
-        🎚️加速度センサーの「移動補正」と競合するため、加速度センサーを有効化すると自動でOFFになります。
+        🎥映像トラッキングの移動推定と競合するため、映像トラッキングを有効化すると自動でOFFになります。
       </div>
     </div>
 
     <div id="settingsTabAccel" class="settings-tab-panel">
-      <div class="sub-toggle-row"><button id="btnAccel">🎚️ 加速度センサー有効化</button></div>
-      <div class="slider-row"><label>移動補正</label><button id="moveFixToggle" class="toggle-btn">OFF</button></div>
-      <div class="sub-toggle-row"><button id="btnVideoFlow">🎥 映像トラッキング(上下左右)</button></div>
-      <div class="sub-toggle-row"><button id="btnFrontDepth">🤳 映像トラッキング(前後)</button></div>
+      <div class="sub-toggle-row"><button id="btnVideoFlow">🎥 映像トラッキング</button></div>
       <div class="slider-row"><label>├上下 強度</label><button id="moveSignUDToggle" class="sign-btn">+</button><input type="range" id="moveStrengthUD" min="0" max="2" step="0.05" value="1"><span id="moveStrengthUDV">1.00</span></div>
       <div class="slider-row"><label>├前後 強度</label><button id="moveSignFBToggle" class="sign-btn">+</button><input type="range" id="moveStrengthFB" min="0" max="2" step="0.05" value="1"><span id="moveStrengthFBV">1.00</span></div>
       <div class="slider-row"><label>└左右 強度</label><button id="moveSignLRToggle" class="sign-btn">+</button><input type="range" id="moveStrengthLR" min="0" max="2" step="0.05" value="1"><span id="moveStrengthLRV">1.00</span></div>
       <div class="slider-row"><label>├映像判定閾値</label><input type="range" id="videoFlowDeadzone" min="0" max="2" step="0.05" value="0.5"><span id="videoFlowDeadzoneV">0.50</span></div>
-      <div class="slider-row"><label>現在の補正量</label><span id="moveOffsetDebug" style="font-size:11px; color:var(--text-dim);">UD 0.00 / FB 0.00 / LR 0.00</span></div>
-      <div style="font-size:9.5px; color:var(--text-dim); padding:0 2px 4px;">
-        ※加速度センサーが有効な状態で、端末を上下に動かすと「視線先高さ」を、前後に動かすと「視点距離」を、
-        左右に動かすと視点の左右位置を変化させます。動かした位置は自動では中央へ戻らないため、
-        戻したい場合は🎯中央校正を押してください。向きが逆に感じる軸は、その行の+/−ボタンで反転してください。
+      <div style="font-size:9.5px; color:var(--text-dim); padding:0 2px 4px; max-height:80px; overflow-y:auto;">
+        ※🎥映像トラッキングをONにすると🤳インカメラと📷アウトカメラを自動で有効化し、
+        📷アウトカメラの映像から上下左右の移動を、🤳インカメラの顔の大きさ変化から前後(視点距離)の移動を推定します
+        (端末によっては前面/背面カメラを同時起動できず、一方が停止することがあります)。
+        動かした位置は自動では中央へ戻らないため、戻したい場合は🎯中央校正を押してください。
+        向きが逆に感じる軸は、その行の+/−ボタンで反転してください。
         🧭ジャイロも同時に有効化しておくと、端末が多少傾いても検出精度が上がりおすすめです。<br>
-        ※🎥映像トラッキング(上下左右)は、📷アウトカメラの映像から見た目の動きを直接読み取って上下左右のみを
-        推定する方式です。加速度センサーの二重積分より原理的にドリフトしにくい代わりに、無地の壁など
-        特徴の乏しい映像では反応しにくくなります。ONにするには先に📷アウトカメラをONにしてください。
+        ※上下左右は、アウトカメラ映像のフレーム間の見た目の動きを直接読み取る方式です。速度の積分を経ないため
+        原理的にドリフトしにくい代わりに、無地の壁など特徴の乏しい映像では反応しにくくなります。
         ジャイロが有効な場合、端末の傾き(回転)による見た目の動きは自動的に差し引かれ、純粋な並進移動分だけを
-        検出しようとします。さらに🤳インカメラが有効な場合、「端末を傾けると前後カメラの映像は逆方向に動き、
-        端末を(傾きを保ったまま)移動させると前後カメラの映像は同じ方向に動く」という関係を利用し、
-        前後カメラの映像が同じ方向に動いた場合のみ並進移動として採用します(逆方向なら回転とみなし採用量を
-        大きく減らします)。「├映像判定閾値」は、この判定や手ブレ除去に使う最小の映像シフト量の目安です。
-        小さくすると小さな動きにも反応しやすくなりますが手ブレも拾いやすくなり、大きくすると逆に鈍くなります。
-        有効な間は上下・左右について加速度センサー側の推定より優先されます(強度・向き設定は共通で使われます)。<br>
-        ※🤳映像トラッキング(前後)は、🤳インカメラに写る顔の大きさの変化から視点距離を推定する方式です。
-        速度の積分を経ないため原理的にドリフトしません(端末の傾きだけでは顔との距離は変わらないため、
-        回転の影響も受けにくい方式です)。ONにするにはインカメラでの顔検出が動作している必要があります。
-        有効な間は前後について加速度センサー側の推定より優先されます。
+        検出しようとします。さらに、前後カメラの映像が同じ方向に動いた場合のみ並進移動として採用します
+        (逆方向なら回転とみなし採用量を大きく減らします)。「├映像判定閾値」は、この判定や手ブレ除去に使う
+        最小の映像シフト量の目安です。小さくすると小さな動きにも反応しやすくなりますが手ブレも拾いやすくなり、
+        大きくすると逆に鈍くなります。<br>
+        ※前後は、インカメラに写る顔の大きさの変化から視点距離を推定する方式です。速度の積分を経ないため
+        原理的にドリフトしません(端末の傾きだけでは顔との距離は変わらないため、回転の影響も受けにくい方式です)。
       </div>
     </div>
 
@@ -923,7 +916,7 @@ const VR_MAIN_MENU = [
   { type: 'action', domId: 'btnRecord',        label: '⏺ 録画',                    mirror: true },
   { type: 'action', domId: 'btnCalib',         label: '🎯 中央校正' },
   { type: 'action', domId: 'btnGyro',          label: '🧭 ジャイロ有効化',          mirror: true },
-  { type: 'action', domId: 'btnAccel',         label: '🎚️ 加速度センサー有効化',   mirror: true },
+  { type: 'action', domId: 'btnVideoFlow',     label: '🎥 映像トラッキング',        mirror: true },
   { type: 'action', domId: 'btnOffAxis',       label: '🪟 本格off-axis',           mirror: true },
   { type: 'list',   view: 'log',           label: '📋 ログ' },
   { type: 'action', domId: 'btnVR',            label: '🚪 VR終了' }
@@ -4364,23 +4357,24 @@ async function initFaceLandmarker(){
   }
 }
 
-document.getElementById('btnCam').addEventListener('click', async () => {
+// インカメラ停止(前後映像トラッキングはインカメラの顔検出に依存しているため連動して停止する)
+function stopInCam(logMsg){
   const btn = document.getElementById('btnCam');
-  if(camRunning){
-    video.srcObject && video.srcObject.getTracks().forEach(t => t.stop());
-    camRunning = false;
-    btn.textContent = '▶ インカメラ';
-    btn.classList.remove('on');
-    if(frontDepthEnabled){
-      // 前後映像トラッキングはインカメラの顔検出に依存しているため、インカメラ停止時は連動して停止する
-      frontDepthEnabled = false;
-      const fdBtn = document.getElementById('btnFrontDepth');
-      if(fdBtn){ fdBtn.textContent = '🤳 映像トラッキング(前後)'; fdBtn.classList.remove('on'); }
-      log('インカメラ停止に伴い映像トラッキング(前後)も停止しました');
-    }
-    log('カメラ停止');
-    return;
+  video.srcObject && video.srcObject.getTracks().forEach(t => t.stop());
+  camRunning = false;
+  btn.textContent = '▶ インカメラ';
+  btn.classList.remove('on');
+  if(frontDepthEnabled){
+    frontDepthEnabled = false;
+    updateVideoTrackButtonUI();
+    log('インカメラ停止に伴い映像トラッキング(前後)も停止しました');
   }
+  if(logMsg) log(logMsg);
+}
+
+// インカメラ開始。成功/失敗をboolで返す(映像トラッキングからの自動起動でも使う)
+async function startInCam(){
+  const btn = document.getElementById('btnCam');
   try{
     if(!faceLandmarker) await initFaceLandmarker();
     log('カメラ許可を要求中...');
@@ -4395,9 +4389,16 @@ document.getElementById('btnCam').addEventListener('click', async () => {
     btn.textContent = '■ インカメラ停止';
     btn.classList.add('on');
     log('カメラ開始・顔トラッキング開始', 'ok');
+    return true;
   }catch(err){
     log(`カメラ起動エラー: ${err.message || err}`, 'err');
+    return false;
   }
+}
+
+document.getElementById('btnCam').addEventListener('click', async () => {
+  if(camRunning){ stopInCam('カメラ停止'); return; }
+  await startInCam();
 });
 
 /* ---------------- アウトカメラ(背面カメラ)映像をキャラクターの背景として表示 ----------------
@@ -4409,46 +4410,36 @@ let outCamStream = null;
 let outCamTexture = null;
 let savedSceneBackground = scene.background; // アウトカメラOFF復帰用に元の背景を保持
 
-document.getElementById('btnOutCam').addEventListener('click', async () => {
+// アウトカメラ停止(映像トラッキングはアウトカメラ映像に依存しているため連動して停止する)
+function stopOutCam(logMsg){
   const btn = document.getElementById('btnOutCam');
-
-  if(outCamStream){
-    outCamStream.getTracks().forEach(t => t.stop());
-    outCamStream = null;
-    outCamVideo.pause();
-    outCamVideo.srcObject = null;
-    if(outCamTexture){ outCamTexture.dispose(); outCamTexture = null; }
-    scene.background = savedSceneBackground;
-    if(videoFlowEnabled){
-      // 映像トラッキングはアウトカメラ映像に依存しているため、アウトカメラOFF時は連動して停止する
-      videoFlowEnabled = false;
-      flowPrevGray = null;
-      const flowBtn = document.getElementById('btnVideoFlow');
-      if(flowBtn){ flowBtn.textContent = '🎥 映像トラッキング(上下左右)'; flowBtn.classList.remove('on'); }
-      log('アウトカメラOFFに伴い映像トラッキングも停止しました');
-    }
-    btn.textContent = '📷 アウトカメラ';
-    btn.classList.remove('on');
-    log('アウトカメラ表示をOFFにしました');
-    return;
+  outCamStream.getTracks().forEach(t => t.stop());
+  outCamStream = null;
+  outCamVideo.pause();
+  outCamVideo.srcObject = null;
+  if(outCamTexture){ outCamTexture.dispose(); outCamTexture = null; }
+  scene.background = savedSceneBackground;
+  if(videoFlowEnabled){
+    videoFlowEnabled = false;
+    flowPrevGray = null;
+    updateVideoTrackButtonUI();
+    log('アウトカメラOFFに伴い映像トラッキングも停止しました');
   }
+  btn.textContent = '📷 アウトカメラ';
+  btn.classList.remove('on');
+  if(logMsg) log(logMsg);
+}
 
+// アウトカメラ開始。成功/失敗をboolで返す(映像トラッキングからの自動起動でも使う)
+async function startOutCam(){
+  const btn = document.getElementById('btnOutCam');
   try{
     log('アウトカメラ許可を要求中...');
 
     // 多くのスマホ(特にAndroid)は前面/背面カメラを同時に起動できないため、
     // インカメラ動作中ならアウトカメラ開始前に一旦停止する(顔トラッキングも止まる点に注意)
     if(camRunning){
-      const camBtn = document.getElementById('btnCam');
-      video.srcObject && video.srcObject.getTracks().forEach(t => t.stop());
-      camRunning = false;
-      camBtn.textContent = '▶ インカメラ';
-      camBtn.classList.remove('on');
-      if(frontDepthEnabled){
-        frontDepthEnabled = false;
-        const fdBtn = document.getElementById('btnFrontDepth');
-        if(fdBtn){ fdBtn.textContent = '🤳 映像トラッキング(前後)'; fdBtn.classList.remove('on'); }
-      }
+      stopInCam();
       log('端末の制約上、前面/背面カメラは同時起動できないためインカメラを停止しました', 'warn');
     }
 
@@ -4478,10 +4469,17 @@ document.getElementById('btnOutCam').addEventListener('click', async () => {
         log(`アウトカメラ映像サイズ: ${outCamVideo.videoWidth}x${outCamVideo.videoHeight}`);
       }
     }, 1500);
+    return true;
   }catch(err){
     outCamStream = null;
     log(`アウトカメラ起動エラー: ${err.message || err}`, 'err');
+    return false;
   }
+}
+
+document.getElementById('btnOutCam').addEventListener('click', async () => {
+  if(outCamStream){ stopOutCam('アウトカメラ表示をOFFにしました'); return; }
+  await startOutCam();
 });
 
 /* ---------------- 📸 撮影(モデル+背景のみをスクリーンショット保存) ----------------
@@ -5428,7 +5426,8 @@ async function toggleAccel(){
   saveParamsToStorage();
   log('加速度センサートラッキング開始(移動補正ON。ジャイロと併用中は直立補正・キャラクター中心注視を一時的に無効化します)', 'ok');
 }
-document.getElementById('btnAccel').addEventListener('click', toggleAccel);
+// 注: 加速度センサー有効化ボタンは廃止(映像トラッキングに統合)したため、
+// toggleAccelは現在どこからも呼ばれない(内部状態accelEnabledは常にfalseのまま)。
 
 // 端末の上下・前後方向の並進移動を検知し、視線先高さ/視点距離に加える一時的なオフセットを更新する。
 // dt: 直前フレームからの経過秒数
@@ -5738,7 +5737,7 @@ function updateVideoFlow(dt){
   // 合わせて調整してもらう前提の、あくまで相対的な量として扱う。
   const FLOW_SENSITIVITY = 0.03; // 1px(縮小後解像度基準)あたりの仮想的な移動量
   moveOffsetUD += residualDy * FLOW_SENSITIVITY * confDy; // 映像が下にずれた=端末が上に動いた
-  moveOffsetLR += -residualDx * FLOW_SENSITIVITY * confDx; // 映像が右にずれた=端末が左に動いた
+  moveOffsetLR += residualDx * FLOW_SENSITIVITY * confDx; // 映像が右にずれた=端末が右に動いた(左右反転を修正)
 }
 
 /* ---------------- 映像トラッキング(インカメラの顔の大きさ変化による前後推定) ----------------
@@ -6034,51 +6033,57 @@ bindSlider('uprightStrengthFB','uprightStrengthFB', v=>v.toFixed(2));
 const applyUprightSignYawUI = bindSignToggle('uprightSignYawToggle','uprightSignYaw');
 bindSlider('uprightStrengthYaw','uprightStrengthYaw', v=>v.toFixed(2));
 const applyCharCenterLookToggleUI = bindToggle('charCenterLookToggle','charCenterLook');
-const applyMoveFixToggleUI = bindToggle('moveFixToggle','moveFix');
-document.getElementById('moveFixToggle').addEventListener('click', () => {
-  if(params.moveFix && !accelEnabled){
-    log('移動補正を使うには「🎚️ 加速度センサー有効化」も併せてONにしてください', 'warn');
-  }
-});
-
-document.getElementById('btnVideoFlow').addEventListener('click', () => {
+// 映像トラッキング(上下左右・前後を統合したボタン)の表示状態を、現在の
+// videoFlowEnabled/frontDepthEnabledの実値に合わせて更新する(カメラが個別に
+// 停止された場合など、ボタン以外の経路で状態が変わった時にも呼ばれる)。
+function updateVideoTrackButtonUI(){
   const btn = document.getElementById('btnVideoFlow');
-  if(videoFlowEnabled){
-    videoFlowEnabled = false;
-    flowPrevGray = null;
-    btn.textContent = '🎥 映像トラッキング(上下左右)';
+  if(!btn) return;
+  if(videoFlowEnabled || frontDepthEnabled){
+    btn.textContent = '🎥 映像トラッキング停止';
+    btn.classList.add('on');
+  }else{
+    btn.textContent = '🎥 映像トラッキング';
     btn.classList.remove('on');
+  }
+}
+
+document.getElementById('btnVideoFlow').addEventListener('click', async () => {
+  const btn = document.getElementById('btnVideoFlow');
+  if(videoFlowEnabled || frontDepthEnabled){
+    videoFlowEnabled = false;
+    frontDepthEnabled = false;
+    flowPrevGray = null;
+    updateVideoTrackButtonUI();
     log('映像トラッキングを停止しました');
     return;
   }
-  if(!outCamStream){
-    log('映像トラッキングを使うには先に「📷 アウトカメラ」を有効にしてください', 'warn');
-    return;
-  }
-  videoFlowEnabled = true;
-  flowPrevGray = null; // 有効化直後は比較対象がないので1フレーム目からやり直す
-  btn.textContent = '🎥 映像トラッキング停止';
-  btn.classList.add('on');
-  log('映像トラッキング開始(上下左右は加速度センサーよりこちらが優先されます)', 'ok');
-});
 
-document.getElementById('btnFrontDepth').addEventListener('click', () => {
-  const btn = document.getElementById('btnFrontDepth');
-  if(frontDepthEnabled){
-    frontDepthEnabled = false;
-    btn.textContent = '🤳 映像トラッキング(前後)';
-    btn.classList.remove('on');
-    log('映像トラッキング(前後)を停止しました');
-    return;
+  // ONにすると、上下左右(アウトカメラ)・前後(インカメラ)それぞれに必要なカメラを自動で有効化する
+  btn.disabled = true;
+  btn.textContent = '🎥 起動中...';
+  if(!outCamStream) await startOutCam();
+  if(!camRunning) await startInCam();
+  btn.disabled = false;
+
+  if(outCamStream){
+    videoFlowEnabled = true;
+    flowPrevGray = null; // 有効化直後は比較対象がないので1フレーム目からやり直す
+  }else{
+    log('アウトカメラを起動できなかったため、映像トラッキング(上下左右)は無効のままです', 'warn');
   }
-  if(!camRunning){
-    log('映像トラッキング(前後)を使うには先に「▶ インカメラ」を有効にしてください', 'warn');
-    return;
+  if(camRunning){
+    frontDepthEnabled = true;
+  }else{
+    log('インカメラを起動できなかったため、映像トラッキング(前後)は無効のままです', 'warn');
   }
-  frontDepthEnabled = true;
-  btn.textContent = '🤳 映像トラッキング(前後)停止';
-  btn.classList.add('on');
-  log('映像トラッキング(前後)開始(視点距離は加速度センサーよりこちらが優先されます)', 'ok');
+
+  updateVideoTrackButtonUI();
+  if(videoFlowEnabled || frontDepthEnabled){
+    log('映像トラッキング開始', 'ok');
+  }else{
+    log('映像トラッキングを開始できませんでした(インカメラ・アウトカメラともに起動できませんでした)', 'err');
+  }
 });
 const applyMoveSignUDUI = bindSignToggle('moveSignUDToggle','moveSignUD');
 bindSlider('moveStrengthUD','moveStrengthUD', v=>v.toFixed(2));
