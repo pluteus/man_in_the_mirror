@@ -510,6 +510,7 @@
       <div class="slider-row"><label>├上下 強度</label><button id="moveSignUDToggle" class="sign-btn">+</button><input type="range" id="moveStrengthUD" min="0" max="2" step="0.05" value="1"><span id="moveStrengthUDV">1.00</span></div>
       <div class="slider-row"><label>├前後 強度</label><button id="moveSignFBToggle" class="sign-btn">+</button><input type="range" id="moveStrengthFB" min="0" max="2" step="0.05" value="1"><span id="moveStrengthFBV">1.00</span></div>
       <div class="slider-row"><label>└左右 強度</label><button id="moveSignLRToggle" class="sign-btn">+</button><input type="range" id="moveStrengthLR" min="0" max="2" step="0.05" value="1"><span id="moveStrengthLRV">1.00</span></div>
+      <div class="slider-row"><label>├映像判定閾値</label><input type="range" id="videoFlowDeadzone" min="0" max="2" step="0.05" value="0.5"><span id="videoFlowDeadzoneV">0.50</span></div>
       <div class="slider-row"><label>現在の補正量</label><span id="moveOffsetDebug" style="font-size:11px; color:var(--text-dim);">UD 0.00 / FB 0.00 / LR 0.00</span></div>
       <div style="font-size:9.5px; color:var(--text-dim); padding:0 2px 4px;">
         ※加速度センサーが有効な状態で、端末を上下に動かすと「視線先高さ」を、前後に動かすと「視点距離」を、
@@ -520,8 +521,12 @@
         推定する方式です。加速度センサーの二重積分より原理的にドリフトしにくい代わりに、無地の壁など
         特徴の乏しい映像では反応しにくくなります。ONにするには先に📷アウトカメラをONにしてください。
         ジャイロが有効な場合、端末の傾き(回転)による見た目の動きは自動的に差し引かれ、純粋な並進移動分だけを
-        検出しようとします。有効な間は上下・左右について加速度センサー側の推定より優先されます
-        (強度・向き設定は共通で使われます)。<br>
+        検出しようとします。さらに🤳インカメラが有効な場合、「端末を傾けると前後カメラの映像は逆方向に動き、
+        端末を(傾きを保ったまま)移動させると前後カメラの映像は同じ方向に動く」という関係を利用し、
+        前後カメラの映像が同じ方向に動いた場合のみ並進移動として採用します(逆方向なら回転とみなし採用量を
+        大きく減らします)。「├映像判定閾値」は、この判定や手ブレ除去に使う最小の映像シフト量の目安です。
+        小さくすると小さな動きにも反応しやすくなりますが手ブレも拾いやすくなり、大きくすると逆に鈍くなります。
+        有効な間は上下・左右について加速度センサー側の推定より優先されます(強度・向き設定は共通で使われます)。<br>
         ※🤳映像トラッキング(前後)は、🤳インカメラに写る顔の大きさの変化から視点距離を推定する方式です。
         速度の積分を経ないため原理的にドリフトしません(端末の傾きだけでは顔との距離は変わらないため、
         回転の影響も受けにくい方式です)。ONにするにはインカメラでの顔検出が動作している必要があります。
@@ -5061,7 +5066,8 @@ const params = {
   moveStrengthLR: 1.0, moveSignLR: 0,
   offAxis: false, screenZ: 0.4, eyeDistCm: 40, cmRange: 60,
   texBudgetMB: 200, modelRotY: 0, lipSyncMaxMouth: 1.0, vowelLipSync: 0,
-  perfMode: 0
+  perfMode: 0,
+  videoFlowDeadzone: 0.5 // 映像トラッキング:これ未満の映像シフト(px相当)は手ブレ等のノイズとみなす
 };
 
 /* ---------------- 調整値の保存/復元(localStorage) ---------------- */
@@ -5581,21 +5587,24 @@ function updateMoveOffsetDebug(){
    端末が「移動」したのか「傾いた(回転した)」だけなのかの切り分け:
    単眼カメラの映像だけでは、遠くの景色に対する回転と並進はよく似た画像の動きを生むため区別が難しい。
    そこでジャイロの回転量(alpha=ヨー/beta=ピッチ)から「回転だけで説明できるはずの映像の動き」を
-   予測し、実際に観測された動きとの差(残差)だけを並進由来とみなして採用する。
-   さらに、インカメラの顔位置についても同様にジャイロ予測との残差を求め、そちらでも同時に
-   動きが裏付けられた場合のみ全面的に信用し、インカメラ側で動きが見えない場合は
-   (回転の誤差やアウトカメラ単体の誤検出の可能性を考慮して)採用量を抑える。
+   予測し、実際に観測された動きとの差(残差)を求める。
+   さらに、前後カメラの映像の動く向きの関係を利用する:
+   ・回転(例:端末を下に傾ける)→ アウトカメラの映像は上に、インカメラの映像は下にと、逆向きに動く
+   ・並進(例:端末を傾きを保ったまま下へ移動)→ アウトカメラ・インカメラの映像はどちらも同じ向き(上)に動く
+   この関係から、前後カメラの残差が同じ符号(同じ向き)の場合のみ並進由来として全面的に採用し、
+   逆符号(回転由来の疑いが強い)の場合は採用量を大きく減らす。どちらかの残差が小さい
+   (設定の「├映像判定閾値」未満、手ブレ等のノイズの可能性がある)場合は判定を保留してそのまま採用する。
 
    仕組み(簡易ブロックマッチング):
    1. アウトカメラ映像を小さいグレースケール画像(64x48)に縮小して毎フレーム保存
    2. ジャイロの回転量から予測される映像シフト量を中心に、小さな探索範囲(±6px)内の
       平行移動(dx,dy)を総当たりで試し、差分の絶対値の合計(SAD)が最小になる
       (=最もよく一致する)ずれを「フレーム間の映像の動き」とする
-   3. 予測シフトとの差(残差)を並進由来の動きとみなし、逆向きにmoveOffsetUD/moveOffsetLRへ
-      直接加算する(速度の概念を挟まず、都度の移動量をそのまま積算する点が光学マウスに近い方式)
+   3. 予測シフトとの差(残差)を並進由来の動きの候補とし、上記の前後カメラ符号一致判定を経て
+      逆向きにmoveOffsetUD/moveOffsetLRへ直接加算する(速度の概念を挟まず、都度の移動量を
+      そのまま積算する点が光学マウスに近い方式)
    4. 最良ずれのSADと「予測通り(回転だけ)だった場合」のSADの差が小さければ、無地の壁など
       特徴の乏しい映像で不確かと判断し、誤検出を避けるためその回のフレームは無視する
-   5. インカメラの顔位置の動きでも裏付けが取れない場合は、採用量を抑える
 */
 let videoFlowEnabled = false;
 const FLOW_W = 64, FLOW_H = 48; // 縮小後の解析解像度(小さいほど高速だが精度は粗くなる)
@@ -5691,29 +5700,45 @@ function updateVideoFlow(dt){
   const residualDx = bestDx - predDxR;
   const residualDy = bestDy - predDyR;
 
-  // インカメラの顔位置でも同様に、ジャイロ予測との残差を求めて裏付けとする。
-  // (端末が本当に並進移動していれば、アウトカメラの背景だけでなくインカメラに写る顔の
-  //  相対位置にも同じ並進由来のズレが現れるはず、という考え方)
-  let corroborationScale = 1;
+  // インカメラの顔位置についても同様に、ジャイロ予測との残差(=回転では説明できない動き)を求める。
+  let residualFrontDx = 0, residualFrontDy = 0, hasFrontResidual = false;
   if(camRunning && currFacePos && prevFacePosForCompare && currGyro && prevGyroForCompare){
-    const dAlpha = ((currGyro.alpha - prevGyroForCompare.alpha + 540) % 360) - 180;
-    const dBeta  = currGyro.beta - prevGyroForCompare.beta;
-    const predFrontDx = (dAlpha / FRONT_CAM_HFOV_DEG) * FLOW_W;
-    const predFrontDy = -(dBeta / FRONT_CAM_VFOV_DEG) * FLOW_H;
+    const dAlphaF = ((currGyro.alpha - prevGyroForCompare.alpha + 540) % 360) - 180;
+    const dBetaF  = currGyro.beta - prevGyroForCompare.beta;
+    const predFrontDx = (dAlphaF / FRONT_CAM_HFOV_DEG) * FLOW_W;
+    const predFrontDy = -(dBetaF / FRONT_CAM_VFOV_DEG) * FLOW_H;
     const actualFrontDx = (currFacePos.x - prevFacePosForCompare.x) * FLOW_W;
     const actualFrontDy = (currFacePos.y - prevFacePosForCompare.y) * FLOW_H;
-    const frontResidualMag = Math.hypot(actualFrontDx - predFrontDx, actualFrontDy - predFrontDy);
-    const FRONT_CORROBORATION_THRESHOLD = 0.4; // これ未満なら「インカメラ側では動きが見えない」とみなす
-    corroborationScale = frontResidualMag >= FRONT_CORROBORATION_THRESHOLD ? 1 : 0.3; // 裏付けが無ければ抑える(0にはしない)
+    residualFrontDx = actualFrontDx - predFrontDx;
+    residualFrontDy = actualFrontDy - predFrontDy;
+    hasFrontResidual = true;
   }
+
+  // 端末が「傾いた(回転)」場合と「傾きを保ったまま移動した(並進)」場合とで、前後カメラの
+  // 映像の動く向きの関係が違うことを利用して判定する:
+  // ・回転(例:端末を下に傾ける)→ アウトカメラの映像は上に動き、インカメラの映像は下に動く(逆向き)
+  // ・並進(例:端末を傾きを保ったまま下へ移動)→ アウトカメラ・インカメラの映像はどちらも上に動く(同じ向き)
+  // そのため、両カメラの残差が同じ符号(同じ向き)なら並進とみなしてそのまま採用し、
+  // 逆符号(回転由来の疑いが強い)なら採用量を大きく減らす。どちらかの動きが小さい
+  // (params.videoFlowDeadzone未満、手ブレ等のノイズの可能性がある)場合は判定を保留し、
+  // 減衰させずそのまま採用する。
+  function axisConfidence(backResidual, frontResidual){
+    if(!hasFrontResidual) return 1; // インカメラ側の情報が無ければ判定できないのでそのまま採用
+    const deadzone = params.videoFlowDeadzone;
+    if(Math.abs(backResidual) < deadzone || Math.abs(frontResidual) < deadzone) return 1;
+    const sameSign = (backResidual > 0) === (frontResidual > 0);
+    return sameSign ? 1 : 0.15; // 逆符号(回転由来の疑い)なら大きく減衰させる(0にはしない)
+  }
+  const confDy = axisConfidence(residualDy, residualFrontDy);
+  const confDx = axisConfidence(residualDx, residualFrontDx);
 
   // 映像内の景色が(residualDx, residualDy)だけ動いて見えた場合、カメラ(端末)自体は逆向きに
   // 動いたとみなす。感度(1px相当の実移動量)は環境の被写体との距離に依存し正確な
   // 単位変換はできないため、既存の「左右 強度」「上下 強度」スライダーで見た目に
   // 合わせて調整してもらう前提の、あくまで相対的な量として扱う。
   const FLOW_SENSITIVITY = 0.03; // 1px(縮小後解像度基準)あたりの仮想的な移動量
-  moveOffsetUD += residualDy * FLOW_SENSITIVITY * corroborationScale; // 映像が下にずれた=端末が上に動いた
-  moveOffsetLR += -residualDx * FLOW_SENSITIVITY * corroborationScale; // 映像が右にずれた=端末が左に動いた
+  moveOffsetUD += residualDy * FLOW_SENSITIVITY * confDy; // 映像が下にずれた=端末が上に動いた
+  moveOffsetLR += -residualDx * FLOW_SENSITIVITY * confDx; // 映像が右にずれた=端末が左に動いた
 }
 
 /* ---------------- 映像トラッキング(インカメラの顔の大きさ変化による前後推定) ----------------
@@ -6061,6 +6086,7 @@ const applyMoveSignFBUI = bindSignToggle('moveSignFBToggle','moveSignFB');
 bindSlider('moveStrengthFB','moveStrengthFB', v=>v.toFixed(2));
 const applyMoveSignLRUI = bindSignToggle('moveSignLRToggle','moveSignLR');
 bindSlider('moveStrengthLR','moveStrengthLR', v=>v.toFixed(2));
+bindSlider('videoFlowDeadzone','videoFlowDeadzone', v=>v.toFixed(2));
 bindSlider('modelRotY','modelRotY', v=>v.toFixed(0));
 bindSlider('screenZ','screenZ', v=>v.toFixed(2));
 bindSlider('eyeDistCm','eyeDistCm', v=>v.toFixed(0));
