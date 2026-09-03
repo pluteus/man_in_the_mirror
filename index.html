@@ -5287,16 +5287,50 @@ let gyroEnabled = false;
 const gyroRaw = { beta: 0, gamma: 0, alpha: 0, has: false };
 const gyroSmoothed = { beta: 0, gamma: 0, alpha: 0 };
 let gyroBaseline = { beta: 0, gamma: 0, alpha: 0 };
+// ジャイロを有効化した瞬間の画面回転角。ここを「回転補正なし(従来通り)」の基準とする。
+// (screen.orientation.angle=0が必ずしも縦向きとは限らない。特にiPadは機種によって
+//  「自然な向き」の基準が横向き寄りになっていることがあるため、絶対角ではなく
+//  有効化時からの相対的な回転量で補正するほうが安全)
+let gyroOrientationBaseAngle = 0;
+
+// 現在の画面の回転角(0/90/180/270)を取得する。Screen Orientation APIが無い古い環境向けに
+// 非推奨のwindow.orientationへフォールバックする(値の意味はほぼ同じとみなせる)。
+function getScreenOrientationAngle(){
+  if(screen.orientation && typeof screen.orientation.angle === 'number') return screen.orientation.angle;
+  if(typeof window.orientation === 'number') return window.orientation;
+  return 0;
+}
+
+// DeviceOrientationEventのalpha/beta/gammaは常に端末本体(物理的な筐体)基準の値であり、
+// 画面の自動回転(縦⇔横)には連動しない。そのため画面が回転すると、見た目の「前後の傾き」と
+// 「左右の傾き」が入れ替わってしまう(縦向き固定を前提にしたコードのままだと、横向きでは
+// 前後補正と左右補正が入れ替わったり符号が反転したりする)。
+// ここでは、ジャイロ有効化時からの画面回転量(relativeAngle)に応じてbeta/gamma/alphaを
+// 変換してから使う。有効化時と同じ向きのままなら relativeAngle=0 となり、従来と全く同じ
+// 挙動になる(回転角ごとの変換式自体はDeviceOrientation関連の実装で広く使われている標準的なもの)。
+function compensateForScreenOrientation(alpha, beta, gamma, relativeAngle){
+  let cBeta = beta, cGamma = gamma;
+  switch(((relativeAngle % 360) + 360) % 360){
+    case 90:  cBeta = -gamma; cGamma = beta;  break;
+    case 180: cBeta = -beta;  cGamma = -gamma; break;
+    case 270: cBeta = gamma;  cGamma = -beta;  break;
+    // 0(有効化時と同じ向き・従来通り)は変換不要
+  }
+  const cAlpha = (alpha !== null) ? ((alpha + relativeAngle) % 360 + 360) % 360 : alpha;
+  return { alpha: cAlpha, beta: cBeta, gamma: cGamma };
+}
 
 function handleOrientation(e){
   if(e.beta === null || e.gamma === null) return;
-  gyroRaw.beta = e.beta;   // 前後の傾き -180〜180 (縦持ちで約90前後)
-  gyroRaw.gamma = e.gamma; // 左右の傾き -90〜90
-  if(e.alpha !== null) gyroRaw.alpha = e.alpha; // 回転(ヨー・コンパス方位) 0〜360
+  const relativeAngle = getScreenOrientationAngle() - gyroOrientationBaseAngle;
+  const c = compensateForScreenOrientation(e.alpha, e.beta, e.gamma, relativeAngle);
+  gyroRaw.beta = c.beta;   // 前後の傾き -180〜180 (縦持ちで約90前後、画面回転補正済み)
+  gyroRaw.gamma = c.gamma; // 左右の傾き -90〜90 (画面回転補正済み)
+  if(c.alpha !== null) gyroRaw.alpha = c.alpha; // 回転(ヨー・コンパス方位) 0〜360 (画面回転補正済み)
   if(!gyroRaw.has){
     // 初回受信時にその場でスムージング値も初期化(起動時の飛びを防ぐ)
-    gyroSmoothed.beta = e.beta;
-    gyroSmoothed.gamma = e.gamma;
+    gyroSmoothed.beta = c.beta;
+    gyroSmoothed.gamma = c.gamma;
     gyroSmoothed.alpha = gyroRaw.alpha;
     gyroRaw.has = true;
   }
@@ -5330,6 +5364,7 @@ async function toggleGyro(){
     }
   }
   window.addEventListener('deviceorientation', handleOrientation);
+  gyroOrientationBaseAngle = getScreenOrientationAngle(); // 以後はこの向きからの回転量で画面回転を補正する
   gyroEnabled = true;
   btn.textContent = '🧭 ジャイロ停止';
   btn.classList.add('on');
