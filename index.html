@@ -638,9 +638,12 @@
   <p><b style="color:var(--accent)">画面サイズ校正</b><br>
   お手元のカード類を画面に重ね、下のバーの幅が実物の幅と一致するようスライダーで調整してください。</p>
   <div id="calibPresets">
-    <button data-cm="8.56" class="calibPreset on">💳 クレジットカード幅(8.56cm)</button>
-    <button data-cm="5.398" class="calibPreset">🪪 マイナンバーカード幅(5.4cm)</button>
-    <button data-cm="10" class="calibPreset">📏 10cm基準</button>
+    <button data-cm="8.56" class="calibPreset on">💳 クレカ長辺(8.5cm)</button>
+    <button data-cm="5.398" class="calibPreset">🪪 マイナカード短辺(5.4cm)</button>
+    <button data-cm="2.65" class="calibPreset">🪙 500円硬貨直径(2.65cm)</button>
+    <button data-cm="2.26" class="calibPreset">🪙 100円硬貨直径(2.26cm)</button>
+    <button data-cm="2.35" class="calibPreset">🪙 10円硬貨直径(2.35cm)</button>
+    <button data-cm="2.0" class="calibPreset">🪙 1円硬貨直径(2.0cm)</button>
   </div>
   <div id="calibBarWrap"><div id="calibBar" style="width:200px;"></div></div>
   <input type="range" id="calibSlider" min="60" max="600" step="1" value="200">
@@ -2916,7 +2919,16 @@ function updateBackgroundListUI(){
     nameSpan.textContent = (idx === activeBackgroundIndex ? '▶ ' : '') + entry.name;
     nameSpan.addEventListener('click', () => setActiveBackground(idx));
     row.appendChild(nameSpan);
-    if(!entry.isNone){ // 「背景なし」は固定項目のため削除ボタンを出さない
+    if(entry.isNone){
+      // 「背景なし」項目にのみ、最奥背景(scene.background)をアウトカメラ映像にするか黒にするかのトグルを表示する
+      const outCamBgBtn = document.createElement('button');
+      outCamBgBtn.id = 'btnOutCamBgToggle';
+      outCamBgBtn.textContent = outCamBgVisible ? '最奥背景:アウトカメラ' : '最奥背景:黒';
+      outCamBgBtn.classList.toggle('on', outCamBgVisible);
+      outCamBgBtn.title = 'アウトカメラ有効時、キャラクターの最奥に表示する背景をアウトカメラ映像/黒で切り替えます(映像トラッキングの解析には影響しません)';
+      outCamBgBtn.addEventListener('click', (ev) => { ev.stopPropagation(); toggleOutCamBg(); });
+      row.appendChild(outCamBgBtn);
+    }else{ // 「背景なし」以外は固定項目ではないため削除ボタンを出す
       const delBtn = document.createElement('button');
       delBtn.textContent = '🗑';
       delBtn.addEventListener('click', (ev) => { ev.stopPropagation(); removeBackground(idx); });
@@ -4465,6 +4477,25 @@ const outCamVideo = document.getElementById('outCamBg');
 let outCamStream = null;
 let outCamTexture = null;
 let savedSceneBackground = scene.background; // アウトカメラOFF復帰用に元の背景を保持
+// 最奥背景(scene.background)としてアウトカメラ映像を表示するかどうか。
+// falseの場合でもoutCamVideo自体は再生・取得を続けるため、映像トラッキングの解析(オプティカルフロー・顔検出)には
+// 引き続きアウトカメラ映像を使用できる。あくまで「見た目としてキャラクターの最奥に表示するか」だけを切り替える。
+let outCamBgVisible = true;
+const OUTCAM_BG_BLACK = new THREE.Color(0x000000);
+
+// アウトカメラ起動中に限り、outCamBgVisibleの値をscene.backgroundへ反映する
+function applyOutCamBgVisibility(){
+  if(!outCamStream) return; // 未起動時は何もしない(起動時にstartOutCam側で反映される)
+  scene.background = outCamBgVisible ? outCamTexture : OUTCAM_BG_BLACK;
+}
+
+// 「最奥背景＝アウトカメラ／黒」トグルボタンの押下時ハンドラ
+function toggleOutCamBg(){
+  outCamBgVisible = !outCamBgVisible;
+  applyOutCamBgVisibility();
+  updateBackgroundListUI();
+  log(outCamBgVisible ? '最奥背景をアウトカメラ映像にしました' : '最奥背景を黒にしました(アウトカメラ映像は映像トラッキングの解析にのみ使用します)', 'ok');
+}
 
 // アウトカメラ停止(映像トラッキングはアウトカメラ映像に依存しているため連動して停止する)
 function stopOutCam(logMsg){
@@ -4511,7 +4542,7 @@ async function startOutCam(){
     else if('encoding' in outCamTexture) outCamTexture.encoding = THREE.sRGBEncoding;
 
     savedSceneBackground = scene.background;
-    scene.background = outCamTexture;
+    applyOutCamBgVisibility(); // outCamBgVisibleがfalseなら黒、trueならアウトカメラ映像を最奥背景に反映
     btn.textContent = '📷 アウトカメラ表示中';
     btn.classList.add('on');
     log('アウトカメラ映像をキャラクターの背景に表示します', 'ok');
@@ -5208,7 +5239,7 @@ const calibOverlay = document.getElementById('calibOverlay');
 const calibBar = document.getElementById('calibBar');
 const calibSlider = document.getElementById('calibSlider');
 const calibResult = document.getElementById('calibResult');
-let calibRefCm = 8.56; // デフォルト: クレジットカード幅
+let calibRefCm = 8.56; // デフォルト: クレカ長辺
 
 document.querySelectorAll('.calibPreset').forEach(btn => {
   btn.addEventListener('click', () => {
