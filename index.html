@@ -4439,9 +4439,12 @@ async function startInCam(){
     await video.play();
     camRunning = true;
     detectFaceErrorLogged = false;
+    faceDetectedOnce = false; // 今回の起動でまだ顔検出できていない状態にリセット
     btn.textContent = '■ インカメラ停止';
     btn.classList.add('on');
     log('カメラ開始・顔トラッキング開始', 'ok');
+    // 実際に顔を検出できてから少し待って、一度だけ中央校正を自動実行する
+    calibrateOnceWhenReady(() => faceDetectedOnce, { settleMs: 700 });
     return true;
   }catch(err){
     log(`カメラ起動エラー: ${err.message || err}`, 'err');
@@ -5103,6 +5106,10 @@ const raw = { x:0, y:0, width:0.28 };
 const smoothed = { x:0, y:0, width:0.28 };
 // 校正基準(正面を向いた時の値)
 let calib = { x:0, y:0, width:0.28 };
+// インカメラ起動後、一度でも実際に顔検出できたかどうか(自動校正のトリガー判定に使う)。
+// カメラ起動直後はraw/smoothedが既定値のままなので、この状態で校正すると顔検出後に
+// 大きくズレてしまうため、実際に検出できるまで待ってから自動校正するのに使う。
+let faceDetectedOnce = false;
 
 const params = {
   sxy: 1.0, sz: 1.0, baseDist: 2.2, lookY: 1.0, smooth: 0.25, flip: 0,
@@ -5250,6 +5257,7 @@ document.getElementById('btnOffAxis').addEventListener('click', () => {
   }
   saveParamsToStorage();
   log(`本格off-axisモード: ${params.offAxis ? 'ON' : 'OFF'}`, 'ok');
+  if(params.offAxis) performCenterCalibration(); // ONにした瞬間の見え方を基準にするため中央校正を一度だけ実行
 });
 
 // Kooima(2009)の一般化透視投影法。screenパラメータはワールド座標(メートル)。
@@ -5369,6 +5377,8 @@ async function toggleGyro(){
   btn.textContent = '🧭 ジャイロ停止';
   btn.classList.add('on');
   log('ジャイロトラッキング開始', 'ok');
+  // ジャイロの値を受信できてから少し待って、一度だけ中央校正を自動実行する
+  calibrateOnceWhenReady(() => gyroRaw.has, { settleMs: 400 });
 }
 document.getElementById('btnGyro').addEventListener('click', toggleGyro);
 
@@ -5884,6 +5894,7 @@ function detectFace(){
       raw.x = nose.x; // 0=左, 1=右 (ミラーされていない生カメラ座標)
       raw.y = nose.y; // 0=上, 1=下
       raw.width = Math.abs(rightEdge.x - leftEdge.x); // 顔幅(奥行きの目安)
+      faceDetectedOnce = true;
     }
   }catch(err){
     // ここで例外を握りつぶさないと、animate()内でこの後に続くrenderer.render()が
@@ -5972,6 +5983,37 @@ function performCenterCalibration(){
   log(msg, 'ok');
 }
 document.getElementById('btnCalib').addEventListener('click', performCenterCalibration);
+
+// 画面回転・各種トラッキング機能の有効化などをきっかけに、中央校正を自動で一度だけ実行するためのヘルパー。
+// conditionFn()がtrueになるまで(最大maxWaitMsまで)少し待ってから校正することで、
+// 「起動直後でまだ顔検出/ジャイロ受信が済んでいない状態」でズレた基準を作ってしまうのを防ぐ。
+// タイムアウトした場合も、何もしないよりはましなので、その時点の状態で一応一度だけ校正する。
+function calibrateOnceWhenReady(conditionFn, { maxWaitMs = 6000, settleMs = 500, stepMs = 150 } = {}){
+  let elapsed = 0;
+  const poll = setInterval(() => {
+    elapsed += stepMs;
+    let ready = false;
+    try{ ready = !!conditionFn(); }catch(e){ ready = false; }
+    if(ready || elapsed >= maxWaitMs){
+      clearInterval(poll);
+      setTimeout(() => { performCenterCalibration(); }, ready ? settleMs : 0);
+    }
+  }, stepMs);
+}
+
+// 画面が回転(縦⇔横)した際に、一度だけ中央校正を自動実行する。
+// Screen Orientation APIが使えればそちらを、無ければ古いorientationchangeイベントにフォールバックする。
+if(screen.orientation && typeof screen.orientation.addEventListener === 'function'){
+  screen.orientation.addEventListener('change', () => {
+    performCenterCalibration();
+    log('画面回転を検出したため中央校正を自動実行しました');
+  });
+}else{
+  window.addEventListener('orientationchange', () => {
+    performCenterCalibration();
+    log('画面回転を検出したため中央校正を自動実行しました');
+  });
+}
 
 /* ---------------- カメラ視点更新（覗き窓効果） ---------------- */
 function updateOffAxisFromHead(totalDx, totalDy, depthRatio, lookYOffset, distOffset, lrOffset){
@@ -6185,6 +6227,10 @@ document.getElementById('btnVideoFlow').addEventListener('click', async () => {
   updateVideoTrackButtonUI();
   if(videoFlowEnabled || frontDepthEnabled){
     log('映像トラッキング開始', 'ok');
+    // 各種トラッキングの準備が整ってから、一度だけ中央校正を自動実行する
+    // (インカメラ・ジャイロを新たに起動した場合はそちら側からも校正がかかるため、
+    //  ここでは既に起動済みだったケースを含めて念のため実行する)
+    calibrateOnceWhenReady(() => (!camRunning || faceDetectedOnce) && (!gyroEnabled || gyroRaw.has), { settleMs: 700 });
   }else{
     log('映像トラッキングを開始できませんでした(インカメラ・アウトカメラともに起動できませんでした)', 'err');
   }
