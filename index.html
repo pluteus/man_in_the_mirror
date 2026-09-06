@@ -294,6 +294,11 @@
 </script>
 
 <video id="outCamBg" playsinline muted autoplay></video>
+<!-- Gemini Liveの発話音声(AudioContextではなくaudio要素経由)で再生する。
+     スマホ(特にiOS Safari)ではマイク使用中にAudioContext.destinationへ直接出力すると、
+     OS側の音声セッションが「通話用」扱いになり、受話スピーカー(耳に当てる小さい方)から
+     小音量で鳴ってしまうことがあるため、audio要素を介すことでスピーカー出力を優先させる。 -->
+<audio id="realtimeAudioOut" playsinline></audio>
 <div id="canvas-container"></div>
 
 <div id="camPreview"><video id="cam" playsinline muted></video><canvas id="camMosaic"></canvas><div class="dot"></div></div>
@@ -3148,6 +3153,7 @@ let realtimeMicStream = null;
 let realtimeAudioCtx = null;       // 受信音声の再生(24kHz) & リップシンク解析用
 let realtimeAnalyser = null;
 let realtimePlaybackGain = null;   // 🔊再生レベル:「Gemini Live音声」用のgain
+let realtimeSpeakerDest = null;    // AI発話音声をAudioContext.destinationではなく<audio>要素経由で鳴らすためのタップ
 
 /* ---------------- 🔊 再生レベル / ⏺ 録画レベル(BGM・マイク入力・Gemini Live音声を個別調整) ----------------
    「再生レベル」は実際にスピーカーから聞こえる音量、「録画レベル」は⏺録画で保存する動画に
@@ -3649,7 +3655,15 @@ function ensurePlaybackGraph(){
   realtimePlaybackGain = realtimeAudioCtx.createGain(); // 🔊再生レベル:「Gemini Live音声」用のgain
   realtimePlaybackGain.gain.value = getLevelValue('lvlPlaybackAi');
   realtimeAnalyser.connect(realtimePlaybackGain);
-  realtimePlaybackGain.connect(realtimeAudioCtx.destination);
+  // AudioContext.destinationへ直接繋がず、<audio>要素へMediaStreamとして渡して鳴らす。
+  // (マイク使用中の受話スピーカー誤ルーティング対策。詳細はrealtimeAudioOut要素のコメントを参照)
+  realtimeSpeakerDest = realtimeAudioCtx.createMediaStreamDestination();
+  realtimePlaybackGain.connect(realtimeSpeakerDest);
+  const audioOutEl = document.getElementById('realtimeAudioOut');
+  if(audioOutEl){
+    audioOutEl.srcObject = realtimeSpeakerDest.stream;
+    audioOutEl.play().catch(err => log(`AI音声の再生開始に失敗しました: ${err.message || err}`, 'warn'));
+  }
   realtimeRecDest = realtimeAudioCtx.createMediaStreamDestination(); // 通常再生とは別に、録画用に同じ音声をタップする
   realtimeAnalyser.connect(realtimeRecDest);
   geminiNextPlayTime = realtimeAudioCtx.currentTime;
@@ -3811,7 +3825,14 @@ async function mintEphemeralToken(apiKey){
 //  環境や、ラベルにそれらしい語を含まない機種では検出できず、その場合はOS側の入力ルーティングに
 //  委ねるしかない点に注意)
 async function getPreferredMicStream(){
-  const baseConstraints = { echoCancellation: false, noiseSuppression: false, autoGainControl: false };
+  // echoCancellationは、スピーカーから出た音(=AI自身の発話)をマイクが拾って再度Geminiへ送ってしまう
+  // 「音響エコー」を打ち消すための処理。内蔵マイク+内蔵スピーカーや有線イヤホンではこれをONにしておかないと、
+  // AIが自分の声(や翻訳音声)にマイク経由で反応してしまう(発話の重複・自己解釈)ことがあるため、既定ではONにする。
+  const baseConstraints = { echoCancellation: true, noiseSuppression: false, autoGainControl: false };
+  // Bluetoothイヤホンは音声出力がイヤホン側に閉じており、そもそも内蔵マイクが自分の声を拾う経路が無いため
+  // 音響エコーの心配が無い。むしろechoCancellationをONにすると、出力ルートとマイクの参照信号がずれることで
+  // マイク入力そのものが無音/極小音量に抑制されてしまう既知の不具合があるため、BT接続時はOFFのままにする。
+  const btConstraints = { echoCancellation: false, noiseSuppression: false, autoGainControl: false };
   let stream = await navigator.mediaDevices.getUserMedia({ audio: baseConstraints });
   try{
     const devices = await navigator.mediaDevices.enumerateDevices();
@@ -3822,7 +3843,7 @@ async function getPreferredMicStream(){
     if(btDevice && btDevice.deviceId && btDevice.deviceId !== currentDeviceId){
       try{
         const btStream = await navigator.mediaDevices.getUserMedia({
-          audio: { ...baseConstraints, deviceId: { exact: btDevice.deviceId } }
+          audio: { ...btConstraints, deviceId: { exact: btDevice.deviceId } }
         });
         stream.getTracks().forEach(t => t.stop()); // 既定マイクの方は不要になったので解放する
         stream = btStream;
@@ -3841,6 +3862,10 @@ async function getPreferredMicStream(){
 }
 
 async function connectRealtime(){
+  // クリック(ユーザー操作)直後の同期区間でaudio要素を一度再生しておくことで、
+  // iOS Safari等の自動再生制限を突破しておく(この後awaitを挟んでからsrcObjectを設定して鳴らす)。
+  const audioOutElForUnlock = document.getElementById('realtimeAudioOut');
+  if(audioOutElForUnlock) audioOutElForUnlock.play().catch(() => {});
   const apiKey = realtimeApiKeyEl.value.trim();
   if(!apiKey){
     log('ご自身のGemini APIキーを入力してください(Google AI Studioで無料発行できます)', 'warn');
@@ -3862,14 +3887,9 @@ async function connectRealtime(){
   }
 
   try{
-    // echoCancellation/noiseSuppression/autoGainControlは、内蔵スピーカーからの音を内蔵マイクが
-    // 拾ってしまう「音響エコー」を打ち消すための処理だが、Bluetoothイヤホン使用時は音声出力が
-    // イヤホン側に閉じているため本来不要な処理であり、出力ルートとマイクの参照信号がずれることで
-    // 逆にマイク入力そのものが無音/極小音量に抑制されてしまう既知の不具合がある。
-    // このアプリは取得したマイク音声をローカル再生していない(下のsilentGainで音量0にして完全に
-    // ミュートしている)ため、内蔵スピーカー使用時にAI応答の声を自分のマイクが拾って再送してしまう
-    // 心配もなく、これらの処理をOFFにしても大きな副作用は無いはずである。
-    // さらにgetPreferredMicStream()で、可能であればBluetoothイヤホン側のマイクを優先して選択する。
+    // 内蔵マイク+内蔵スピーカー使用時は、AI自身の発話(音響エコー)をマイクが拾って再度Geminiへ送ってしまい
+    // 「AIが自分自身の声(や翻訳音声)に反応してしまう」現象が起きるため、getPreferredMicStream()側で
+    // echoCancellationを既定でONにして対策している(Bluetoothイヤホン使用時のみ既知の不具合回避のためOFF)。
     realtimeMicStream = await getPreferredMicStream();
     // 接続前にあらかじめ選択されたミュート状態を、取得直後のマイクトラックへ反映する
     realtimeMicStream.getAudioTracks().forEach(t => { t.enabled = !realtimeMuted; });
