@@ -148,6 +148,14 @@
     font-size:11px; color:var(--text-dim); }
   #realtimePanel.hidden{ display:none; }
   #realtimePanel .motion-controls button{ padding:8px 4px; flex:1 1 auto; min-width:108px; white-space:nowrap; }
+  /* 🔊出力切替ボタン: ミュート/受話スピーカー/音楽スピーカー/イヤホンを選ぶポップアップメニュー */
+  .output-btn-wrap{ position:relative; flex:1 1 auto; min-width:108px; }
+  .output-btn-wrap > button{ width:100%; }
+  .output-mode-menu{ position:absolute; top:calc(100% + 4px); left:0; right:0; z-index:45;
+    background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:4px;
+    display:flex; flex-direction:column; gap:4px; backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); }
+  .output-mode-menu.hidden{ display:none; }
+  .output-mode-menu button{ width:100%; text-align:left; white-space:nowrap; }
   #realtimeStatus{ padding:6px 2px 2px; font-size:11px; color:var(--text-dim); }
   #realtimeConnSettings.collapsed{ display:none; }
   /* 接続設定を折りたたんでいる間は、会話パネル(トランスクリプト)をより大きく表示する */
@@ -594,7 +602,15 @@
         </div>
         <div class="motion-controls" style="border-bottom:none; padding-left:0; padding-right:0;">
           <button id="btnRealtimeConnect">🎙️ 接続</button>
-          <button id="btnRealtimeMute">🔇 ミュート</button>
+          <div class="output-btn-wrap">
+            <button id="btnRealtimeMute">🔊 音楽スピーカー</button>
+            <div id="realtimeOutputMenu" class="output-mode-menu hidden">
+              <button type="button" data-mode="mute">🔇 ミュート</button>
+              <button type="button" data-mode="earpiece">📞 受話スピーカー</button>
+              <button type="button" data-mode="speaker">🔊 音楽スピーカー</button>
+              <button type="button" data-mode="headphones">🎧 イヤホン</button>
+            </div>
+          </div>
           <button id="btnAutoGesture" class="on">🎭 自動ジェスチャー:ON</button>
           <button id="btnRealtimeClearKey">🗑️ キー消去</button>
         </div>
@@ -4050,24 +4066,87 @@ document.getElementById('btnRealtimeConnToggle').addEventListener('click', () =>
   setRealtimeConnSettingsVisible(isCollapsed); // 現在隠れていれば表示、表示中なら隠す
 });
 
-document.getElementById('btnRealtimeMute').addEventListener('click', () => {
-  realtimeMuted = !realtimeMuted;
-  // 接続前でもミュートを選択できるようにする(マイク未取得時はrealtimeMutedのフラグだけ更新しておき、
+// ---- 🔊出力切替ボタン(旧ミュートボタン): ミュート/受話スピーカー/音楽スピーカー/イヤホンをタップで選択 ----
+let audioOutputMode = 'speaker'; // 既定は音楽スピーカー(通常の大きい方のスピーカー)
+const AUDIO_OUTPUT_LABELS = {
+  mute: '🔇 ミュート中',
+  earpiece: '📞 受話スピーカー',
+  speaker: '🔊 音楽スピーカー',
+  headphones: '🎧 イヤホン'
+};
+
+function updateOutputButtonUi(){
+  const btn = document.getElementById('btnRealtimeMute');
+  btn.textContent = AUDIO_OUTPUT_LABELS[audioOutputMode];
+  btn.classList.toggle('on', audioOutputMode === 'mute');
+  document.querySelectorAll('#realtimeOutputMenu button').forEach(b => {
+    b.classList.toggle('on', b.dataset.mode === audioOutputMode);
+  });
+}
+
+// 選択したモードを実際の音声出力へ反映する。
+// setSinkId(Audio Output Devices API)に対応している環境(主にAndroid Chrome等)では実際に出力デバイスを
+// 切り替え、非対応環境(iOS Safari等、setSinkId自体が無い)では実際の出力先を直接指定できないため、
+// その旨をログで案内するだけにとどめる(その場合の実際の出力はOS/端末側の状態に従う)。
+async function applyAudioOutputMode(){
+  realtimeMuted = (audioOutputMode === 'mute');
+  // 接続前でもモードを選択できるようにする(マイク未取得時はrealtimeMutedのフラグだけ更新しておき、
   // 接続時のgetUserMedia直後にこの値をトラックへ反映する。接続中ならここで即座に反映する)
   if(realtimeMicStream){
     realtimeMicStream.getAudioTracks().forEach(t => { t.enabled = !realtimeMuted; });
   }
-  const btn = document.getElementById('btnRealtimeMute');
-  btn.classList.toggle('on', realtimeMuted);
-  btn.textContent = realtimeMuted ? '🔇 ミュート中' : '🔇 ミュート';
   textLipSyncLastTime = null; // ミュート状態の切り替え時に経過時間の基準をリセット(切替中の空白時間を消化に含めないため)
   if(realtimeMuted){
     stopPlayback(); // 再生中の音声も即座に停止し、以後はトランスクリプト表示のみにする(電車内などでの使用を想定)
     log('ミュート中は音声を再生せず、トランスクリプト表示のみになります');
-  }else if(!realtimeMicStream){
-    log('ミュートを選択解除しました(次回接続時からマイクが有効になります)');
+    return;
   }
+  if(!realtimeMicStream){
+    log(`「${AUDIO_OUTPUT_LABELS[audioOutputMode]}」を選択しました(次回接続時から反映されます)`);
+  }
+  const audioOutEl = document.getElementById('realtimeAudioOut');
+  if(!audioOutEl || typeof audioOutEl.setSinkId !== 'function'){
+    log(`「${AUDIO_OUTPUT_LABELS[audioOutputMode]}」を選択しましたが、この端末/ブラウザでは出力先を直接指定できないため、実際の出力はOS側の状態(イヤホン接続の有無など)に従います`, 'warn');
+    return;
+  }
+  try{
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const outputs = devices.filter(d => d.kind === 'audiooutput');
+    let target = null;
+    if(audioOutputMode === 'earpiece'){
+      target = outputs.find(d => /earpiece|receiver|通話|受話/i.test(d.label));
+    }else if(audioOutputMode === 'headphones'){
+      target = outputs.find(d => /headphone|headset|bluetooth|earbud|airpods|イヤホン|ヘッドセット/i.test(d.label));
+    }else if(audioOutputMode === 'speaker'){
+      target = outputs.find(d => /speaker|スピーカー/i.test(d.label) && !/earpiece|receiver/i.test(d.label));
+    }
+    if(target){
+      await audioOutEl.setSinkId(target.deviceId);
+      log(`出力先を「${AUDIO_OUTPUT_LABELS[audioOutputMode]}」(${target.label})に切り替えました`, 'ok');
+    }else{
+      await audioOutEl.setSinkId(''); // 該当デバイスが見つからない場合は既定の出力に戻す
+      log(`「${AUDIO_OUTPUT_LABELS[audioOutputMode]}」に該当する出力デバイスが見つからなかったため、既定の出力を使用します`, 'warn');
+    }
+  }catch(err){
+    log(`出力先の切り替えに失敗しました: ${err.message || err}`, 'warn');
+  }
+}
+
+document.getElementById('btnRealtimeMute').addEventListener('click', (ev) => {
+  ev.stopPropagation();
+  document.getElementById('realtimeOutputMenu').classList.toggle('hidden');
 });
+document.querySelectorAll('#realtimeOutputMenu button').forEach(optBtn => {
+  optBtn.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    audioOutputMode = optBtn.dataset.mode;
+    document.getElementById('realtimeOutputMenu').classList.add('hidden');
+    updateOutputButtonUi();
+    applyAudioOutputMode();
+  });
+});
+document.addEventListener('click', () => { document.getElementById('realtimeOutputMenu').classList.add('hidden'); });
+updateOutputButtonUi();
 
 document.getElementById('btnAutoGesture').addEventListener('click', () => {
   autoGestureEnabled = !autoGestureEnabled;
