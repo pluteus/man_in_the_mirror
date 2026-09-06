@@ -149,6 +149,9 @@
   #realtimePanel.hidden{ display:none; }
   #realtimePanel .motion-controls button{ padding:8px 4px; flex:1 1 auto; min-width:108px; white-space:nowrap; }
   #realtimeStatus{ padding:6px 2px 2px; font-size:11px; color:var(--text-dim); }
+  #realtimeConnSettings.collapsed{ display:none; }
+  /* 接続設定を折りたたんでいる間は、会話パネル(トランスクリプト)をより大きく表示する */
+  #realtimeTabGeneral.connCollapsed #realtimeTranscript{ max-height:320px; }
   #realtimeTranscript{ max-height:120px; overflow-y:auto; padding:4px 2px 2px; font-size:11px;
     line-height:1.5; color:var(--text); user-select:text; -webkit-user-select:text; }
   #realtimeTranscript div{ white-space:pre-wrap; word-break:break-all; padding:2px 0; user-select:text; -webkit-user-select:text; }
@@ -562,29 +565,34 @@
     </div>
 
     <div id="realtimeTabGeneral" class="realtime-tab-panel active">
-      <div class="slider-row">
-        <label>Gemini APIキー</label>
-        <input type="password" id="realtimeApiKey" class="text-input" placeholder="AIzaSy... (ご自身のキー)" autocomplete="off">
+      <div class="motion-controls" style="border-bottom:none; padding:0 0 6px;">
+        <button id="btnRealtimeConnToggle" class="on" title="Gemini APIキーや接続ボタンなどの接続設定欄の表示/非表示を切り替えます">🔌 接続設定</button>
       </div>
-      <div style="font-size:9.5px; color:var(--text-dim); padding:0 2px 4px;">
-        ※ このキーはあなたの端末のブラウザ内(localStorage)にのみ保存され、Gemini(Google)への通信以外には送信されません。
-        共有・公共PCでは使用後に消去してください。キー未取得の場合は
-        <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" style="color:var(--accent);">Google AI Studio</a>
-        で無料発行できます。
-      </div>
-      <div class="slider-row">
-        <label id="toneToggleLabel" class="instr-toggle-label" title="クリックで会話 指示(口調)のON/OFFを切り替え">指示(口調)</label>
-        <input type="text" id="realtimeInstructions" class="text-input" placeholder="例: 明るく元気な口調で話してください">
-      </div>
-      <div class="slider-row" style="flex-wrap:wrap; align-items:flex-start;">
-        <label id="translateToggleLabel" class="instr-toggle-label" title="クリックで選択した2言語の相互通訳指示のON/OFFを切り替え">指示(翻訳)</label>
-        <span class="translate-sentence">「<select id="translateLangA" class="translate-lang-select"></select>」と「<select id="translateLangB" class="translate-lang-select"></select>」を相互通訳して。その際は通訳に徹して自身の考えを話さないで下さい。</span>
-      </div>
-      <div class="motion-controls" style="border-bottom:none; padding-left:0; padding-right:0;">
-        <button id="btnRealtimeConnect">🎙️ 接続</button>
-        <button id="btnRealtimeMute">🔇 ミュート</button>
-        <button id="btnAutoGesture" class="on">🎭 自動ジェスチャー:ON</button>
-        <button id="btnRealtimeClearKey">🗑️ キー消去</button>
+      <div id="realtimeConnSettings">
+        <div class="slider-row">
+          <label>Gemini APIキー</label>
+          <input type="password" id="realtimeApiKey" class="text-input" placeholder="AIzaSy... (ご自身のキー)" autocomplete="off">
+        </div>
+        <div style="font-size:9.5px; color:var(--text-dim); padding:0 2px 4px;">
+          ※ このキーはあなたの端末のブラウザ内(localStorage)にのみ保存され、Gemini(Google)への通信以外には送信されません。
+          共有・公共PCでは使用後に消去してください。キー未取得の場合は
+          <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" style="color:var(--accent);">Google AI Studio</a>
+          で無料発行できます。
+        </div>
+        <div class="slider-row">
+          <label id="toneToggleLabel" class="instr-toggle-label" title="クリックで会話 指示(口調)のON/OFFを切り替え">指示(口調)</label>
+          <input type="text" id="realtimeInstructions" class="text-input" placeholder="例: 明るく元気な口調で話してください">
+        </div>
+        <div class="slider-row" style="flex-wrap:wrap; align-items:flex-start;">
+          <label id="translateToggleLabel" class="instr-toggle-label" title="クリックで選択した2言語の相互通訳指示のON/OFFを切り替え">指示(翻訳)</label>
+          <span class="translate-sentence">「<select id="translateLangA" class="translate-lang-select"></select>」と「<select id="translateLangB" class="translate-lang-select"></select>」を相互通訳して。その際は通訳に徹して自身の考えを話さないで下さい。</span>
+        </div>
+        <div class="motion-controls" style="border-bottom:none; padding-left:0; padding-right:0;">
+          <button id="btnRealtimeConnect">🎙️ 接続</button>
+          <button id="btnRealtimeMute">🔇 ミュート</button>
+          <button id="btnAutoGesture" class="on">🎭 自動ジェスチャー:ON</button>
+          <button id="btnRealtimeClearKey">🗑️ キー消去</button>
+        </div>
       </div>
       <div id="realtimeStatus">未接続</div>
       <div id="realtimeTranscript"></div>
@@ -3923,6 +3931,7 @@ async function connectRealtime(){
         const btn = document.getElementById('btnRealtimeConnect');
         btn.textContent = '🔌 切断';
         btn.classList.add('on');
+        setRealtimeConnSettingsVisible(false); // 接続後は接続設定欄を折りたたみ、会話パネルを大きく表示する
         log('Gemini Liveに接続しました', 'ok');
         startMicCapture(realtimeMicStream);
         if(anyVideoSendEnabled()) startVideoSend();
@@ -3989,6 +3998,7 @@ function disconnectRealtime(){
   setRealtimeStatus('未接続');
   const btn = document.getElementById('btnRealtimeConnect');
   if(btn){ btn.textContent = '🎙️ 接続'; btn.classList.remove('on'); }
+  setRealtimeConnSettingsVisible(true); // 切断時は接続設定欄を再表示し、APIキー変更や再接続をしやすくする
   if(currentVRM && currentVRM.expressionManager){
     for(const key in lipSyncVowelSmooth){
       lipSyncVowelSmooth[key] = 0;
@@ -4002,6 +4012,22 @@ function disconnectRealtime(){
 document.getElementById('btnRealtimeConnect').addEventListener('click', () => {
   if(geminiWs){ disconnectRealtime(); log('Gemini Liveから切断しました'); }
   else{ connectRealtime(); }
+});
+
+// 「🔌 接続設定」欄(Gemini APIキー〜キー消去まで)の表示/非表示を切り替える。
+// 接続完了時にこの欄を自動で折りたたみ、会話パネル(トランスクリプト)を大きく表示できるようにする。
+function setRealtimeConnSettingsVisible(visible){
+  const group = document.getElementById('realtimeConnSettings');
+  const toggleBtn = document.getElementById('btnRealtimeConnToggle');
+  const tabPanel = document.getElementById('realtimeTabGeneral');
+  if(group) group.classList.toggle('collapsed', !visible);
+  if(toggleBtn) toggleBtn.classList.toggle('on', visible);
+  if(tabPanel) tabPanel.classList.toggle('connCollapsed', !visible);
+}
+document.getElementById('btnRealtimeConnToggle').addEventListener('click', () => {
+  const group = document.getElementById('realtimeConnSettings');
+  const isCollapsed = group.classList.contains('collapsed');
+  setRealtimeConnSettingsVisible(isCollapsed); // 現在隠れていれば表示、表示中なら隠す
 });
 
 document.getElementById('btnRealtimeMute').addEventListener('click', () => {
