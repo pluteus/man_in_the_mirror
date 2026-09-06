@@ -3170,6 +3170,19 @@ let realtimeAudioCtx = null;       // 受信音声の再生(24kHz) & リップ�
 let realtimeAnalyser = null;
 let realtimePlaybackGain = null;   // 🔊再生レベル:「Gemini Live音声」用のgain
 let realtimeSpeakerDest = null;    // AI発話音声をAudioContext.destinationではなく<audio>要素経由で鳴らすためのタップ
+// Android Chromeは(setSinkIdによる出力デバイス選択に対応していない上に)、getUserMediaの音声制約に
+// echoCancellation等を1つでも指定すると、Android側のAudioManagerが「通話モード(MODE_IN_COMMUNICATION)」に
+// 切り替わり、アプリの音声出力全体が(<audio>要素経由でも)既定で受話スピーカーに固定されてしまう
+// 既知の挙動がある。この場合は「AI自身の声への反応防止(echoCancellation)」と「音楽スピーカーからの
+// 出力」を両立できないため、Androidではspeaker出力を優先してechoCancellationを諦め、代わりに
+// isAiAudioPlaying()を使ったソフトウェア側のゲート(AI発話中はマイク送信を止める)で自己反応を防ぐ。
+const IS_ANDROID = /Android/i.test(navigator.userAgent);
+const ANDROID_ECHO_GATE_TAIL_SEC = 0.3; // 音声再生終了後もスピーカーの余韻(残響)を拾わないための猶予時間
+function isAiAudioPlaying(){
+  if(!IS_ANDROID) return false; // Android以外はecho CancellationがONのため、このソフトゲートは使わない
+  if(!realtimeAudioCtx) return false;
+  return geminiScheduledSources.length > 0 || realtimeAudioCtx.currentTime < geminiNextPlayTime + ANDROID_ECHO_GATE_TAIL_SEC;
+}
 
 /* ---------------- 🔊 再生レベル / ⏺ 録画レベル(BGM・マイク入力・Gemini Live音声を個別調整) ----------------
    「再生レベル」は実際にスピーカーから聞こえる音量、「録画レベル」は⏺録画で保存する動画に
@@ -3737,6 +3750,10 @@ function startMicCapture(stream){
   processor.onaudioprocess = (e) => {
     if(realtimeMuted) return;
     if(!geminiWs || geminiWs.readyState !== WebSocket.OPEN) return;
+    // Android(echoCancellation非使用)では、AI発話中+その直後の余韻の間はマイク送信自体を止めて、
+    // スピーカーから漏れたAI自身の声をGeminiに送り返してしまう(自己反応)のを防ぐ。
+    // (バージイン(割り込み発話)はこの間だけ効かなくなるトレードオフがある)
+    if(isAiAudioPlaying()) return;
     const input = e.inputBuffer.getChannelData(0);
     const int16 = new Int16Array(input.length);
     for(let i = 0; i < input.length; i++){
@@ -3844,7 +3861,9 @@ async function getPreferredMicStream(){
   // echoCancellationは、スピーカーから出た音(=AI自身の発話)をマイクが拾って再度Geminiへ送ってしまう
   // 「音響エコー」を打ち消すための処理。内蔵マイク+内蔵スピーカーや有線イヤホンではこれをONにしておかないと、
   // AIが自分の声(や翻訳音声)にマイク経由で反応してしまう(発話の重複・自己解釈)ことがあるため、既定ではONにする。
-  const baseConstraints = { echoCancellation: true, noiseSuppression: false, autoGainControl: false };
+  // ただしAndroidはecho Cancellation等を指定すると通話モードに入り受話スピーカー固定になってしまうため例外的にOFFにする
+  // (自己反応の防止はstartMicCapture側のisAiAudioPlaying()によるソフトウェアゲートで代替する)。
+  const baseConstraints = { echoCancellation: !IS_ANDROID, noiseSuppression: false, autoGainControl: false };
   // Bluetoothイヤホンは音声出力がイヤホン側に閉じており、そもそも内蔵マイクが自分の声を拾う経路が無いため
   // 音響エコーの心配が無い。むしろechoCancellationをONにすると、出力ルートとマイクの参照信号がずれることで
   // マイク入力そのものが無音/極小音量に抑制されてしまう既知の不具合があるため、BT接続時はOFFのままにする。
@@ -3969,6 +3988,7 @@ async function connectRealtime(){
         btn.classList.add('on');
         setRealtimeConnSettingsVisible(false); // 接続後は接続設定欄を折りたたみ、会話パネルを大きく表示する
         log('Gemini Liveに接続しました', 'ok');
+        if(IS_ANDROID) log('Androidではecho Cancellationの代わりに、AI発話中(+その直後)はマイク送信を止めることで自己反応を防いでいます(この間はバージイン(割り込み発話)が効きません)', 'warn');
         startMicCapture(realtimeMicStream);
         if(anyVideoSendEnabled()) startVideoSend();
         return;
