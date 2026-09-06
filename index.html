@@ -4106,29 +4106,51 @@ async function applyAudioOutputMode(){
   }
   const audioOutEl = document.getElementById('realtimeAudioOut');
   if(!audioOutEl || typeof audioOutEl.setSinkId !== 'function'){
-    log(`「${AUDIO_OUTPUT_LABELS[audioOutputMode]}」を選択しましたが、この端末/ブラウザでは出力先を直接指定できないため、実際の出力はOS側の状態(イヤホン接続の有無など)に従います`, 'warn');
+    log(`「${AUDIO_OUTPUT_LABELS[audioOutputMode]}」を選択しましたが、この端末/ブラウザではsetSinkId(出力先指定API)自体に対応していないため、実際の出力先を直接指定できません。実際の出力はOS側の状態(イヤホン接続の有無など)に従います`, 'warn');
     return;
   }
+  let outputs = [];
   try{
     const devices = await navigator.mediaDevices.enumerateDevices();
-    const outputs = devices.filter(d => d.kind === 'audiooutput');
-    let target = null;
-    if(audioOutputMode === 'earpiece'){
-      target = outputs.find(d => /earpiece|receiver|通話|受話/i.test(d.label));
-    }else if(audioOutputMode === 'headphones'){
-      target = outputs.find(d => /headphone|headset|bluetooth|earbud|airpods|イヤホン|ヘッドセット/i.test(d.label));
-    }else if(audioOutputMode === 'speaker'){
-      target = outputs.find(d => /speaker|スピーカー/i.test(d.label) && !/earpiece|receiver/i.test(d.label));
-    }
-    if(target){
-      await audioOutEl.setSinkId(target.deviceId);
-      log(`出力先を「${AUDIO_OUTPUT_LABELS[audioOutputMode]}」(${target.label})に切り替えました`, 'ok');
-    }else{
-      await audioOutEl.setSinkId(''); // 該当デバイスが見つからない場合は既定の出力に戻す
-      log(`「${AUDIO_OUTPUT_LABELS[audioOutputMode]}」に該当する出力デバイスが見つからなかったため、既定の出力を使用します`, 'warn');
-    }
+    outputs = devices.filter(d => d.kind === 'audiooutput');
   }catch(err){
-    log(`出力先の切り替えに失敗しました: ${err.message || err}`, 'warn');
+    log(`❌ 出力デバイス一覧の取得(enumerateDevices)に失敗しました: ${err.name || ''} ${err.message || err}`, 'err');
+    return;
+  }
+  // 判別用: 現在この端末/ブラウザが実際に列挙している出力デバイスをそのままログに出す。
+  // Android Chrome等では「受話スピーカー」と「音楽スピーカー」が別デバイスとして列挙されず、
+  // 有線/Bluetoothなど物理的に独立した機器しか区別されない機種もあるため、その場合は
+  // 該当なし(既定にリセット)というログになる。これはsetSinkId側の制約であり、アプリ側の不具合ではない。
+  log(`出力デバイス候補(${outputs.length}件): ${outputs.length ? outputs.map(d => `[${d.label || '(ラベル取得不可)'}]`).join(' ') : '(なし)'}`);
+  let target = null;
+  if(audioOutputMode === 'earpiece'){
+    target = outputs.find(d => /earpiece|receiver|通話|受話/i.test(d.label));
+  }else if(audioOutputMode === 'headphones'){
+    target = outputs.find(d => /headphone|headset|bluetooth|earbud|airpods|イヤホン|ヘッドセット/i.test(d.label));
+  }else if(audioOutputMode === 'speaker'){
+    target = outputs.find(d => /speaker|スピーカー/i.test(d.label) && !/earpiece|receiver/i.test(d.label));
+  }
+  if(target){
+    try{
+      await audioOutEl.setSinkId(target.deviceId);
+      // setSinkId自体は例外を投げなくても実際には反映されていないブラウザ実装があるため、
+      // 適用後のsinkId(実際に紐付いたデバイスID)を読み直して指定通りになっているか確認する。
+      const appliedId = audioOutEl.sinkId;
+      if(appliedId === target.deviceId){
+        log(`✅ 出力先を「${AUDIO_OUTPUT_LABELS[audioOutputMode]}」(${target.label})に切り替えました(適用確認OK)`, 'ok');
+      }else{
+        log(`⚠ setSinkIdの呼び出しは成功しましたが、適用後のsinkId(${appliedId || '取得不可'})が指定デバイスID(${target.deviceId})と一致しません。この端末では実際には切り替わっていない可能性があります`, 'warn');
+      }
+    }catch(err){
+      log(`❌ 出力先「${AUDIO_OUTPUT_LABELS[audioOutputMode]}」(${target.label})への切り替えに失敗しました: ${err.name || ''} ${err.message || err}`, 'err');
+    }
+  }else{
+    try{
+      await audioOutEl.setSinkId(''); // 該当デバイスが見つからない場合は既定の出力に戻す
+      log(`⚠ 「${AUDIO_OUTPUT_LABELS[audioOutputMode]}」に該当する出力デバイスがこの端末では列挙されなかったため、既定(default)の出力にリセットしました。実際にどのスピーカーが使われるかは端末のOS側の状態に依存します(setSinkIdでは「受話/音楽スピーカー」を区別できない機種があります)`, 'warn');
+    }catch(err){
+      log(`❌ 既定出力へのリセットにも失敗しました: ${err.name || ''} ${err.message || err}`, 'err');
+    }
   }
 }
 
