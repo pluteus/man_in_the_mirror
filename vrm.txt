@@ -1,3 +1,8 @@
+5018128617262021736.vrm,pinehead,https://hub.vroid.com/characters/8575794863671455457/models/1724781748084856362
+8852071447712743533.vrm,pinehead,https://hub.vroid.com/characters/4347078477137254766/models/352161745317054886
+6101468412074608738.vrm,pinehead,https://hub.vroid.com/characters/3966434835270133918/models/8063374137633669688
+262410318834873893.vrm,pinehead,https://hub.vroid.com/characters/4696179242008512121/models/8761041530868915382
+1112435277841725958.vrm,pinehead,https://hub.vroid.com/characters/4755652033414890150/models/8424004869567156440
 AnimalKawaii_01_Kuro.vrm,七百屋 [ Nao - Ya ],https://7a04m.booth.pm/items/4936193,ぶっきらぼうだけど優しい、低めのトーンで話す感じのボーイッシュ少女
 AnimalKawaii_02_Ryoku.vrm,七百屋 [ Nao - Ya ],https://7a04m.booth.pm/items/4936193,明るくてちょっとやんちゃ、フランクに距離を詰めてくるケモミミ少女の話し方
 #AnimalKawaii_03_Sei.vrm,七百屋 [ Nao - Ya ],https://7a04m.booth.pm/items/4936193
