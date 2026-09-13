@@ -6,6 +6,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>VRMちゃんと！</title>
+<script>
+  // Electron(デスクトップマスコットラッパー)内で読み込まれている場合、背景を最初から透過させる
+  // (ちらつき防止のため、CSS読み込み前のこの位置で同期的にクラスを付与する)
+  if(/Electron/i.test(navigator.userAgent)){
+    document.documentElement.classList.add('electron-mascot');
+  }
+</script>
 
 <!-- PWA -->
 <link rel="manifest" href="./manifest.json">
@@ -25,6 +32,10 @@
   html,body{ margin:0; padding:0; width:100%; height:100%; background:var(--bg); color:var(--text);
     font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Hiragino Kaku Gothic ProN",sans-serif;
     overflow:hidden; overscroll-behavior:none; touch-action:manipulation; }
+  /* Electron(デスクトップマスコットラッパー)内では背景を透過させ、デスクトップを透かせるようにする */
+  html.electron-mascot, html.electron-mascot body{ background:transparent !important; }
+  /* マスコットモード: トレイメニューからUI(ボタン・パネル類)を一括で隠し、キャラクターのみ表示する */
+  body.mascot-ui-hidden > *:not(#canvas-container):not(#outCamBg){ display:none !important; }
   #canvas-container{ position:fixed; inset:0; }
   #canvas-container canvas{ display:block; width:100%; height:100%; touch-action:none; }
   #outCamBg{ position:fixed; width:2px; height:2px; opacity:0; pointer-events:none; }
@@ -1460,6 +1471,9 @@ function updateVrThumbsticks(dt){
 // (押すとシステムメニューが開く/セッションを抜けるなどOS側の動作になる)、WebXR経由では
 // ゲームパッドの押下として取得できない機種がほとんどのため、代わりに同じ左コントローラーの
 // Yボタンをメニューウィンドウの表示切替に割り当てている。
+// Yボタンの動作: メニューが閉じていれば開く/サブビュー(一覧等)表示中なら画面左上の
+// 「◀ 戻る」ボタンをレイで狙わずともメイン画面へ戻れる/メイン画面まで戻っている(戻るボタンが
+// 無い状態)ならウィンドウそのものを閉じる、の3段階(戻るボタンが押しにくいことへの対策)。
 // xr-standardマッピングでは buttons[4]=A/Xボタン、buttons[5]=B/Yボタンが一般的。
 let vrBtnAPrevPressed = false;
 let vrBtnMenuSubPrevPressed = false;
@@ -1482,9 +1496,21 @@ function updateVrGamepadButtons(){
         if(vrUiHidden){
           // 無操作で隠れていた直後の最初の押下は、誤操作防止のためメニューボタンの再表示のみに留める
           vrUiHidden = false;
+        }else if(!vrMenuOpen){
+          // メニューが閉じている間は開く(メイン画面から)
+          vrMenuOpen = true;
+          vrSetView('main');
+          drawVrPanel();
+          drawVrButton(state.hoverButton);
+        }else if(vrView !== 'main'){
+          // サブビュー(一覧等)表示中は、画面左上の「◀ 戻る」ボタンをレイで狙うのが難しいため、
+          // Yボタン一発で同じ動作(メイン画面へ戻る)にする
+          vrSetView('main');
+          drawVrPanel();
+          drawVrButton(state.hoverButton);
         }else{
-          vrMenuOpen = !vrMenuOpen;
-          if(vrMenuOpen){ vrSetView('main'); drawVrPanel(); }
+          // すでにメイン画面(=戻るボタンが無い状態)ならウィンドウそのものを閉じる
+          vrMenuOpen = false;
           drawVrButton(state.hoverButton);
         }
       }
@@ -6941,7 +6967,66 @@ function animate(time){
   drawMosaicPreview();
   renderer.render(scene, camera);
 }
+/* ---------------- Electronデスクトップマスコット用: 当たり判定 ----------------
+   Electronラッパー(preload.js経由のwindow.electronAPI)から利用される想定のヘルパー群。
+   通常のブラウザ実行時はwindow.electronAPIが存在しないため、下のイベント配線も含めて一切動作せず、
+   既存の挙動に影響しない。 */
+const _electronHitRaycaster = new THREE.Raycaster();
+const _electronHitNdc = new THREE.Vector2();
+
+// 画面上の座標(clientX, clientY)がキャラクター(VRM)本体のメッシュ上かどうかを判定する
+window.__electronMascotIsOnCharacter = function(clientX, clientY){
+  if(!currentVRM || !currentVRM.scene) return false;
+  const elAtPoint = document.elementFromPoint(clientX, clientY);
+  if(!elAtPoint || elAtPoint.tagName !== 'CANVAS') return false; // UI要素の上はキャラクター扱いしない
+  const rect = renderer.domElement.getBoundingClientRect();
+  if(rect.width === 0 || rect.height === 0) return false;
+  _electronHitNdc.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+  _electronHitNdc.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+  _electronHitRaycaster.setFromCamera(_electronHitNdc, camera);
+  return _electronHitRaycaster.intersectObject(currentVRM.scene, true).length > 0;
+};
+
+// 画面上の座標がクリックスルー(=背後のデスクトップへイベントを素通りさせる)対象かどうかを判定する。
+// キャラクター本体の上、またはUIパネル/ボタン等のDOM要素の上であればfalse(このウィンドウで受け取る)。
+window.__electronMascotShouldClickThrough = function(clientX, clientY){
+  const elAtPoint = document.elementFromPoint(clientX, clientY);
+  if(!elAtPoint || elAtPoint.tagName !== 'CANVAS') return false; // UIパネル/ボタン等の上
+  return !window.__electronMascotIsOnCharacter(clientX, clientY);
+};
+
+// Electronのトレイメニュー等からUI(ボタン・パネル類)の表示/非表示を一括切替するためのフック
+window.__electronMascotSetUiVisible = function(visible){
+  document.body.classList.toggle('mascot-ui-hidden', !visible);
+};
+
+// window.electronAPI(preload.jsが公開)が存在する場合のみ、クリックスルーの自動切替と
+// キャラクターをつまんでのウィンドウドラッグ移動を配線する
+if(window.electronAPI){
+  let mascotDragging = false;
+  let mascotIgnoring = null; // 直近にmainプロセスへ送った状態(変化した時だけ送って負荷を抑える)
+  window.addEventListener('mousemove', (e) => {
+    if(mascotDragging){ window.electronAPI.dragMove(e.screenX, e.screenY); return; }
+    const shouldIgnore = window.__electronMascotShouldClickThrough(e.clientX, e.clientY);
+    if(shouldIgnore !== mascotIgnoring){
+      mascotIgnoring = shouldIgnore;
+      window.electronAPI.setIgnoreMouseEvents(shouldIgnore);
+    }
+  });
+  window.addEventListener('mousedown', (e) => {
+    if(e.button !== 0) return; // 左クリックのみドラッグ対象
+    if(window.__electronMascotIsOnCharacter(e.clientX, e.clientY)){
+      mascotDragging = true;
+      window.electronAPI.dragStart(e.screenX, e.screenY);
+    }
+  });
+  window.addEventListener('mouseup', () => {
+    if(mascotDragging){ mascotDragging = false; window.electronAPI.dragEnd(); }
+  });
+}
+
 renderer.setAnimationLoop(animate);
+
 
 log('起動しました。VRMを選択してカメラを開始してください。');
 </script>
