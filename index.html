@@ -143,8 +143,9 @@
   .text-input{ flex:1; background:var(--bg); border:1px solid var(--border); color:var(--text);
     border-radius:6px; padding:6px 8px; font-size:11px; min-width:0; }
 
-  #realtimePanel{ position:relative; background:var(--panel); border:1px solid var(--border); border-radius:10px;
-    padding:34px 12px 8px; backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px);
+  /* 会話ウィンドウは半透明にして、背後のキャラクターが透けて見えるようにする */
+  #realtimePanel{ position:relative; background:rgba(19,25,34,0.55); border:1px solid var(--border); border-radius:10px;
+    padding:34px 12px 8px; backdrop-filter:blur(3px); -webkit-backdrop-filter:blur(3px);
     font-size:11px; color:var(--text-dim); }
   #realtimePanel.hidden{ display:none; }
   #realtimePanel .motion-controls button{ padding:8px 4px; flex:1 1 auto; min-width:108px; white-space:nowrap; }
@@ -3264,13 +3265,53 @@ function setRealtimeStatus(text){
   if(el) el.textContent = text;
 }
 
+// 句点(。)・読点(、)・ピリオド(.)・コロン(:)の直後以外では改行させないための整形。
+// Gemini Liveからの文字起こしは細切れ(数文字ずつ)で届くため、それをそのまま1行ずつ追加すると
+// 改行だらけで読みにくくなる。ターンごとに1つのバッファへ連結してから整形することで、
+// 「句読点の直後でだけ改行される、自然な文章」として表示する。
+function formatTranscriptText(text){
+  return text.replace(/([。、.:])/g, '$1\n').replace(/\n+$/, '');
+}
+
 function addRealtimeTranscript(text){
   const el = document.getElementById('realtimeTranscript');
   if(!el) return;
   const line = document.createElement('div');
-  line.textContent = text;
+  line.textContent = formatTranscriptText(text);
   el.appendChild(line);
   el.scrollTop = el.scrollHeight;
+}
+
+// Gemini Liveの発話中文字起こし(input/outputTranscription)はターン内で細切れに届くため、
+// ターンが続いている間は同じ行(div)へ追記し続け、句読点の位置でだけ改行されるようにする。
+// ターンが終わる(turnComplete/interrupted)時にバッファをリセットし、次のターンから新しい行にする。
+let currentInputTranscriptEl = null, currentInputTranscriptBuffer = '';
+let currentOutputTranscriptEl = null, currentOutputTranscriptBuffer = '';
+
+function appendStreamingRealtimeTranscript(kind, deltaText){
+  const container = document.getElementById('realtimeTranscript');
+  if(!container) return;
+  const isInput = (kind === 'input');
+  let el = isInput ? currentInputTranscriptEl : currentOutputTranscriptEl;
+  if(!el){
+    el = document.createElement('div');
+    container.appendChild(el);
+    if(isInput){ currentInputTranscriptEl = el; currentInputTranscriptBuffer = ''; }
+    else{ currentOutputTranscriptEl = el; currentOutputTranscriptBuffer = ''; }
+  }
+  if(isInput){
+    currentInputTranscriptBuffer += deltaText;
+    el.textContent = `🧑 ${formatTranscriptText(currentInputTranscriptBuffer)}`;
+  }else{
+    currentOutputTranscriptBuffer += deltaText;
+    el.textContent = `🤖 ${formatTranscriptText(currentOutputTranscriptBuffer)}`;
+  }
+  container.scrollTop = container.scrollHeight;
+}
+
+function resetStreamingRealtimeTranscriptLines(){
+  currentInputTranscriptEl = null; currentInputTranscriptBuffer = '';
+  currentOutputTranscriptEl = null; currentOutputTranscriptBuffer = '';
 }
 
 // 音量(RMS)を計算する共通ヘルパー(会話音声・BGMどちらのAnalyserにも使う)
@@ -3996,17 +4037,17 @@ async function connectRealtime(){
 
       if(evt.serverContent){
         const sc = evt.serverContent;
-        if(sc.interrupted){ stopPlayback(); currentTurnOutputText = ''; pendingEmotionMotionIndex = null; resetTextLipSyncQueue(); }
+        if(sc.interrupted){ stopPlayback(); currentTurnOutputText = ''; pendingEmotionMotionIndex = null; resetTextLipSyncQueue(); resetStreamingRealtimeTranscriptLines(); }
         if(sc.modelTurn && sc.modelTurn.parts){
           for(const part of sc.modelTurn.parts){
             if(part.inlineData && part.inlineData.data) playAudioChunk(part.inlineData.data);
           }
         }
         if(sc.inputTranscription && sc.inputTranscription.text){
-          addRealtimeTranscript(`🧑 ${sc.inputTranscription.text}`);
+          appendStreamingRealtimeTranscript('input', sc.inputTranscription.text);
         }
         if(sc.outputTranscription && sc.outputTranscription.text){
-          addRealtimeTranscript(`🤖 ${sc.outputTranscription.text}`);
+          appendStreamingRealtimeTranscript('output', sc.outputTranscription.text);
           currentTurnOutputText += sc.outputTranscription.text; // ターン内の発話をまとめて後で感情分類する
           pushTextToLipSyncQueue(sc.outputTranscription.text); // ミュート中の母音推定リップシンク用キューにも積んでおく
         }
@@ -4014,6 +4055,7 @@ async function connectRealtime(){
           updateConversationExpression(currentTurnOutputText);
           triggerAutoGesture(currentTurnOutputText);
           currentTurnOutputText = '';
+          resetStreamingRealtimeTranscriptLines();
         }
       }else if(evt.goAway){
         log('Gemini Live: セッションがまもなく終了します', 'warn');
@@ -4041,6 +4083,7 @@ async function connectRealtime(){
 }
 
 function disconnectRealtime(){
+  resetStreamingRealtimeTranscriptLines();
   if(geminiWs){ try{ geminiWs.close(); }catch(e){} geminiWs = null; }
   if(geminiCaptureProcessor){ try{ geminiCaptureProcessor.disconnect(); }catch(e){} geminiCaptureProcessor.onaudioprocess = null; geminiCaptureProcessor = null; }
   if(geminiCaptureCtx){ try{ geminiCaptureCtx.close(); }catch(e){} geminiCaptureCtx = null; }
