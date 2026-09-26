@@ -710,6 +710,8 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { VRMLoaderPlugin, VRMUtils, VRMSpringBoneCollider, VRMSpringBoneColliderShapeSphere } from '@pixiv/three-vrm';
+import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
+import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
 import { VRMAnimationLoaderPlugin, createVRMAnimationClip } from '@pixiv/three-vrm-animation';
 import { FaceLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
 
@@ -890,6 +892,8 @@ async function enterVR(){
       vrSetView('main');
       vrControllerCollidersEnabled = false; // 通常表示に戻るため、登録していたコライダーを解除
       applyVrControllerCollidersToCurrentVRM();
+      for(const s of vrGrabState){ s.active = false; s.kind = null; s.chain = null; s.joint = null; s.weight = 0; }
+      for(const ind of vrGrabIndicators){ ind.visible = false; }
     });
   }catch(e){
     log(`VR表示の開始に失敗しました: ${e.message || e}`, 'err');
@@ -1337,6 +1341,8 @@ function makeReticle(){
 
 const vrRaycaster = new THREE.Raycaster();
 const vrControllers = [];
+const vrControllerModelFactory = new XRControllerModelFactory();
+const vrHandModelFactory = new XRHandModelFactory();
 
 function setupVrController(index){
   const controller = renderer.xr.getController(index);
@@ -1344,10 +1350,26 @@ function setupVrController(index){
   const reticle = makeReticle();
   controller.add(ray);
   scene.add(reticle);
-  const state = { controller, reticle, inputSource: null, hoverKey: null, hoverButton: false };
+
+  // VRコントローラーを検知した場合: 実機に近い形のコントローラーモデルを表示する
+  // (grip空間に付けることで、実際に手で握っている向き・位置に合わせて表示される)
+  const controllerGrip = renderer.xr.getControllerGrip(index);
+  controllerGrip.add(vrControllerModelFactory.createControllerModel(controllerGrip));
+  scene.add(controllerGrip);
+
+  // ハンドトラッキングを検知した場合: 手の形(関節ごとの球)を表示する
+  // ('spheres'指定により外部モデルファイルの読み込みが不要で、そのまま動作する)
+  const hand = renderer.xr.getHand(index);
+  hand.add(vrHandModelFactory.createHandModel(hand, 'spheres'));
+  scene.add(hand);
+
+  const state = { controller, controllerGrip, hand, reticle, inputSource: null, hoverKey: null, hoverButton: false };
   controller.addEventListener('selectstart', () => onVrSelectStart(state));
   controller.addEventListener('squeezestart', () => tryStartVrGrab(index)); // グリップ操作: 近くの腕/脚を掴んでIKで追従させる
   controller.addEventListener('squeezeend', () => endVrGrab(index));
+  // ハンドトラッキング時は「つまむ(ピンチ)」動作がグリップ操作に相当する
+  hand.addEventListener('pinchstart', () => tryStartVrGrab(index));
+  hand.addEventListener('pinchend', () => endVrGrab(index));
   controller.addEventListener('connected', (ev) => { state.inputSource = ev.data; ray.visible = true; });
   controller.addEventListener('disconnected', () => { state.inputSource = null; ray.visible = false; reticle.visible = false; state.hoverKey = null; endVrGrab(index); });
   scene.add(controller);
@@ -1412,7 +1434,11 @@ function rotateBoneTowardWorldDir(bone, oldDirWorld, newDirWorld, weight){
 
 // 簡易的な2関節IK(root→mid→endの3ボーン構成、例: 肩→肘→手)。
 // targetWorldPosへ向けてrootとmidの回転を更新する。weightでアニメーション姿勢とブレンドする。
-function solveTwoBoneIK(rootBone, midBone, endBone, targetWorldPos, weight){
+// 簡易的な2関節IK(root→mid→endの3ボーン構成、例: 肩→肘→手)。
+// targetWorldPosへ向けてrootとmidの回転を更新する。weightでアニメーション姿勢とブレンドする。
+// poleDirWorld(任意): 肘/膝が「どちら向きに曲がるべきか」を示す安定した基準方向。
+//   省略時は現在の姿勢から都度求めるため、targetの位置によって曲がる向きが不自然に反転することがある。
+function solveTwoBoneIK(rootBone, midBone, endBone, targetWorldPos, weight, poleDirWorld){
   if(!rootBone || !midBone || !endBone || weight <= 0) return;
   const rootPos = new THREE.Vector3(); rootBone.getWorldPosition(rootPos);
   const midPos = new THREE.Vector3(); midBone.getWorldPosition(midPos);
@@ -1436,18 +1462,31 @@ function solveTwoBoneIK(rootBone, midBone, endBone, targetWorldPos, weight){
   cosRootAngle = THREE.MathUtils.clamp(cosRootAngle, -1, 1);
   const rootAngle = Math.acos(cosRootAngle);
 
-  // 曲げ平面の法線: 現在の(アニメーション由来の)root→mid, root→targetの外積を使う
-  // (ほぼ一直線でうまく外積が取れない場合はフォールバックのベクトルを使う)
-  const rootToMidDir = new THREE.Vector3().subVectors(midPos, rootPos).normalize();
-  let planeNormal = new THREE.Vector3().crossVectors(rootToMidDir, rootToTargetDir);
-  if(planeNormal.lengthSq() < 1e-8){
-    planeNormal = new THREE.Vector3().crossVectors(rootToMidDir, new THREE.Vector3(0, 1, 0));
-    if(planeNormal.lengthSq() < 1e-8) planeNormal.set(1, 0, 0);
+  // 曲げ方向(targetDirと直交な成分)を求める。poleDirWorldが安定した基準になっている場合は
+  // それを優先し(グラムシュミット直交化)、無い/ほぼ一直線で使えない場合のみ、
+  // 現在の姿勢から都度求める従来方式にフォールバックする
+  // (このフォールバックのみだと、targetの位置によって曲がる向きが不自然に反転しうる)。
+  let poleDirPerp = null;
+  if(poleDirWorld){
+    const d = poleDirWorld.dot(rootToTargetDir);
+    poleDirPerp = new THREE.Vector3().copy(poleDirWorld).addScaledVector(rootToTargetDir, -d);
+    if(poleDirPerp.lengthSq() < 1e-8) poleDirPerp = null;
   }
-  planeNormal.normalize();
+  if(!poleDirPerp){
+    const rootToMidDirFallback = new THREE.Vector3().subVectors(midPos, rootPos).normalize();
+    poleDirPerp = new THREE.Vector3().crossVectors(rootToMidDirFallback, rootToTargetDir);
+    if(poleDirPerp.lengthSq() < 1e-8) poleDirPerp = new THREE.Vector3().crossVectors(rootToTargetDir, new THREE.Vector3(0, 1, 0));
+    if(poleDirPerp.lengthSq() < 1e-8) poleDirPerp.set(1, 0, 0);
+  }
+  poleDirPerp.normalize();
 
-  // root→target方向を曲げ平面内でrootAngleだけ回転させたものが、新しいroot→mid方向
-  const newRootToMidDir = rootToTargetDir.clone().applyAxisAngle(planeNormal, rootAngle);
+  // targetDirを、targetDirとpoleDirPerpが張る平面内でrootAngleだけ曲げた方向が、新しいroot→mid方向
+  const newRootToMidDir = new THREE.Vector3()
+    .addScaledVector(rootToTargetDir, Math.cos(rootAngle))
+    .addScaledVector(poleDirPerp, Math.sin(rootAngle))
+    .normalize();
+
+  const rootToMidDir = new THREE.Vector3().subVectors(midPos, rootPos).normalize();
   rotateBoneTowardWorldDir(rootBone, rootToMidDir, newRootToMidDir, weight);
 
   // rootBone更新後の新しいmid位置を取得し、mid→endをtarget方向へ向ける
@@ -1455,6 +1494,66 @@ function solveTwoBoneIK(rootBone, midBone, endBone, targetWorldPos, weight){
   const midToEndDir = new THREE.Vector3().subVectors(endPos, midPos).normalize();
   const newMidToEndDir = new THREE.Vector3().subVectors(targetWorldPos, newMidPos).normalize();
   rotateBoneTowardWorldDir(midBone, midToEndDir, newMidToEndDir, weight);
+}
+
+// chainの「自然な曲がる向き(pole方向)」を求める。掴み始めた瞬間の姿勢(=その時点でのroot-end直線
+// からmidがどちらへずれているか)を1度だけ記録し、以降は親ボーン(胸/腰)の現在の向きに合わせて
+// 毎フレーム求め直す(アニメーションで胴体が動いても追従する)。これにより、targetの位置によって
+// 肘/膝の曲がる向きが不自然に反転するのを防ぐ。
+function getChainPoleDirWorld(chain){
+  if(!chain._restPoleLocalDir){
+    const rootPos = new THREE.Vector3(); chain.root.getWorldPosition(rootPos);
+    const midPos = new THREE.Vector3(); chain.mid.getWorldPosition(midPos);
+    const endPos = new THREE.Vector3(); chain.end.getWorldPosition(endPos);
+    const rootToEnd = new THREE.Vector3().subVectors(endPos, rootPos);
+    const rootToMid = new THREE.Vector3().subVectors(midPos, rootPos);
+    const rootToEndLenSq = rootToEnd.lengthSq();
+    let perp;
+    if(rootToEndLenSq < 1e-8){
+      perp = rootToMid.lengthSq() > 1e-8 ? rootToMid.clone().normalize() : new THREE.Vector3(0, 0, 1);
+    }else{
+      const t = rootToMid.dot(rootToEnd) / rootToEndLenSq;
+      const projOnLine = rootToEnd.clone().multiplyScalar(t);
+      perp = new THREE.Vector3().subVectors(rootToMid, projOnLine); // root-end直線からmidへの垂線
+      if(perp.lengthSq() < 1e-8){
+        perp = new THREE.Vector3(0, 0, 1).cross(rootToEnd);
+        if(perp.lengthSq() < 1e-8) perp.set(1, 0, 0);
+      }
+      perp.normalize();
+    }
+    const parent = chain.root.parent || null;
+    const parentWorldQuat = new THREE.Quaternion();
+    if(parent) parent.getWorldQuaternion(parentWorldQuat);
+    chain._restPoleParent = parent;
+    chain._restPoleLocalDir = parent ? perp.applyQuaternion(parentWorldQuat.clone().invert()) : perp;
+  }
+  const worldQuat = new THREE.Quaternion();
+  if(chain._restPoleParent) chain._restPoleParent.getWorldQuaternion(worldQuat);
+  return chain._restPoleLocalDir.clone().applyQuaternion(worldQuat);
+}
+
+// 胴体(腰→胸)を単純なカプセルとして近似し、IKの目標地点がその中にめり込まないよう
+// 外側へ押し出す(手足の関節が服/胴体を突き抜けて見えるのを軽減するための簡易対策)。
+function clampTargetOutsideTorso(targetWorldPos){
+  if(!currentVRM || !currentVRM.humanoid) return targetWorldPos;
+  const h = currentVRM.humanoid;
+  const hips = h.getRawBoneNode('hips');
+  const chest = h.getRawBoneNode('upperChest') || h.getRawBoneNode('chest') || h.getRawBoneNode('spine');
+  if(!hips || !chest) return targetWorldPos;
+  const hipsPos = new THREE.Vector3(); hips.getWorldPosition(hipsPos);
+  const chestPos = new THREE.Vector3(); chest.getWorldPosition(chestPos);
+  const axis = new THREE.Vector3().subVectors(chestPos, hipsPos);
+  const axisLen = axis.length();
+  if(axisLen < 1e-5) return targetWorldPos;
+  const toTarget = new THREE.Vector3().subVectors(targetWorldPos, hipsPos);
+  const t = THREE.MathUtils.clamp(toTarget.dot(axis) / (axisLen * axisLen), 0, 1);
+  const closestOnAxis = hipsPos.clone().addScaledVector(axis, t);
+  const radius = axisLen * 0.45; // 胴体の太さの簡易的な目安(腰〜胸の長さに対する比率)
+  const offset = new THREE.Vector3().subVectors(targetWorldPos, closestOnAxis);
+  const dist = offset.length();
+  if(dist >= radius) return targetWorldPos;
+  if(dist < 1e-6) offset.set(1, 0, 0); else offset.multiplyScalar(1 / dist);
+  return closestOnAxis.addScaledVector(offset, radius);
 }
 
 // 掴める4つの腕/脚チェーン(root=肩/股, mid=肘/膝, end=手/足)を、現在のVRMから取得する
@@ -1503,7 +1602,45 @@ function getSpringJointTailWorldPos(joint, target){
   return target;
 }
 
-// グリップを握った瞬間: 一番近い「腕/脚」または「揺れ物(髪・服等のスプリングボーン)」を探して掴みを開始する
+// 指定した位置から最も近い「掴める対象」(腕/脚チェーン、または揺れ物のジョイント)を探す。
+// excludeState(他方のコントローラーの状態)が同じ対象を掴んでいる場合はその対象を除外する。
+// 戻り値: { kind:'chain'|'spring', chain, joint, point(先端のワールド座標), dist } | null
+function findNearestGrabCandidate(pos, excludeState){
+  if(!currentVRM) return null;
+  let bestDist = GRAB_RADIUS;
+  let bestKind = null, bestChain = null, bestJoint = null, bestPoint = null;
+
+  // 候補1: 腕/脚(肩→肘→手 / 股→膝→足)
+  for(const chain of getVrGrabChains()){
+    if(excludeState && excludeState.active && excludeState.kind === 'chain' && excludeState.chain === chain) continue;
+    const rootPos = new THREE.Vector3(); chain.root.getWorldPosition(rootPos);
+    const midPos = new THREE.Vector3(); chain.mid.getWorldPosition(midPos);
+    const endPos = new THREE.Vector3(); chain.end.getWorldPosition(endPos);
+    const d = Math.min(
+      pointToSegmentDistance(pos, rootPos, midPos),
+      pointToSegmentDistance(pos, midPos, endPos)
+    );
+    if(d < bestDist){ bestDist = d; bestKind = 'chain'; bestChain = chain; bestJoint = null; bestPoint = endPos; }
+  }
+
+  // 候補2: 揺れ物(髪・スカート等のスプリングボーン)の各ジョイント
+  if(currentVRM.springBoneManager){
+    const p0 = new THREE.Vector3(), p1 = new THREE.Vector3();
+    for(const joint of currentVRM.springBoneManager.joints){
+      if(excludeState && excludeState.active && excludeState.kind === 'spring' && excludeState.joint === joint) continue;
+      joint.bone.getWorldPosition(p0);
+      getSpringJointTailWorldPos(joint, p1);
+      const d = pointToSegmentDistance(pos, p0, p1);
+      if(d < bestDist){ bestDist = d; bestKind = 'spring'; bestChain = null; bestJoint = joint; bestPoint = p1.clone(); }
+    }
+  }
+
+  if(!bestKind) return null;
+  return { kind: bestKind, chain: bestChain, joint: bestJoint, point: bestPoint, dist: bestDist };
+}
+
+// グリップ(またはハンドトラッキングのピンチ)を握った瞬間: 一番近い「腕/脚」または
+// 「揺れ物(髪・服等のスプリングボーン)」を探して掴みを開始する
 function tryStartVrGrab(controllerIndex){
   const state = vrGrabState[controllerIndex];
   const controller = vrControllers[controllerIndex] && vrControllers[controllerIndex].controller;
@@ -1511,40 +1648,13 @@ function tryStartVrGrab(controllerIndex){
   const controllerPos = new THREE.Vector3();
   controller.getWorldPosition(controllerPos);
   const otherState = vrGrabState[1 - controllerIndex];
-  let bestDist = GRAB_RADIUS;
-  let bestKind = null, bestChain = null, bestJoint = null, bestTailPos = null;
-
-  // 候補1: 腕/脚(肩→肘→手 / 股→膝→足)
-  for(const chain of getVrGrabChains()){
-    if(otherState.active && otherState.kind === 'chain' && otherState.chain === chain) continue;
-    const rootPos = new THREE.Vector3(); chain.root.getWorldPosition(rootPos);
-    const midPos = new THREE.Vector3(); chain.mid.getWorldPosition(midPos);
-    const endPos = new THREE.Vector3(); chain.end.getWorldPosition(endPos);
-    const d = Math.min(
-      pointToSegmentDistance(controllerPos, rootPos, midPos),
-      pointToSegmentDistance(controllerPos, midPos, endPos)
-    );
-    if(d < bestDist){ bestDist = d; bestKind = 'chain'; bestChain = chain; bestJoint = null; bestTailPos = endPos; }
-  }
-
-  // 候補2: 揺れ物(髪・スカート等のスプリングボーン)の各ジョイント
-  if(currentVRM.springBoneManager){
-    const p0 = new THREE.Vector3(), p1 = new THREE.Vector3();
-    for(const joint of currentVRM.springBoneManager.joints){
-      if(otherState.active && otherState.kind === 'spring' && otherState.joint === joint) continue;
-      joint.bone.getWorldPosition(p0);
-      getSpringJointTailWorldPos(joint, p1);
-      const d = pointToSegmentDistance(controllerPos, p0, p1);
-      if(d < bestDist){ bestDist = d; bestKind = 'spring'; bestChain = null; bestJoint = joint; bestTailPos = p1.clone(); }
-    }
-  }
-
-  if(!bestKind) return;
+  const found = findNearestGrabCandidate(controllerPos, otherState);
+  if(!found) return;
   state.active = true;
-  state.kind = bestKind;
-  state.chain = bestChain;
-  state.joint = bestJoint;
-  state.offset.subVectors(bestTailPos, controllerPos); // 掴んだ瞬間の「先端とコントローラーの位置差」を保持
+  state.kind = found.kind;
+  state.chain = found.chain;
+  state.joint = found.joint;
+  state.offset.subVectors(found.point, controllerPos); // 掴んだ瞬間の「先端とコントローラーの位置差」を保持
   registerVrActivity();
 }
 
@@ -1553,33 +1663,76 @@ function endVrGrab(controllerIndex){
   vrGrabState[controllerIndex].active = false;
 }
 
-// 毎フレーム: 掴んでいる腕/脚・揺れ物があれば、コントローラー位置に合わせてIK/回転を適用する
+// 掴もうとしている場所を示すインジケーター(コントローラーごとに1つ)。
+// 掴んでいない間は「近くにあって掴める対象」を薄い色でハイライトし、
+// 実際に掴んでいる間ははっきりした色で先端の位置を示す。
+function makeGrabIndicator(){
+  const geo = new THREE.SphereGeometry(0.028, 16, 12);
+  const mat = new THREE.MeshBasicMaterial({ color: 0xffe066, transparent: true, opacity: 0.55, depthTest: false });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.renderOrder = 999;
+  mesh.visible = false;
+  scene.add(mesh);
+  return mesh;
+}
+const vrGrabIndicators = [makeGrabIndicator(), makeGrabIndicator()];
+const GRAB_INDICATOR_HOVER_COLOR = new THREE.Color(0xffe066); // 掴めそうな対象に近づいた時(未グリップ)
+const GRAB_INDICATOR_ACTIVE_COLOR = new THREE.Color(0x5cffb0); // 実際に掴んでいる間
+
+// 毎フレーム: 掴んでいる腕/脚・揺れ物があれば、コントローラー位置に合わせてIK/回転を適用する。
+// あわせて、左右それぞれの「掴もうとしている場所」のインジケーター表示も更新する。
 function updateVrGrabIK(delta){
   for(let i = 0; i < vrGrabState.length; i++){
     const state = vrGrabState[i];
-    if(!state.kind) continue;
-    const targetWeight = state.active ? 1 : 0;
-    const speed = state.active ? GRAB_WEIGHT_IN_SPEED : GRAB_WEIGHT_OUT_SPEED;
-    state.weight += (targetWeight - state.weight) * Math.min(1, speed * delta);
-    if(!state.active && state.weight < 0.01){
-      state.weight = 0;
-      state.kind = null; state.chain = null; state.joint = null;
-      continue;
-    }
+    const indicator = vrGrabIndicators[i];
     const controller = vrControllers[i] && vrControllers[i].controller;
-    if(!controller) continue;
-    const controllerPos = new THREE.Vector3();
-    controller.getWorldPosition(controllerPos);
-    const targetPos = controllerPos.add(state.offset);
-    if(state.kind === 'chain'){
-      solveTwoBoneIK(state.chain.root, state.chain.mid, state.chain.end, targetPos, state.weight);
-    }else if(state.kind === 'spring'){
-      const joint = state.joint;
-      const bonePos = new THREE.Vector3(); joint.bone.getWorldPosition(bonePos);
-      const oldTailPos = new THREE.Vector3(); getSpringJointTailWorldPos(joint, oldTailPos);
-      const oldDir = new THREE.Vector3().subVectors(oldTailPos, bonePos);
-      const newDir = new THREE.Vector3().subVectors(targetPos, bonePos);
-      rotateBoneTowardWorldDir(joint.bone, oldDir, newDir, state.weight);
+
+    if(state.kind){
+      const targetWeight = state.active ? 1 : 0;
+      const speed = state.active ? GRAB_WEIGHT_IN_SPEED : GRAB_WEIGHT_OUT_SPEED;
+      state.weight += (targetWeight - state.weight) * Math.min(1, speed * delta);
+      if(!state.active && state.weight < 0.01){
+        state.weight = 0;
+        state.kind = null; state.chain = null; state.joint = null;
+      }
+    }
+
+    if(state.kind && controller){
+      const controllerPos = new THREE.Vector3();
+      controller.getWorldPosition(controllerPos);
+      const targetPos = controllerPos.add(state.offset);
+      if(state.kind === 'chain'){
+        const clampedTarget = clampTargetOutsideTorso(targetPos);
+        solveTwoBoneIK(state.chain.root, state.chain.mid, state.chain.end, clampedTarget, state.weight, getChainPoleDirWorld(state.chain));
+        indicator.position.copy(state.chain.end.getWorldPosition(new THREE.Vector3()));
+      }else if(state.kind === 'spring'){
+        const joint = state.joint;
+        const bonePos = new THREE.Vector3(); joint.bone.getWorldPosition(bonePos);
+        const oldTailPos = new THREE.Vector3(); getSpringJointTailWorldPos(joint, oldTailPos);
+        const oldDir = new THREE.Vector3().subVectors(oldTailPos, bonePos);
+        const newDir = new THREE.Vector3().subVectors(targetPos, bonePos);
+        rotateBoneTowardWorldDir(joint.bone, oldDir, newDir, state.weight);
+        getSpringJointTailWorldPos(joint, indicator.position);
+      }
+      indicator.material.color.copy(GRAB_INDICATOR_ACTIVE_COLOR);
+      indicator.material.opacity = 0.85;
+      indicator.visible = true;
+    }else if(controller){
+      // 掴んでいない間: 近くに掴める対象があれば、薄い色でその場所を示す(「ここを掴めます」の合図)
+      const controllerPos = new THREE.Vector3();
+      controller.getWorldPosition(controllerPos);
+      const otherState = vrGrabState[1 - i];
+      const hover = findNearestGrabCandidate(controllerPos, otherState);
+      if(hover){
+        indicator.position.copy(hover.point);
+        indicator.material.color.copy(GRAB_INDICATOR_HOVER_COLOR);
+        indicator.material.opacity = 0.55;
+        indicator.visible = true;
+      }else{
+        indicator.visible = false;
+      }
+    }else{
+      indicator.visible = false;
     }
   }
 }
