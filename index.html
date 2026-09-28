@@ -248,6 +248,10 @@
   .char-thumb-del{ position:absolute; top:2px; right:2px; width:18px; height:18px; padding:0; border-radius:50%;
     font-size:9px; line-height:1; display:flex; align-items:center; justify-content:center; z-index:2; }
   .size-small .char-thumb-del{ width:15px; height:15px; font-size:8px; top:1px; right:1px; }
+  /* 「キャラクターなし」項目(サムネイル表示時)のアイコン */
+  .char-thumb-none-box{ font-size:28px; color:var(--text-dim); }
+  .size-medium .char-thumb-none-box{ font-size:22px; }
+  .size-small .char-thumb-none-box{ font-size:16px; }
   .char-thumb-label{ width:100%; margin-top:3px; font-size:10px; text-align:center; color:var(--text-dim);
     overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .char-thumb-item.playing .char-thumb-label{ color:var(--accent); }
@@ -2600,6 +2604,7 @@ const FALLBACK_DEFAULT_VRM_FILE = 'AliciaSolid.vrm';
 
 let characterClips = []; // { name, url, author, sourceUrl, tone, object:null|VRM, loadPromise:null|Promise }
 let activeCharacterIndex = -1;
+let characterLoadToken = 0; // 切替処理の世代カウンタ(二重読み込み防止用)
 
 function makeCharacterEntry(name, url, author='', sourceUrl='', tone=''){
   return { name, url, author, sourceUrl, tone, object: null, loadPromise: null };
@@ -2647,6 +2652,7 @@ async function setActiveCharacter(idx){
   const nextEntry = characterClips[idx];
   if(!nextEntry) return;
   const prevEntry = (activeCharacterIndex >= 0) ? characterClips[activeCharacterIndex] : null;
+  const myToken = ++characterLoadToken; // このタップ操作を「最新」として記録する
 
   const needsLoadLog = !nextEntry.object;
   if(needsLoadLog) updateCharacterListUI();
@@ -2660,6 +2666,12 @@ async function setActiveCharacter(idx){
     return;
   }
   if(characterClips[idx] !== nextEntry) return; // 読込待ちの間にリストが変わっていたら中断(削除・入替対策)
+  if(myToken !== characterLoadToken){
+    // 読込を待っている間に、別のタップ(切替/キャラクターなし等)がさらに新しく発生していた場合は、
+    // この古い呼び出しの結果は反映しない(二重読み込み防止)。読み込んだオブジェクト自体はentry.objectに
+    // キャッシュされたままにしておく(後で同じキャラクターに戻った時に使い回せるため、ここでは破棄しない)。
+    return;
+  }
 
   if(mixer) mixer.stopAllAction();
   currentAction = null;
@@ -2749,6 +2761,21 @@ function clearAllCharacters(){
   updateCharacterListUI();
 }
 
+// 「キャラクターなし」選択時: リストはそのまま残し、読み込み済みの全キャラクターをシーンから外して
+// メモリを解放する(誤って二重に読み込んでしまった場合のリセット用)
+function unloadAllCharacters(){
+  characterLoadToken++; // 実行中のsetActiveCharacterがあれば、その後続処理を無効化する
+  characterClips.forEach(entry => releaseCharacter(entry));
+  activeCharacterIndex = -1;
+  currentVRM = null;
+  if(mixer) mixer.stopAllAction();
+  mixer = null;
+  currentAction = null;
+  motionClips.forEach(m => { m.clip = null; m.loadPromise = null; });
+  log('キャラクターをすべてアンロードしました', 'ok');
+  updateCharacterListUI();
+}
+
 document.getElementById('btnClearCharacterList').addEventListener('click', clearAllCharacters);
 
 document.getElementById('btnRandomCharacter').addEventListener('click', () => {
@@ -2829,6 +2856,24 @@ function createCharacterThumbItem(entry, idx){
   return item;
 }
 
+function createNoCharacterThumbItem(){
+  const item = document.createElement('div');
+  item.className = 'char-thumb-item' + (activeCharacterIndex === -1 ? ' playing' : '');
+  item.addEventListener('click', () => unloadAllCharacters());
+
+  const box = document.createElement('div');
+  box.className = 'char-thumb-box char-thumb-none-box';
+  box.textContent = '🚫';
+  item.appendChild(box);
+
+  const label = document.createElement('div');
+  label.className = 'char-thumb-label';
+  label.textContent = (activeCharacterIndex === -1 ? '▶ ' : '') + 'キャラクターなし';
+  item.appendChild(label);
+
+  return item;
+}
+
 function updateCharacterListUI(){
   const currentLabel = document.getElementById('characterCurrentFile');
   if(currentLabel){
@@ -2840,6 +2885,19 @@ function updateCharacterListUI(){
   if(!container) return;
   container.innerHTML = '';
   container.className = (characterViewMode === 'list') ? '' : `char-grid size-${characterViewMode}`;
+  if(characterViewMode === 'list'){
+    // 先頭に「キャラクターなし」を常に表示(誤って二重に読み込んだ場合等のリセット用)
+    const noneRow = document.createElement('div');
+    noneRow.className = 'motion-item' + (activeCharacterIndex === -1 ? ' playing' : '');
+    const noneNameSpan = document.createElement('span');
+    noneNameSpan.className = 'motion-name';
+    noneNameSpan.textContent = (activeCharacterIndex === -1 ? '▶ ' : '') + '🚫 キャラクターなし';
+    noneNameSpan.addEventListener('click', () => unloadAllCharacters());
+    noneRow.appendChild(noneNameSpan);
+    container.appendChild(noneRow);
+  }else{
+    container.appendChild(createNoCharacterThumbItem());
+  }
   if(!characterClips.length){
     const empty = document.createElement('div');
     empty.className = 'motion-empty';
